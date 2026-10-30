@@ -22,9 +22,13 @@ jobs:
       - name: Получить репозиторий
         uses: actions/checkout@v4
 
+      - name: Права на исполнение
+        run: chmod +x setup/*.sh configs/chrome/tiktok-chrome.sh
+
       - name: Проверка синтаксиса скриптов
         run: |
           for f in setup/*.sh; do bash -n "$f"; done
+          sh -n configs/chrome/tiktok-chrome.sh
 
       - name: Применить конфиги и установку
         run: sudo -n ./setup/install.sh

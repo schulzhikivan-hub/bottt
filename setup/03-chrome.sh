@@ -16,7 +16,16 @@ fi
 
 log "Ярлык и профиль TikTok"
 home="$(getent passwd "$OWNER_USER" | cut -d: -f6)"
-as_owner mkdir -p "$home/.local/bin" "$home/.local/share/applications" "$home/tiktok-profile"
+as_owner mkdir -p "$home/.local/bin" "$home/.local/share/applications" "$home/.config" "$home/tiktok-profile"
+
+log "Прокси для Chrome: ${CHROME_PROXY:-не задан}"
+if [ -n "$CHROME_PROXY" ] && ! [[ "$CHROME_PROXY" =~ ^(http|socks5)://[A-Za-z0-9.-]+:[0-9]+$ ]]; then
+  die "CHROME_PROXY должен быть вида http://host:port или socks5://host:port, без логина и пароля"
+fi
+proxy_tmp="$(mktemp)"
+printf 'CHROME_PROXY=%s\n' "$CHROME_PROXY" > "$proxy_tmp"
+install -o "$OWNER_USER" -g "$OWNER_USER" -m 0600 "$proxy_tmp" "$home/.config/tiktok-chrome.env"
+rm -f "$proxy_tmp"
 
 install -o "$OWNER_USER" -g "$OWNER_USER" -m 0755 \
   "$REPO_DIR/configs/chrome/tiktok-chrome.sh" "$home/.local/bin/tiktok-chrome.sh"
