@@ -31,9 +31,52 @@
 | `configs/` | Файлы, которые копируются в систему: xrdp, ufw, fail2ban, sshd, Chrome |
 | `.github/workflows/deploy.yml` | Применяет setup на VPS при push в `main` или вручную |
 
-## Настройка один раз
+## Автоустановка (рекомендуется, с телефона)
 
-Часть шагов требует шелла на VPS. Это можно сделать с телефона через SSH-клиент (например, Termius, с SSH-ключом).
+Один запуск из GitHub ставит всё: пользователя owner с ключом и паролем, Tailscale, runner, sudoers и полную установку.
+
+### Шаг A. Добавить секреты
+
+Секреты — это зашифрованные значения, их не видно после сохранения. Откройте страницу и нажимайте **New repository secret**:
+
+**https://github.com/schulzhikivan-hub/bottt/settings/secrets/actions**
+
+| Имя секрета | Что записать | Где взять |
+|---|---|---|
+| `VPS_HOST` | IP-адрес VPS | Панель хостера, раздел с серверами |
+| `VPS_ROOT_PASSWORD` | Root-пароль VPS | Письмо или панель хостера (у многих можно сбросить пароль) |
+| `OWNER_PUBKEY` | Публичный SSH-ключ | Termius → Keychain → Generate → Copy public key |
+| `OWNER_PASSWORD` | Пароль для входа по RDP | Придумайте длинный, сохраните в менеджере паролей |
+| `TS_AUTHKEY` | Ключ Tailscale | **https://login.tailscale.com/admin/settings/keys** → Generate auth key. Reusable: выключено, Ephemeral: выключено |
+| `RUNNER_ADMIN_TOKEN` | Токен GitHub с правом на runner | См. ниже |
+
+**Как получить `RUNNER_ADMIN_TOKEN`:** откройте **https://github.com/settings/personal-access-tokens/new**:
+- Token name: `vps-bootstrap`
+- Expiration: 7 дней
+- Repository access: **Only select repositories** → `bottt`
+- Repository permissions: **Administration: Read and write**, Metadata: Read-only
+- Generate token. Скопируйте значение сразу, оно показывается один раз.
+
+После установки токен можно удалить: https://github.com/settings/tokens
+
+**Важно про root:** установка заходит на VPS по root-паролю. Если у хостера вход root по паролю отключён, workflow упадёт с `Permission denied`. Тогда скажите, я переделаю вход на ключ.
+
+### Шаг B. Запустить
+
+**https://github.com/schulzhikivan-hub/bottt/actions/workflows/bootstrap.yml** → **Run workflow** → выбрать ветку `claude/telegram-bot-system-kssc6g` → **Run workflow**.
+
+Дождитесь зелёной галочки (обычно 5–15 минут). Если красная, откройте шаг с ошибкой и пришлите текст ошибки.
+
+Когда зелёный:
+- runner появится в **https://github.com/schulzhikivan-hub/bottt/settings/actions/runners**,
+- Tailscale на VPS подключён, его адрес — в admin-консоли Tailscale,
+- можно подключаться через Microsoft Remote Desktop, как описано ниже.
+
+После этого секреты `RUNNER_ADMIN_TOKEN` и `VPS_ROOT_PASSWORD` можно удалить со страницы секретов.
+
+## Настройка один раз вручную
+
+Альтернатива автоустановке: те же шаги руками через Termius. Часть шагов требует шелла на VPS. Это можно сделать с телефона через SSH-клиент (например, Termius, с SSH-ключом).
 
 ### 1. Репозиторий
 
