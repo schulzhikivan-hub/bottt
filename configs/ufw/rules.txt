@@ -1,0 +1,2 @@
+allow OpenSSH
+allow in on tailscale0 to any port 3389 proto tcp
