@@ -172,6 +172,11 @@
     <button class="chip" data-gender="f">Девушки</button>
     <button class="chip" data-gender="m">Парни</button>
   </div>
+  <div class="dfilters">
+    <select id="dAge" aria-label="Возраст"><option value="">Любой возраст</option><option value="18-25">18–25</option><option value="26-35">26–35</option><option value="36-99">36 и старше</option></select>
+    <select id="dRegion" aria-label="Регион"></select>
+  </div>
+  <button class="pill-btn" id="dLikes" type="button" style="margin:8px 0">💌 Меня лайкнули (<span id="dLikesN">0</span>)</button>
   <div id="datingList" class="dgrid"></div>
 </section>
 
@@ -389,7 +394,8 @@
 <div id="serviceList" class="listings"></div></div></div>
 
 <div id="datingModal" class="modal hidden"><div class="sheet"><div class="sheet-top"><b>Моя анкета</b><button id="closeDating">✕</button></div>
-<form id="datingForm"><label>Год рождения<input name="birth_year" type="number" min="1930" max="2100" required></label>
+<form id="datingForm"><label>Имя (видно в анкете, без ссылок и телефона)<input name="first_name" maxlength="40" placeholder="Например: Аня"></label>
+<label>Год рождения<input name="birth_year" type="number" min="1930" max="2100" required></label>
 <label>Пол<select name="gender"><option value="f">Женщина</option><option value="m">Мужчина</option></select></label>
 <div class="geo" id="datingGeo">
 <label>Регион<select name="region_code" required data-geo-region></select></label>

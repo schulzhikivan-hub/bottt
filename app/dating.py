@@ -15,7 +15,7 @@ from app.payments import now
 from app.users import writer, is_blocked_pair, get_or_create_user
 from app.audit import log_action
 from app import admin_ops as ops
-from app import geo
+from app import geo, inbox
 from app.admin_auth import staff, MOD, ADM, SUP
 from app.admin_auth import staff, MOD, ADM, SUP
 
@@ -42,12 +42,16 @@ def detect_image(data: bytes) -> str | None:
     return None
 
 
+def age_of_year() -> int:
+    return now().year
+
+
 def age_of(birth_year: int) -> int:
     return now().year - birth_year
 
 
 def _public(profile: DatingProfile) -> dict:
-    return {"id": profile.id, "age": age_of(profile.birth_year), "gender": profile.gender,
+    return {"id": profile.id, "name": profile.first_name or "", "age": age_of(profile.birth_year), "gender": profile.gender,
             "city": profile.city, "bio": profile.bio, "photo_url": f"/api/dating/{profile.id}/photo"}
 
 
@@ -58,6 +62,7 @@ class DatingIn(BaseModel):
     region_code: str | None = Field(default=None, max_length=20)
     district_id: int | None = None
     bio: str = Field(default="", max_length=500)
+    first_name: str = Field(default="", max_length=40)
 
 
 @router.get("/api/dating/me")
@@ -85,6 +90,10 @@ def save_profile(payload: DatingIn, user_id: str = Depends(writer), db: Session 
     if place is None:
         raise HTTPException(400, "Выберите город или район из списка. Сайт только для Южной Кореи")
     profile.city, profile.region_code, profile.district_id = place.label, place.region_code, place.district_id
+    name = " ".join(payload.first_name.split())
+    if inbox.NAME_BAD.search(name):
+        raise HTTPException(400, "В имени нельзя писать ссылки, @username и телефон: общение идёт внутри приложения")
+    profile.first_name = name
     profile.bio = payload.bio
     profile.status = "pending"  # every change goes back to moderation
     db.commit()
@@ -135,7 +144,8 @@ def _hidden_owners(db: Session, me: str) -> set[str]:
 
 @router.get("/api/dating")
 def browse(gender: str | None = None, city: str | None = None, user_id: str = Depends(writer),
-           db: Session = Depends(get_db)):
+           db: Session = Depends(get_db), age_min: int | None = None, age_max: int | None = None,
+           region: str | None = None):
     hidden = _hidden_owners(db, user_id)
     liked = set(db.scalars(select(DatingLike.to_tg).where(DatingLike.from_tg == user_id)).all())
     stmt = select(DatingProfile).where(DatingProfile.status == "published",
@@ -144,9 +154,29 @@ def browse(gender: str | None = None, city: str | None = None, user_id: str = De
         stmt = stmt.where(DatingProfile.gender == gender)
     if city:
         stmt = stmt.where(DatingProfile.city.ilike(f"%{city}%"))
+    if region:
+        stmt = stmt.where(DatingProfile.region_code == region)
+    if age_min is not None:  # age = this year - birth year
+        stmt = stmt.where(DatingProfile.birth_year <= age_of_year() - age_min)
+    if age_max is not None:
+        stmt = stmt.where(DatingProfile.birth_year >= age_of_year() - age_max)
     rows = db.scalars(stmt.order_by(DatingProfile.id.desc()).limit(200)).all()
     return [_public(p) for p in rows
             if p.owner_tg_id != user_id and p.owner_tg_id not in hidden and p.owner_tg_id not in liked][:50]
+
+
+@router.get("/api/dating/likes-me")
+def likes_me(user_id: str = Depends(writer), db: Session = Depends(get_db)):
+    """Who liked me and has not been answered. Profiles only, never IDs; a like back is the usual like."""
+    hidden = _hidden_owners(db, user_id)
+    mine_to = set(db.scalars(select(DatingLike.to_tg).where(DatingLike.from_tg == user_id)).all())
+    from_ids = [t for t in db.scalars(select(DatingLike.from_tg).where(DatingLike.to_tg == user_id)).all()
+                if t not in hidden and t not in mine_to]
+    rows = db.scalars(select(DatingProfile).where(DatingProfile.owner_tg_id.in_(from_ids or [""]),
+                                                  DatingProfile.status == "published",
+                                                  DatingProfile.photo_key != None)  # noqa: E711
+                      .order_by(DatingProfile.id.desc())).all()
+    return {"count": len(rows), "items": [_public(p) for p in rows]}
 
 
 @router.post("/api/dating/{profile_id}/like")
@@ -188,7 +218,7 @@ def admin_dating(status: str = "pending", actor: str = Depends(staff(*MOD)),
                  db: Session = Depends(get_db)):
     rows = db.scalars(select(DatingProfile).where(DatingProfile.status == status)
                       .order_by(DatingProfile.id).limit(100)).all()
-    return [{"id": p.id, "owner": p.owner_tg_id, "age": age_of(p.birth_year), "gender": p.gender,
+    return [{"id": p.id, "owner": p.owner_tg_id, "name": p.first_name or "", "age": age_of(p.birth_year), "gender": p.gender,
              "city": p.city, "bio": p.bio, "has_photo": p.photo_key is not None, "status": p.status}
             for p in rows]
 

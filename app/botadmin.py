@@ -179,7 +179,7 @@ def dating_queue(db: Session, header: str = "") -> Reply:
     if profile is None:
         return Reply(header + "Анкет на проверке нет ✅", [BACK])
     photo = upload_root() / profile.photo_key if profile.photo_key else None
-    text = (f"{header}💗 Анкета #{profile.id}\n{age_of(profile.birth_year)} лет · "
+    text = (f"{header}💗 Анкета #{profile.id}" + (f" · {profile.first_name}" if profile.first_name else "") + f"\n{age_of(profile.birth_year)} лет · "
             f"{'девушка' if profile.gender == 'f' else 'парень'} · {profile.city}\n\n{_short(profile.bio, 500)}"
             + ("" if photo else "\n\n⚠️ Фото не загружено: опубликовать нельзя"))
     buttons = [("❌ Отклонить", f"a:D:no:{profile.id}")]

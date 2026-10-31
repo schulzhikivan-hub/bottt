@@ -28,7 +28,11 @@ SECTIONS = {
     "m": ("🛍️ Барахолка", {"category": "marketplace"}),
     "a": ("🚗 Автомобили", {"category": "marketplace", "goods_category": "auto"}),
     "s": ("🛠️ Услуги", {"category": "marketplace", "goods_category": "services"}),
+    "f": ("🔎 Поиск по всем разделам", {}),
 }
+AGE_PRESETS = [("Любой возраст", None, None), ("18–25", 18, 25), ("26–35", 26, 35), ("36+", 36, None)]
+REPORT_REASONS = {"fake": "Фейк или чужое фото", "spam": "Спам и реклама", "offensive": "Оскорбления",
+                  "minor": "Несовершеннолетний", "inappropriate": "Неприемлемое содержание", "fraud": "Мошенничество"}
 LABEL = {k: dict(v) for k, v in LABELS.items()}
 
 STATE: dict[int, dict] = {}   # user id -> what they are looking at
@@ -158,10 +162,10 @@ def listing_view(db: Session, user_id: int, st: dict) -> View:
     return View(f"{where}\n\n{describe(db, x)}", [nav, row, act, tools, [btn("⬅️ Разделы", "b:m")]], photo=cover_path(db, x))
 
 
-def regions_view(db: Session) -> View:
+def regions_view(db: Session, prefix: str = "b:rr") -> View:
     regs = db.scalars(select(Region).order_by(Region.sort)).all()
-    rows = [[btn(r.name_ru, f"b:rr:{r.code}") for r in regs[i:i + 3]] for i in range(0, len(regs), 3)]
-    rows.append([btn("🇰🇷 Вся Корея", "b:rr:-")])
+    rows = [[btn(r.name_ru, f"{prefix}:{r.code}") for r in regs[i:i + 3]] for i in range(0, len(regs), 3)]
+    rows.append([btn("🇰🇷 Вся Корея", f"{prefix}:-")])
     return View("Выберите регион:", rows)
 
 
@@ -178,21 +182,49 @@ def dating_view(db: Session, user_id: int, st: dict) -> View:
     if not _consented(db, user_id):
         return View("💗 Знакомства (18+)\n\nЧтобы смотреть анкеты, примите правила в приложении: это один раз.",
                     [[app_btn("📱 Принять правила")], [btn("⬅️ Разделы", "b:m")]])
+    preset = AGE_PRESETS[st.get("age", 0) % len(AGE_PRESETS)]
+    region = db.get(Region, st["region"]) if st.get("region") else None
     try:
-        items = dating.browse(gender or None, None, str(user_id), db)
+        likes = dating.likes_me(str(user_id), db)
+        if st.get("mode") == "likes":
+            items = likes["items"]
+        else:
+            items = dating.browse(gender or None, None, str(user_id), db, age_min=preset[1], age_max=preset[2],
+                                  region=region.code if region else None)
     except HTTPException:
-        items = []
+        items, likes = [], {"count": 0}
     st["ids"] = [p["id"] for p in items]
+    tools = [btn(f"🎂 {preset[0]}", "b:da"), btn("📍 " + (region.name_ru if region else "Регион"), "b:dr")]
+    liked = [btn("↩ Все анкеты", "b:dt")] if st.get("mode") == "likes" else [btn(f"💌 Меня лайкнули ({likes['count']})", "b:dm")]
+    foot = [chips, tools, liked, [btn("⬅️ Разделы", "b:m")]]
+    title = "💌 Вас лайкнули" if st.get("mode") == "likes" else "💗 Знакомства (18+)"
     if not items:
-        return View("💗 Знакомства (18+)\n\nНовых анкет пока нет. Загляните позже.", [chips, [app_btn("Создать свою анкету")], [btn("⬅️ Разделы", "b:m")]])
+        return View(f"{title}\n\nАнкет по этим условиям нет. Измените возраст или регион.", foot + [[app_btn("Создать свою анкету")]])
     st["idx"] = max(0, min(st.get("idx", 0), len(items) - 1))
     p = items[st["idx"]]
     profile = db.get(DatingProfile, p["id"])
     path = Path(settings.upload_dir) / profile.photo_key if profile and profile.photo_key else None
-    text = f"💗 {p['age']} лет · {'девушка' if p['gender'] == 'f' else 'парень'}\n📍 {p['city']}\n\n{p['bio']}"
+    who = f"{p['name']}, {p['age']}" if p.get("name") else f"{p['age']} лет"
+    text = f"💗 {who} · {'девушка' if p['gender'] == 'f' else 'парень'}\n📍 {p['city']}\n\n{p['bio']}"
+    if st.get("mode") == "likes":
+        text = "💌 Вас лайкнули. Нажмите «Нравится», чтобы ответить взаимностью.\n\n" + text
     nav = [btn("◀", "b:dp"), btn(f"{st['idx'] + 1} / {len(items)}", "b:x"), btn("▶", "b:dn")]
-    return View(text[:CAPTION_LIMIT], [nav, [btn("♥ Нравится", f"b:dl:{p['id']}")], chips,
-                                       [btn("⬅️ Разделы", "b:m")]], photo=path if path and path.exists() else None)
+    return View(text[:CAPTION_LIMIT], [nav, [btn("♥ Нравится", f"b:dl:{p['id']}"), btn("⚑ Пожаловаться", f"b:dx:{p['id']}")]] + foot,
+                photo=path if path and path.exists() else None)
+
+
+def report_view(profile_id: int) -> View:
+    rows = [[btn(title, f"b:dy:{profile_id}:{key}")] for key, title in REPORT_REASONS.items()]
+    return View("На что жалоба? Модератор проверит анкету. Автор не узнает, кто пожаловался.", rows + [[btn("↩ Отмена", "b:dc")]])
+
+
+def single_view(db: Session, listing_id: int) -> View:
+    """One listing from a shared link (deep link l_<id>): the card plus a button into the Mini App."""
+    x = db.get(Listing, listing_id)
+    if x is None or x.status != "approved":
+        return View("Это объявление уже снято с публикации или не найдено.", [[btn("⬅️ Разделы", "b:m")]])
+    return View(describe(db, x), [[app_btn("💬 Открыть в приложении", f"?listing={x.id}")], [btn("⬅️ Разделы", "b:m")]],
+                photo=cover_path(db, x))
 
 
 # ---------- community and guide ----------
@@ -273,7 +305,29 @@ def act(db: Session, user_id: int, data: str) -> View:
         db.commit()
         return listing_view(db, user_id, st) if "sec" in st else home_view()
     if cmd == "dt":
-        STATE[user_id] = st = {"dating": True, "gender": "", "idx": 0}
+        keep = {k: st[k] for k in ("gender", "age", "region") if st.get("dating") and k in st}
+        STATE[user_id] = st = {"dating": True, "gender": "", "idx": 0, **keep}
+        return dating_view(db, user_id, st)
+    if cmd in ("da", "dr", "dz", "dm", "dx", "dy", "dc") and st.get("dating"):
+        if cmd == "da":
+            st.update(age=(st.get("age", 0) + 1) % len(AGE_PRESETS), idx=0)
+        elif cmd == "dr":
+            return regions_view(db, "b:dz")
+        elif cmd == "dz":
+            st.update(region="" if arg == "-" else arg, idx=0)
+        elif cmd == "dm":
+            st.update(mode="likes", idx=0)
+        elif cmd == "dx" and arg.isdigit():
+            return report_view(int(arg))
+        elif cmd == "dy" and arg.isdigit() and len(parts) > 3 and parts[3] in REPORT_REASONS:
+            from app.models import Report
+            if db.get(DatingProfile, int(arg)) is not None and db.scalar(select(Report.id).where(
+                    Report.reporter_tg_id == str(user_id), Report.target_type == "dating", Report.target_id == arg)) is None:
+                db.add(Report(reporter_tg_id=str(user_id), target_type="dating", target_id=arg, reason=parts[3]))
+                db.commit()
+            view = dating_view(db, user_id, st)
+            view.alert = "Жалоба отправлена. Спасибо!"
+            return view
         return dating_view(db, user_id, st)
     if cmd in ("dn", "dp", "dg", "dl") and st.get("dating"):
         if cmd == "dg":
@@ -363,7 +417,7 @@ async def send_view(bot, chat_id: int, view: View) -> None:
 
 def register_browse(dp, bot) -> None:
     from aiogram import F
-    from aiogram.filters import Command
+    from aiogram.filters import Command, CommandObject
     from aiogram.types import CallbackQuery, Message
     from app.database import SessionLocal
 
@@ -383,6 +437,21 @@ def register_browse(dp, bot) -> None:
                 pass
         await query.answer(view.alert or None)
         await send_view(bot, query.message.chat.id, view)
+
+    @dp.message(Command("find"))
+    async def find(message: Message, command: CommandObject):
+        uid = message.from_user.id
+        STATE[uid] = {"sec": "f", "idx": 0, "q": "", "region": "", "ids": []}
+        word = (command.args or "").strip()[:60]
+        if not word:
+            WAIT_QUERY.add(uid)
+            await message.answer("Что ищем? Напишите слово: работа, диван, Каннам… (отмена: /cancel)")
+            return
+        with SessionLocal() as db:
+            STATE[uid]["q"] = word
+            STATE[uid]["ids"] = _search(db, STATE[uid])
+            view = listing_view(db, uid, STATE[uid])
+        await send_view(bot, message.chat.id, view)
 
     @dp.message(F.text & ~F.text.startswith("/"), lambda m: m.from_user.id in WAIT_QUERY)
     async def typed(message: Message):

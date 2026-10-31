@@ -471,3 +471,7 @@ button.pchip{color:var(--accent);font-weight:600}
 .gsearch{width:100%;border:1px solid var(--border);background:var(--card);border-radius:12px;padding:11px 14px;font-size:15px;margin-bottom:10px}
 .mark{color:#f2b705;font-size:20px;border:0;background:none;padding:0 4px}
 .grow .members{font-size:12px;color:var(--hint);white-space:nowrap}
+
+.dfilters{display:flex;gap:8px;margin:10px 0 0}
+.dfilters select{flex:1;min-width:0;border:1px solid var(--border);background:var(--card);border-radius:10px;padding:9px;font-size:13px;color:var(--text)}
+.dcard .dinfo b{font-size:16px}

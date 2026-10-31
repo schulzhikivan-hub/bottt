@@ -582,8 +582,11 @@ async function openDetail(id, push = true) {
     showView("detail", {push});
   } catch (e) { toast(e.message); }
 }
+let botName = null;
 async function shareListing(id, title) {
-  const url = `${location.origin}/?listing=${id}`;
+  if (botName === null) { try { botName = (await api("/api/config", {quiet: true})).bot || ""; } catch (e) { botName = ""; } }
+  // Ссылка ведёт в чат с ботом: он покажет карточку и кнопку «Открыть в приложении»
+  const url = botName ? `https://t.me/${botName}?start=l_${id}` : `${location.origin}/?listing=${id}`;
   if (tg?.openTelegramLink) tg.openTelegramLink("https://t.me/share/url?url=" + encodeURIComponent(url) + "&text=" + encodeURIComponent(title));
   else if (navigator.share) navigator.share({title, url}).catch(() => {});
   else { try { await navigator.clipboard.writeText(url); toast("Ссылка скопирована"); } catch (e) { toast(url); } }
@@ -1281,25 +1284,39 @@ async function buy(listingId, code) {
 $("#closeServices").onclick = () => $("#services").classList.add("hidden");
 
 // ---------- знакомства ----------
+let datingMode = "feed";
 async function loadDating() {
   const box = $("#datingList");
   box.innerHTML = '<div class="skeleton"></div>';
+  await loadGeo();
+  const reg = $("#dRegion");
+  if (!reg.options.length) reg.innerHTML = '<option value="">Вся Корея</option>' + (geoData || []).map((r) => `<option value="${r.code}">${esc(r.name)}</option>`).join("");
   const params = new URLSearchParams();
   if (datingGender) params.set("gender", datingGender);
+  const age = $("#dAge").value;
+  if (age) { const [lo, hi] = age.split("-"); params.set("age_min", lo); params.set("age_max", hi); }
+  if (reg.value) params.set("region", reg.value);
   try {
-    const items = await api("/api/dating?" + params);
+    const likes = await api("/api/dating/likes-me", {quiet: true}).catch(() => ({count: 0, items: []}));
+    $("#dLikesN").textContent = likes.count;
+    $("#dLikes").classList.toggle("on", datingMode === "likes");
+    const items = datingMode === "likes" ? likes.items : await api("/api/dating?" + params);
     box.innerHTML = items.length ? items.map((p) => `
       <article class="dcard" data-profile="${p.id}">
         <img src="${esc(p.photo_url)}" alt="" loading="lazy">
         <button class="dh" data-act="like" aria-label="Нравится">♡</button>
         <button class="dr" data-act="dreport" aria-label="Пожаловаться">⚑</button>
-        <div class="dinfo"><b>${p.age} лет</b><span>📍 ${esc(p.city)}</span></div>
+        <div class="dinfo"><b>${p.name ? esc(p.name) + ", " : ""}${p.age}${p.name ? "" : " лет"}</b><span>📍 ${esc(p.city)}</span></div>
       </article>`).join("")
-      : '<div class="empty">Анкет пока нет. Загляните позже.</div>';
+      : `<div class="empty">${datingMode === "likes" ? "Пока никто не лайкнул. Загляните позже." : "Анкет по этим условиям нет. Измените возраст или регион."}</div>`;
   } catch (e) { box.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
 }
+$("#dAge").onchange = () => { datingMode = "feed"; loadDating(); };
+$("#dRegion").onchange = () => { datingMode = "feed"; loadDating(); };
+$("#dLikes").onclick = () => { datingMode = datingMode === "likes" ? "feed" : "likes"; loadDating(); };
 document.querySelectorAll("#datingChips .chip").forEach((chip) => chip.addEventListener("click", () => {
   datingGender = chip.dataset.gender;
+  datingMode = "feed";
   document.querySelectorAll("#datingChips .chip").forEach((c) => c.classList.toggle("active", c === chip));
   loadDating();
 }));
@@ -1312,6 +1329,7 @@ async function openMyDating() {
     if (mine) {
       f.birth_year.value = mine.age ? new Date().getFullYear() - mine.age : "";
       f.gender.value = mine.gender;
+      f.first_name.value = mine.name || "";
       await setGeo("#datingGeo", mine.region_code || "", mine.district_id || "");
       toast("Статус анкеты: " + ({pending: "на проверке", published: "опубликована", rejected: "отклонена"}[mine.status] || mine.status));
     }
@@ -1327,7 +1345,8 @@ $("#datingForm").onsubmit = async (e) => {
   try {
     await api("/api/dating/profile", {method: "PUT", body: JSON.stringify({
       birth_year: Number(f.birth_year.value), gender: f.gender.value, region_code: f.region_code.value,
-      district_id: f.district_id.value ? Number(f.district_id.value) : null, bio: f.bio.value.trim()})});
+      district_id: f.district_id.value ? Number(f.district_id.value) : null, bio: f.bio.value.trim(),
+      first_name: f.first_name.value.trim()})});
     if (f.photo.files[0]) {
       const data = new FormData();
       data.append("file", f.photo.files[0]);

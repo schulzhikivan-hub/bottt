@@ -19,6 +19,7 @@ WELCOME = "🇰🇷 Добро пожаловать в KOREA HUB!\nРабота,
 HELP_TEXT = (
     "Команды:\n"
     "/start — разделы: работа, жильё, барахолка, знакомства, сообщество, гид (смотреть можно прямо в чате)\n"
+    "/find слово — поиск по всем разделам\n"
     "/my — мои объявления и их статус\n"
     "/help — эта справка\n\n"
     "Для администраторов:\n"
@@ -103,6 +104,12 @@ def register(dp: Dispatcher, bot: Bot) -> None:
     @dp.message(CommandStart(deep_link=True))
     async def start_deeplink(message: Message, command: CommandObject):
         arg = command.args or ""
+        if arg.startswith("l_") and arg[2:].isdigit():
+            from app import botbrowse
+            with SessionLocal() as db:
+                view = botbrowse.single_view(db, int(arg[2:]))
+            await botbrowse.send_view(bot, message.chat.id, view)
+            return
         if not arg.startswith("login_"):
             await message.answer(WELCOME + "\nВыберите нужный раздел:",
                                  reply_markup=menu_markup(is_staff(message.from_user.id)))

@@ -100,6 +100,25 @@ class ConsentIn(BaseModel):
     language: str | None = Field(default=None, max_length=8)
 
 
+@app.get("/api/config")
+def public_config():
+    """What the page needs to build links: the bot's @username (empty if it cannot be found)."""
+    from app import webauth
+    import time
+    cached = _config_cache.get("bot")
+    if cached and (cached[0] or time.monotonic() - cached[1] < 300):  # a failed lookup is not repeated for 5 minutes
+        return {"bot": cached[0]}
+    try:
+        name = webauth.bot_username()
+    except Exception:
+        name = ""
+    _config_cache["bot"] = (name, time.monotonic())
+    return {"bot": name}
+
+
+_config_cache: dict = {}
+
+
 @app.get("/api/me")
 def me(user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
     user = get_or_create_user(db, user_id)

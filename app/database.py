@@ -53,6 +53,7 @@ def migrate() -> None:
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_listings_expires_at ON listings (expires_at)"))
         conn.execute(text("ALTER TABLE applications ADD COLUMN IF NOT EXISTS reply VARCHAR(500) DEFAULT ''"))
         conn.execute(text("ALTER TABLE applications ADD COLUMN IF NOT EXISTS name VARCHAR(40) DEFAULT ''"))
+        conn.execute(text("ALTER TABLE dating_profiles ADD COLUMN IF NOT EXISTS first_name VARCHAR(40) DEFAULT ''"))
         conn.execute(text("ALTER TABLE listings ADD COLUMN IF NOT EXISTS year INTEGER"))
         conn.execute(text("ALTER TABLE listings ADD COLUMN IF NOT EXISTS mileage_km INTEGER"))
         conn.execute(text("ALTER TABLE listings ADD COLUMN IF NOT EXISTS reserved BOOLEAN DEFAULT FALSE"))

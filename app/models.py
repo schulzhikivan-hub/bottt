@@ -163,6 +163,7 @@ class DatingProfile(Base):
     city: Mapped[str] = mapped_column(String(100), index=True)
     region_code: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)
     district_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    first_name: Mapped[str] = mapped_column(String(40), default="")  # shown on the card; moderated with the profile
     bio: Mapped[str] = mapped_column(Text, default="")
     photo_key: Mapped[str | None] = mapped_column(String(80), nullable=True)
     # pending, published, rejected
