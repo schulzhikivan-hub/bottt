@@ -141,6 +141,8 @@ def browse(gender: str | None = None, city: str | None = None, user_id: str = De
 
 @router.post("/api/dating/{profile_id}/like")
 def like(profile_id: int, user_id: str = Depends(writer), db: Session = Depends(get_db)):
+    from app.guard import rate_limit
+    rate_limit(user_id, "like", 60, 3600)
     target = db.get(DatingProfile, profile_id)
     if target is None or target.status != "published" or target.owner_tg_id == user_id:
         raise HTTPException(404, "Анкета не найдена")

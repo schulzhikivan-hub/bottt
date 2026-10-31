@@ -28,6 +28,8 @@ def reset_db() -> None:
     """Fresh SQLite schema with reference data (tests only; the engine is always SQLite)."""
     from app.database import Base, engine, SessionLocal
     from app.seed import seed_reference
+    from app.guard import _hits
+    _hits.clear()
     assert engine.url.drivername == "sqlite", "Tests must run on SQLite only"
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)

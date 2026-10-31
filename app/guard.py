@@ -1,0 +1,70 @@
+"""Anti-spam limits, automatic listing checks (ТЗ § 11.1) and Telegram notifications (ТЗ § 7.10)."""
+import re
+import time
+from collections import defaultdict, deque
+
+import httpx
+from fastapi import HTTPException
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.config import settings
+from app.models import Listing, User
+
+# ---- rate limits (in memory; one API process) ----
+_hits: dict[tuple[str, str], deque] = defaultdict(deque)
+
+
+def rate_limit(user_id: str, action: str, limit: int, window_seconds: int) -> None:
+    now_ts = time.monotonic()
+    bucket = _hits[(user_id, action)]
+    while bucket and now_ts - bucket[0] > window_seconds:
+        bucket.popleft()
+    if len(bucket) >= limit:
+        raise HTTPException(429, "Слишком много действий. Попробуйте чуть позже")
+    bucket.append(now_ts)
+
+
+# ---- automatic checks ----
+STOP_PHRASES = [
+    "предоплат", "перевод на карт", "переведите на карт", "на карту", "usdt", "криптовалют",
+    "заплатите за визу", "оплатите визу", "быстрые деньги", "залог за работу", "депозит за работу",
+]
+PHONE_RE = re.compile(r"(\+?\d[\d\-\s()]{8,}\d)")
+LINK_RE = re.compile(r"(https?://|www\.|t\.me/|@[A-Za-z][A-Za-z0-9_]{3,})", re.IGNORECASE)
+
+
+def check_text(title: str, description: str) -> None:
+    """Block obvious fraud patterns and contacts written into the description."""
+    text = f"{title} {description}".lower()
+    for phrase in STOP_PHRASES:
+        if phrase in text:
+            raise HTTPException(400, "Объявление содержит запрещённые условия (предоплата, перевод на карту или криптовалюту). Измените текст")
+    if PHONE_RE.search(description) or LINK_RE.search(description):
+        raise HTTPException(400, "Уберите телефон, ссылки и @-ники из описания: укажите контакт в поле «Контакт»")
+
+
+def duplicate_note(db: Session, author: str, title: str, description: str, listing_id: int | None) -> str:
+    """Mark a listing for the moderator when the same text was posted by someone else recently."""
+    rows = db.scalars(select(Listing).where(
+        Listing.title == title, Listing.description == description,
+        Listing.author_telegram_id != author, Listing.status.in_(["pending", "approved"]))).all()
+    rows = [r for r in rows if r.id != listing_id]
+    if rows:
+        return f"Возможный дубликат: #{rows[0].id}"
+    return ""
+
+
+# ---- notifications ----
+def notify_user(db: Session, tg_id: str, text: str) -> None:
+    """Send a Telegram message from the bot. Failures never break the request."""
+    if not settings.notifications_enabled or not settings.bot_token or not tg_id.isdigit():
+        return
+    user = db.get(User, tg_id)
+    if user is not None and not user.notify_messages:
+        return
+    try:
+        httpx.post(f"https://api.telegram.org/bot{settings.bot_token}/sendMessage",
+                   json={"chat_id": int(tg_id), "text": text[:500]}, timeout=5)
+    except Exception:
+        pass

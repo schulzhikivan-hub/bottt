@@ -22,6 +22,7 @@ class User(Base):
     registration_no: Mapped[str] = mapped_column(String(80), default="")
     contact_person: Mapped[str] = mapped_column(String(80), default="")
     block_reason: Mapped[str] = mapped_column(String(300), default="")
+    notify_messages: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 

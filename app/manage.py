@@ -5,6 +5,7 @@ from sqlalchemy import select, or_
 from sqlalchemy.orm import Session
 
 from app.audit import admin_actor, log_action
+from app.guard import check_text
 from app.database import get_db
 from app.models import Listing, User, Block, Report
 from app.schemas import CATEGORIES, ListingOut
@@ -38,6 +39,7 @@ def edit_listing(listing_id: int, payload: ListingEdit, user_id: str = Depends(w
     changes = payload.model_dump(exclude_none=True)
     if not changes:
         return item
+    check_text(changes.get("title", item.title), changes.get("description", item.description))
     for key, value in changes.items():
         setattr(item, key, value)
     # Любое изменение снова проходит модерацию (ТЗ § 7.4)
@@ -93,6 +95,18 @@ def archive_listing(listing_id: int, user_id: str = Depends(writer), db: Session
 
 class SettingsIn(BaseModel):
     city: str = Field(min_length=2, max_length=80)
+
+
+class NotificationsIn(BaseModel):
+    messages: bool
+
+
+@router.put("/api/me/notifications")
+def update_notifications(payload: NotificationsIn, user_id: str = Depends(writer), db: Session = Depends(get_db)):
+    user = get_or_create_user(db, user_id)
+    user.notify_messages = payload.messages
+    db.commit()
+    return {"messages": user.notify_messages}
 
 
 @router.put("/api/me/settings")

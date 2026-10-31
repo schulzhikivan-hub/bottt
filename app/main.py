@@ -23,6 +23,7 @@ from app.schemas import (
 from app.seed import seed_reference
 from app.audit import admin_actor, log_action
 from app.manage import router as manage_router
+from app.guard import rate_limit, check_text, duplicate_note, notify_user
 from app.users import get_or_create_user, writer, is_blocked_pair
 from app.models import DatingProfile
 from app.dating import router as dating_router
@@ -162,6 +163,7 @@ class ReportIn(BaseModel):
 
 @app.post("/api/reports", status_code=201)
 def create_report(payload: ReportIn, user_id: str = Depends(writer), db: Session = Depends(get_db)):
+    rate_limit(user_id, "report", 10, 3600)
     if payload.target_type not in REPORT_TARGETS:
         raise HTTPException(400, "Неизвестный тип жалобы")
     if payload.reason not in REPORT_REASONS:
@@ -220,6 +222,8 @@ def get_listings(category: str | None = None, city: str | None = None,
 def create_listing(payload: ListingCreate, user_id: str = Depends(writer), db: Session = Depends(get_db)):
     if payload.category not in CATEGORIES:
         raise HTTPException(400, "Неизвестная категория")
+    rate_limit(user_id, "listing", 10, 3600)
+    check_text(payload.title, payload.description)
     active = db.scalar(
         select(func.count()).select_from(Listing).where(
             Listing.author_telegram_id == user_id,
@@ -233,6 +237,11 @@ def create_listing(payload: ListingCreate, user_id: str = Depends(writer), db: S
     db.add(item)
     db.commit()
     db.refresh(item)
+    dup = duplicate_note(db, user_id, payload.title, payload.description, item.id)
+    if dup:
+        # Для модератора: виден в журнале, автор этого не видит
+        log_action(db, "system", "listing.duplicate_suspected", "listing", item.id, dup)
+        db.commit()
     return item
 
 
@@ -347,10 +356,12 @@ def send_message(conv_id: int, payload: MessageIn, user_id: str = Depends(writer
     text = payload.text.strip()
     if not text:
         raise HTTPException(422, "Пустое сообщение")
+    rate_limit(user_id, "message", 30, 60)
     msg = Message(conversation_id=conv_id, sender_tg_id=user_id, text=text)
     db.add(msg)
     db.commit()
     db.refresh(msg)
+    notify_user(db, other, f"Новое сообщение в KOREA HUB:\n{text[:200]}")
     return MessageOut(id=msg.id, mine=True, text=msg.text, created_at=msg.created_at)
 
 

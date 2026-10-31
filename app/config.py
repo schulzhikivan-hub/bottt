@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     admin_api_key: str = "change-me"
     admin_ids: str = ""
     upload_dir: str = "uploads"
+    notifications_enabled: bool = True
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 settings = Settings()
