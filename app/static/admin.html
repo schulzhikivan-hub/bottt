@@ -1,32 +1,65 @@
 <!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>KOREA HUB — модерация</title>
+<title>KOREA HUB — админ-панель</title>
 <style>
+*{box-sizing:border-box}
 body{font-family:system-ui,sans-serif;margin:0;background:#f4f6fa;color:#1b2430}
-header{background:#0c1f3f;color:#fff;padding:14px 16px}
-main{padding:16px;max-width:760px;margin:0 auto}
+header{background:#0c1f3f;color:#fff;padding:12px 16px;display:flex;justify-content:space-between;align-items:center}
+nav{background:#15315e;display:flex;flex-wrap:wrap;gap:4px;padding:6px}
+nav button{background:transparent;color:#cfd9ee;border:0;padding:8px 10px;border-radius:8px;cursor:pointer;font-size:14px}
+nav button.active{background:#1f6feb;color:#fff}
+main{padding:16px;max-width:980px;margin:0 auto}
 .card{background:#fff;border-radius:12px;padding:14px;margin-bottom:12px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
 .meta{color:#8a94a6;font-size:13px;margin:4px 0 8px}
-button{border:0;border-radius:10px;padding:10px 14px;font-size:15px;cursor:pointer;margin-right:8px}
-.ok{background:#22a45d;color:#fff}.no{background:#e5484d;color:#fff}
-input{padding:10px;border:1px solid #e3e8f0;border-radius:10px;width:100%;box-sizing:border-box}
-.muted{color:#8a94a6}
+button.act{border:0;border-radius:10px;padding:9px 13px;font-size:14px;cursor:pointer;margin:4px 6px 4px 0;color:#fff;background:#1f6feb}
+button.ok{background:#22a45d}button.no{background:#e5484d}button.warn{background:#f5a524;color:#1b2430}button.gray{background:#8a94a6}
+input,select{padding:9px;border:1px solid #e3e8f0;border-radius:10px;font-size:14px}
+.stats{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px}
+.stats div{background:#fff;border-radius:12px;padding:12px}
+.stats b{font-size:22px;display:block}
+.muted{color:#8a94a6;font-size:13px}
+table{width:100%;border-collapse:collapse;background:#fff;border-radius:12px;overflow:hidden}
+td,th{padding:8px;border-bottom:1px solid #eef1f6;text-align:left;font-size:13px;vertical-align:top}
+.hidden{display:none !important}
+#login{max-width:420px;margin:40px auto}
 </style></head>
 <body>
-<header><b>KOREA HUB — модерация</b></header>
-<main>
-  <div class="card" id="login">
-    <p>Введите админ-ключ (ADMIN_API_KEY из .env). Он хранится только в этой вкладке браузера.</p>
-    <input id="key" type="password" placeholder="Админ-ключ">
-    <p><button class="ok" id="enter">Войти</button></p>
-  </div>
-  <div id="queue" hidden>
-    <p><button class="ok" id="reload">Обновить</button> <span class="muted" id="status"></span></p>
-    <h3>Объявления на проверке</h3>
-    <div id="items"></div>
-    <h3>Анкеты знакомств на проверке</h3>
-    <div id="dating"></div>
-  </div>
-</main>
+<header><b>KOREA HUB — админ-панель</b><button class="act gray" id="logout" hidden>Выйти</button></header>
+
+<div id="login" class="card">
+  <p>Вход для администраторов. Имя латиницей (например, Ivan), ключ из ADMIN_API_KEY. Всё хранится только в этой вкладке браузера.</p>
+  <p><input id="name" placeholder="Имя (латиница)" style="width:100%"></p>
+  <p><input id="key" type="password" placeholder="Админ-ключ" style="width:100%"></p>
+  <p><button class="act" id="enter">Войти</button> <span class="muted" id="loginError"></span></p>
+</div>
+
+<div id="app" class="hidden">
+  <nav id="tabs">
+    <button data-tab="dash" class="active">Дашборд</button>
+    <button data-tab="listings">Модерация</button>
+    <button data-tab="dating">Знакомства</button>
+    <button data-tab="reports">Жалобы</button>
+    <button data-tab="users">Пользователи</button>
+    <button data-tab="employers">Работодатели</button>
+    <button data-tab="payments">Платежи</button>
+    <button data-tab="pricing">Цены</button>
+    <button data-tab="audit">Журнал</button>
+  </nav>
+  <main>
+    <p class="muted" id="status"></p>
+    <section id="tab-dash"></section>
+    <section id="tab-listings" class="hidden"></section>
+    <section id="tab-dating" class="hidden"></section>
+    <section id="tab-reports" class="hidden"></section>
+    <section id="tab-users" class="hidden">
+      <p><input id="userQuery" placeholder="ID пользователя"> <button class="act" id="userSearch">Найти</button></p>
+      <div id="usersList"></div>
+    </section>
+    <section id="tab-employers" class="hidden"></section>
+    <section id="tab-payments" class="hidden"></section>
+    <section id="tab-pricing" class="hidden"></section>
+    <section id="tab-audit" class="hidden"></section>
+  </main>
+</div>
 <script src="/static/admin.js"></script>
 </body></html>

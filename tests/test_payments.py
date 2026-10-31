@@ -11,7 +11,7 @@ from app.main import app
 from app.models import Listing, Payment, Placement, Pricing
 from tests.tg import as_user, reset_db, accept_terms
 
-ADMIN = {"X-Admin-Key": "test-admin-key"}
+ADMIN = {"X-Admin-Key": "test-admin-key", "X-Admin-Name": "Test Admin"}
 CALLS: list[tuple[str, dict]] = []
 
 

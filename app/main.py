@@ -21,6 +21,8 @@ from app.schemas import (
     CATEGORIES, MAX_ACTIVE_PER_CATEGORY,
 )
 from app.seed import seed_reference
+from app.audit import admin_actor, log_action
+from app.manage import router as manage_router
 from app.users import get_or_create_user, writer, is_blocked_pair
 from app.models import DatingProfile
 from app.dating import router as dating_router
@@ -33,6 +35,7 @@ with SessionLocal() as _db:
 
 app = FastAPI(title="KOREA HUB API", version="0.4.0")
 app.include_router(dating_router)
+app.include_router(manage_router)
 STATIC = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
@@ -68,7 +71,8 @@ class ConsentIn(BaseModel):
 def me(user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
     user = get_or_create_user(db, user_id)
     return {"tg_id": user.tg_id, "consent": user.consent_at is not None, "city": user.city,
-            "language": user.language, "blocked": user.blocked}
+            "language": "ru", "blocked": user.blocked, "block_reason": user.block_reason,
+            "employer_status": user.employer_status, "company_name": user.company_name}
 
 
 @app.post("/api/me/consent")
@@ -424,38 +428,40 @@ def require_admin(x_admin_key: str | None):
 
 
 @app.get("/api/admin/listings", response_model=list[ListingOut])
-def pending_listings(x_admin_key: str | None = Header(default=None), db: Session = Depends(get_db)):
-    require_admin(x_admin_key)
+def pending_listings(actor: str = Depends(admin_actor), db: Session = Depends(get_db)):
     return db.scalars(select(Listing).where(Listing.status == "pending").order_by(Listing.id)).all()
 
 
 @app.post("/api/admin/listings/{listing_id}/{decision}")
-def moderate_listing(listing_id: int, decision: str, x_admin_key: str | None = Header(default=None),
-                     db: Session = Depends(get_db)):
-    require_admin(x_admin_key)
-    if decision not in {"approve", "reject"}:
-        raise HTTPException(400, "Decision must be approve or reject")
+def moderate_listing(listing_id: int, decision: str, reason: str = Query(default="", max_length=300),
+                     actor: str = Depends(admin_actor), db: Session = Depends(get_db)):
+    """decision: approve | reject (reason required) | needs_fix (comment required)."""
+    if decision not in {"approve", "reject", "needs_fix"}:
+        raise HTTPException(400, "Решение: approve, reject или needs_fix")
+    if decision in {"reject", "needs_fix"} and len(reason.strip()) < 3:
+        raise HTTPException(400, "Укажите причину (не короче 3 символов)")
     item = db.get(Listing, listing_id)
     if not item:
         raise HTTPException(404, "Listing not found")
-    item.status = "approved" if decision == "approve" else "rejected"
+    before = item.status
+    item.status = {"approve": "approved", "reject": "rejected", "needs_fix": "needs_fix"}[decision]
+    item.note = "" if decision == "approve" else reason.strip()
+    log_action(db, actor, f"listing.{decision}", "listing", listing_id, f"{before} -> {item.status}: {reason}")
     db.commit()
     return {"id": item.id, "status": item.status}
 
 
 @app.get("/api/admin/reports")
-def admin_reports(status: str = "new", x_admin_key: str | None = Header(default=None),
+def admin_reports(status: str = "new", actor: str = Depends(admin_actor),
                   db: Session = Depends(get_db)):
-    require_admin(x_admin_key)
     rows = db.scalars(select(Report).where(Report.status == status).order_by(Report.id).limit(200)).all()
     return [{"id": r.id, "target_type": r.target_type, "target_id": r.target_id, "reason": r.reason,
              "comment": r.comment, "status": r.status, "created_at": str(r.created_at)} for r in rows]
 
 
 @app.post("/api/admin/reports/{report_id}/{decision}")
-def decide_report(report_id: int, decision: str, x_admin_key: str | None = Header(default=None),
+def decide_report(report_id: int, decision: str, actor: str = Depends(admin_actor),
                   db: Session = Depends(get_db)):
-    require_admin(x_admin_key)
     if decision not in {"resolve", "reject"}:
         raise HTTPException(400, "Decision must be resolve or reject")
     report = db.get(Report, report_id)
@@ -477,13 +483,13 @@ def decide_report(report_id: int, decision: str, x_admin_key: str | None = Heade
             if user:
                 user.blocked = True
     report.status = "resolved" if decision == "resolve" else "rejected"
+    log_action(db, actor, f"report.{decision}", "report", report_id, report.target_type + ":" + report.target_id)
     db.commit()
     return {"id": report.id, "status": report.status}
 
 
 @app.get("/api/admin/pricing")
-def admin_pricing(x_admin_key: str | None = Header(default=None), db: Session = Depends(get_db)):
-    require_admin(x_admin_key)
+def admin_pricing(actor: str = Depends(admin_actor), db: Session = Depends(get_db)):
     payments.ensure_pricing(db)
     return [{"code": p.code, "category": p.category, "kind": p.kind, "title": p.title,
              "stars": p.stars, "duration_days": p.duration_days, "is_active": p.is_active}
@@ -496,19 +502,19 @@ class PricingIn(BaseModel):
 
 
 @app.put("/api/admin/pricing/{code}")
-def admin_set_price(code: str, payload: PricingIn, x_admin_key: str | None = Header(default=None),
+def admin_set_price(code: str, payload: PricingIn, actor: str = Depends(admin_actor),
                     db: Session = Depends(get_db)):
-    require_admin(x_admin_key)
     try:
         p = payments.set_price(db, code, payload.stars, payload.is_active)
     except PaymentError as exc:
         raise HTTPException(400, str(exc))
+    log_action(db, actor, "pricing.update", "pricing", code, f"stars={payload.stars} active={payload.is_active}")
+    db.commit()
     return {"code": p.code, "stars": p.stars, "is_active": p.is_active}
 
 
 @app.get("/api/admin/payments")
-def admin_payments(x_admin_key: str | None = Header(default=None), db: Session = Depends(get_db)):
-    require_admin(x_admin_key)
+def admin_payments(actor: str = Depends(admin_actor), db: Session = Depends(get_db)):
     rows = db.scalars(select(Payment).order_by(desc(Payment.id)).limit(200)).all()
     return [{"id": p.id, "user": p.user_tg_id, "listing_id": p.listing_id, "service": p.service_code,
              "stars": p.stars, "status": p.status, "charge_id": p.telegram_payment_charge_id,
@@ -516,18 +522,18 @@ def admin_payments(x_admin_key: str | None = Header(default=None), db: Session =
 
 
 @app.post("/api/admin/payments/{payment_id}/refund")
-def admin_refund(payment_id: int, x_admin_key: str | None = Header(default=None), db: Session = Depends(get_db)):
-    require_admin(x_admin_key)
+def admin_refund(payment_id: int, actor: str = Depends(admin_actor), db: Session = Depends(get_db)):
     try:
         p = payments.refund(db, payment_id)
     except PaymentError as exc:
         raise HTTPException(400, str(exc))
+    log_action(db, actor, "payment.refund", "payment", payment_id, p.telegram_payment_charge_id or "")
+    db.commit()
     return {"id": p.id, "status": p.status}
 
 
 @app.get("/api/admin/stats")
-def admin_stats(x_admin_key: str | None = Header(default=None), db: Session = Depends(get_db)):
-    require_admin(x_admin_key)
+def admin_stats(actor: str = Depends(admin_actor), db: Session = Depends(get_db)):
     current = now()
     paid = db.scalars(select(Payment).where(Payment.status == "paid")).all()
 
@@ -553,8 +559,7 @@ def admin_stats(x_admin_key: str | None = Header(default=None), db: Session = De
 
 @app.put("/api/admin/groups/{group_id}")
 def admin_group(group_id: int, telegram_link: str = "", members_count: int = 0,
-                x_admin_key: str | None = Header(default=None), db: Session = Depends(get_db)):
-    require_admin(x_admin_key)
+                actor: str = Depends(admin_actor), db: Session = Depends(get_db)):
     g = db.get(Group, group_id)
     if g is None:
         raise HTTPException(404, "Группа не найдена")
@@ -563,6 +568,7 @@ def admin_group(group_id: int, telegram_link: str = "", members_count: int = 0,
             raise HTTPException(400, "Ссылка должна начинаться с https://t.me/")
         g.telegram_link = telegram_link
     g.members_count = max(0, members_count)
+    log_action(db, actor, "group.update", "group", group_id, telegram_link)
     db.commit()
     return {"id": g.id, "telegram_link": g.telegram_link}
 
@@ -576,9 +582,8 @@ class ArticleIn(BaseModel):
 
 
 @app.put("/api/admin/articles/{article_id}")
-def admin_article(article_id: int, payload: ArticleIn, x_admin_key: str | None = Header(default=None),
+def admin_article(article_id: int, payload: ArticleIn, actor: str = Depends(admin_actor),
                   db: Session = Depends(get_db)):
-    require_admin(x_admin_key)
     a = db.get(Article, article_id)
     if a is None:
         raise HTTPException(404, "Статья не найдена")
@@ -586,5 +591,6 @@ def admin_article(article_id: int, payload: ArticleIn, x_admin_key: str | None =
         raise HTTPException(400, "Для публикации нужны источник и дата проверки")
     a.title, a.body, a.source_url = payload.title, payload.body, payload.source_url
     a.checked_at, a.published = payload.checked_at, payload.published
+    log_action(db, actor, "article.update", "article", article_id, f"published={payload.published}")
     db.commit()
     return {"id": a.id, "published": a.published}

@@ -16,7 +16,25 @@ class User(Base):
     consent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     blocked: Mapped[bool] = mapped_column(Boolean, default=False)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # none, pending, approved, rejected
+    employer_status: Mapped[str] = mapped_column(String(16), default="none")
+    company_name: Mapped[str] = mapped_column(String(160), default="")
+    registration_no: Mapped[str] = mapped_column(String(80), default="")
+    contact_person: Mapped[str] = mapped_column(String(80), default="")
+    block_reason: Mapped[str] = mapped_column(String(300), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class AuditLog(Base):
+    """Journal of administrator actions (ТЗ § 10, § 16.3). Append-only in the application."""
+    __tablename__ = "audit_logs"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    actor: Mapped[str] = mapped_column(String(80), index=True)
+    action: Mapped[str] = mapped_column(String(60), index=True)
+    object_type: Mapped[str] = mapped_column(String(30))
+    object_id: Mapped[str] = mapped_column(String(40))
+    details: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, index=True)
 
 
 class Block(Base):
@@ -52,7 +70,9 @@ class Listing(Base):
     contact: Mapped[str] = mapped_column(String(160), default="")
     author_telegram_id: Mapped[str] = mapped_column(String(40), default="", index=True)
     # pending, approved, rejected, hidden (hidden = reports or author deletion)
+    # pending, approved, rejected, needs_fix, hidden, closed, sold, archived
     status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
+    note: Mapped[str] = mapped_column(String(300), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 

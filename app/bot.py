@@ -4,6 +4,7 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart, Command, CommandObject
 from aiogram.types import (
     Message, PreCheckoutQuery, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo,
+    MenuButtonWebApp,
 )
 from sqlalchemy import select
 
@@ -239,6 +240,9 @@ async def main():
     # Бот работает через polling. Если у токена активен webhook (например, остался
     # от другого сервиса), Telegram не отдаёт обновления и /start молчит.
     await bot.delete_webhook(drop_pending_updates=True)
+    # Кнопка меню рядом с полем ввода открывает приложение внутри Telegram, а не в браузере
+    await bot.set_chat_menu_button(menu_button=MenuButtonWebApp(
+        text="KOREA HUB", web_app=WebAppInfo(url=settings.webapp_url)))
     dp = Dispatcher()
     register(dp, bot)
     asyncio.create_task(expiry_loop(bot))

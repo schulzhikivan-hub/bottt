@@ -13,6 +13,7 @@ from app.database import get_db
 from app.models import DatingProfile, DatingLike, Conversation, User, Block
 from app.payments import now
 from app.users import writer, is_blocked_pair, get_or_create_user
+from app.audit import admin_actor, log_action
 
 router = APIRouter()
 MIN_AGE = 18
@@ -171,9 +172,8 @@ def _require_admin(key: str | None):
 
 
 @router.get("/api/admin/dating")
-def admin_dating(status: str = "pending", x_admin_key: str | None = Header(default=None),
+def admin_dating(status: str = "pending", actor: str = Depends(admin_actor),
                  db: Session = Depends(get_db)):
-    _require_admin(x_admin_key)
     rows = db.scalars(select(DatingProfile).where(DatingProfile.status == status)
                       .order_by(DatingProfile.id).limit(100)).all()
     return [{"id": p.id, "owner": p.owner_tg_id, "age": age_of(p.birth_year), "gender": p.gender,
@@ -182,9 +182,8 @@ def admin_dating(status: str = "pending", x_admin_key: str | None = Header(defau
 
 
 @router.get("/api/admin/dating/{profile_id}/photo")
-def admin_photo(profile_id: int, x_admin_key: str | None = Header(default=None),
+def admin_photo(profile_id: int, actor: str = Depends(admin_actor),
                 db: Session = Depends(get_db)):
-    _require_admin(x_admin_key)
     profile = db.get(DatingProfile, profile_id)
     if profile is None or not profile.photo_key:
         raise HTTPException(404, "Фото не найдено")
@@ -192,9 +191,8 @@ def admin_photo(profile_id: int, x_admin_key: str | None = Header(default=None),
 
 
 @router.post("/api/admin/dating/{profile_id}/{decision}")
-def decide(profile_id: int, decision: str, x_admin_key: str | None = Header(default=None),
+def decide(profile_id: int, decision: str, actor: str = Depends(admin_actor),
            db: Session = Depends(get_db)):
-    _require_admin(x_admin_key)
     if decision not in {"approve", "reject"}:
         raise HTTPException(400, "Decision must be approve or reject")
     profile = db.get(DatingProfile, profile_id)
@@ -203,5 +201,6 @@ def decide(profile_id: int, decision: str, x_admin_key: str | None = Header(defa
     if decision == "approve" and profile.photo_key is None:
         raise HTTPException(400, "Нельзя опубликовать анкету без фото")
     profile.status = "published" if decision == "approve" else "rejected"
+    log_action(db, actor, f"dating.{decision}", "dating", profile_id, profile.status)
     db.commit()
     return {"id": profile.id, "status": profile.status}

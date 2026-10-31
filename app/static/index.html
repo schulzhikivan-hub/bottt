@@ -38,16 +38,27 @@
 </section>
 
 <section id="view-profile" hidden>
-  <div class="section-head"><div><span class="eyebrow">ЛИЧНЫЙ КАБИНЕТ</span><h2>Мои объявления</h2></div></div>
-  <div id="myListings" class="listings"></div>
-  <div class="section-head"><div><span class="eyebrow">ОПЛАТА</span><h2>История платежей</h2></div></div>
-  <div id="payments" class="listings"></div>
-  <div class="section-head"><div><span class="eyebrow">НАСТРОЙКИ</span><h2>Аккаунт</h2></div></div>
-  <div class="listings">
-    <button class="wide" id="blocksBtn">Заблокированные пользователи</button>
-    <button class="wide" id="exportBtn">Выгрузить мои данные</button>
-    <button class="wide danger" id="deleteBtn">Удалить аккаунт</button>
+  <div class="profile-head"><div class="avatar">👤</div>
+    <div><b id="pName">Мой профиль</b><small id="pCity"></small></div>
+    <button class="link" id="cityBtn">Город</button></div>
+  <div class="stats">
+    <div><b id="sListings">0</b><small>объявлений</small></div>
+    <div><b id="sFav">0</b><small>в избранном</small></div>
+    <div><b id="sChats">0</b><small>диалогов</small></div>
   </div>
+  <div class="section-head"><div><h2>Мои объявления</h2></div></div>
+  <div id="myListings" class="listings"></div>
+  <div class="menu-list">
+    <button class="wide" data-menu="favorites">♡ Избранное</button>
+    <button class="wide" data-menu="chats">☰ Сообщения</button>
+    <button class="wide" data-menu="payments">⭐ История платежей</button>
+    <button class="wide" data-menu="employer">🏢 Статус работодателя</button>
+    <button class="wide" data-menu="blocks">🚫 Заблокированные</button>
+    <button class="wide" data-menu="help">❓ Помощь и правила</button>
+    <button class="wide" data-menu="export">📄 Выгрузить мои данные</button>
+    <button class="wide danger" data-menu="delete">Удалить аккаунт</button>
+  </div>
+  <div id="menuBody" class="listings"></div>
 </section>
 
 <section id="view-dating" hidden>
@@ -87,7 +98,7 @@
 <label class="check"><input type="checkbox" id="consentPrivacy"> Я согласен на обработку данных по <a href="#" data-doc="privacy">политике конфиденциальности</a></label>
 <button class="submit" id="consentOk" type="button">Продолжить</button></div></div>
 
-<div id="modal" class="modal hidden"><div class="sheet"><div class="sheet-top"><b>Новое объявление</b><button id="closeModal">✕</button></div>
+<div id="modal" class="modal hidden"><div class="sheet"><div class="sheet-top"><b id="modalTitle">Новое объявление</b><button id="closeModal">✕</button></div>
 <form id="listingForm"><label>Категория<select name="category"><option value="job">Работа</option><option value="housing">Жильё</option><option value="marketplace">Барахолка</option></select></label>
 <label>Заголовок<input name="title" required minlength="3" maxlength="160" placeholder="Например: Работа на заводе"></label><label>Город<input name="city" required maxlength="80" placeholder="Например: Асан"></label>
 <label>Цена / зарплата<input name="price" maxlength="80" placeholder="Например: 2 800 000 ₩/мес"></label><label>Описание<textarea name="description" rows="3" maxlength="4000" placeholder="Подробности объявления"></textarea></label><label>Контакт<input name="contact" maxlength="160" placeholder="Telegram или телефон"></label>
@@ -104,6 +115,25 @@
 <label>Фото (JPEG, PNG или WebP, до 5 МБ)<input name="photo" type="file" accept="image/jpeg,image/png,image/webp"></label>
 <p class="muted">Анкета появится после проверки модератором. Контакты в анкете не нужны: общение только в приложении.</p>
 <button class="submit" type="submit">Сохранить</button></form></div></div>
+
+<div id="addSheet" class="modal hidden"><div class="sheet"><div class="sheet-top"><b>Что добавить?</b><button id="closeAdd">✕</button></div>
+<div class="menu-list">
+<button class="wide" data-add="job">💼 Вакансия</button>
+<button class="wide" data-add="housing">🏠 Жильё</button>
+<button class="wide" data-add="marketplace">🛍️ Товар</button>
+<button class="wide" data-add="dating">💗 Анкета знакомств</button>
+</div></div></div>
+
+<div id="cityModal" class="modal hidden"><div class="sheet"><div class="sheet-top"><b>Мой город</b><button id="closeCity">✕</button></div>
+<form id="cityForm"><label>Город<input name="city" required minlength="2" maxlength="80" placeholder="Например: Пусан"></label>
+<button class="submit" type="submit">Сохранить</button></form></div></div>
+
+<div id="employerModal" class="modal hidden"><div class="sheet"><div class="sheet-top"><b>Заявка работодателя</b><button id="closeEmployer">✕</button></div>
+<form id="employerForm"><label>Название компании<input name="company_name" required minlength="2" maxlength="160"></label>
+<label>Регистрационный номер компании<input name="registration_no" required minlength="3" maxlength="80"></label>
+<label>Контактное лицо<input name="contact_person" required minlength="2" maxlength="80"></label>
+<p class="muted">Заявку проверит модератор. После одобрения в профиле появится отметка работодателя.</p>
+<button class="submit" type="submit">Отправить заявку</button></form></div></div>
 
 <div id="toast" class="toast"></div>
 <script src="/static/app.js"></script></body></html>

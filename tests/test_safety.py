@@ -5,7 +5,7 @@ from app.database import engine
 from app.main import app
 from tests.tg import as_user, reset_db, accept_terms
 
-ADMIN = {"X-Admin-Key": "test-admin-key"}
+ADMIN = {"X-Admin-Key": "test-admin-key", "X-Admin-Name": "Test Admin"}
 ITEM = {"category": "marketplace", "title": "Стол письменный", "city": "Сеул",
         "price": "50 000 ₩", "description": "Хорошее состояние", "contact": "@seller"}
 
