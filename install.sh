@@ -113,7 +113,9 @@ backup_db() {
     return 0
   fi
   mkdir -p "$BACKUP_DIR"
-  local file="$BACKUP_DIR/koreahub-$(date +%Y%m%d-%H%M%S).sql.gz"
+  local stamp file
+  stamp="$(date +%Y%m%d-%H%M%S)"
+  file="$BACKUP_DIR/koreahub-$stamp.sql.gz"
   log "Резервная копия базы: $file"
   (cd "$APP_DIR" && docker compose exec -T db pg_dump -U koreahub koreahub) | gzip >"$file"
   [ -s "$file" ] || die "Резервная копия пустая. Обновление остановлено."
