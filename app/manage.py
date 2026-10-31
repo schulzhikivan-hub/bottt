@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.audit import log_action
 from app.admin_auth import staff, MOD, ADM, SUP
 from app.guard import check_text
+from app import catalog, lifecycle
 from app.catalog import drop_irrelevant
 from app.fields import (VisaCode, Employment, Schedule, SalaryPeriod, HousingType, GoodsCategory)
 from app import admin_ops as ops
@@ -26,7 +27,7 @@ def _run(operation, *args):
         return operation(*args)
     except ops.OpError as exc:
         raise HTTPException(exc.status, exc.message)
-EDITABLE = {"pending", "approved", "rejected", "needs_fix"}
+EDITABLE = {"draft", "pending", "approved", "rejected", "needs_fix"}
 
 
 def _own_listing(db: Session, listing_id: int, user_id: str) -> Listing:
@@ -71,21 +72,18 @@ def edit_listing(listing_id: int, payload: ListingEdit, user_id: str = Depends(w
         raise HTTPException(409, "Это объявление нельзя изменить. Сначала верните его из закрытых")
     changes = drop_irrelevant(item.category, payload.model_dump(exclude_none=True))
     if not changes:
-        return item
+        return catalog.with_promo(db, [item], owner=True)[0]
     check_text(changes.get("title", item.title), changes.get("description", item.description))
     if any(k in changes for k in ("city", "region_code", "district_id")):
         place = geo.resolve_place(db, changes.pop("district_id", None), changes.pop("region_code", None), changes.pop("city", None))
         if place is None:
             raise HTTPException(400, "Выберите город или район из списка. Сайт только для Южной Кореи")
         changes.update(city=place.label, region_code=place.region_code, district_id=place.district_id)
-    for key, value in changes.items():
-        setattr(item, key, value)
-    # Любое изменение снова проходит модерацию (ТЗ § 7.4)
-    item.status = "pending"
-    item.note = ""
+    # A published listing stays visible: small changes apply at once, important ones wait for a moderator
+    lifecycle.edit(db, item, changes)
     db.commit()
     db.refresh(item)
-    return item
+    return catalog.with_promo(db, [item], owner=True)[0]
 
 
 def _set_status(db: Session, listing_id: int, user_id: str, allowed: set[str], new_status: str,
@@ -97,6 +95,32 @@ def _set_status(db: Session, listing_id: int, user_id: str, allowed: set[str], n
     db.commit()
     db.refresh(item)
     return item
+
+
+@router.post("/api/listings/{listing_id}/submit", response_model=ListingOut)
+def submit_draft(listing_id: int, user_id: str = Depends(writer), db: Session = Depends(get_db)):
+    """Send a draft to moderation (housing and goods need a photo)."""
+    item = _own_listing(db, listing_id, user_id)
+    if item.status != "draft":
+        raise HTTPException(409, "Это объявление уже отправлено")
+    if lifecycle.needs_photo(db, item):
+        raise HTTPException(400, "Добавьте хотя бы одно фото")
+    item.status = "pending"
+    db.commit()
+    db.refresh(item)
+    return catalog.with_promo(db, [item], owner=True)[0]
+
+
+@router.post("/api/listings/{listing_id}/renew", response_model=ListingOut)
+def renew_listing(listing_id: int, user_id: str = Depends(writer), db: Session = Depends(get_db)):
+    """Extend a published or just expired listing for another period. No new moderation: the text is unchanged."""
+    item = _own_listing(db, listing_id, user_id)
+    if item.status not in {"approved", "expired"}:
+        raise HTTPException(409, "Продлить можно опубликованное или завершившееся объявление")
+    lifecycle.renew(item)
+    db.commit()
+    db.refresh(item)
+    return catalog.with_promo(db, [item], owner=True)[0]
 
 
 @router.post("/api/listings/{listing_id}/close", response_model=ListingOut)

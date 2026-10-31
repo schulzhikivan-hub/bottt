@@ -45,6 +45,14 @@ def migrate() -> None:
                        "housing_type VARCHAR(12)", "deposit BIGINT", "area_m2 INTEGER", "pets_allowed BOOLEAN",
                        "furnished BOOLEAN", "goods_category VARCHAR(16)", "negotiable BOOLEAN", "details JSON"):
             conn.execute(text(f"ALTER TABLE listings ADD COLUMN IF NOT EXISTS {column}"))
+        for column in ("published_at TIMESTAMPTZ", "expires_at TIMESTAMPTZ", "expiry_notified BOOLEAN DEFAULT FALSE",
+                       "views INTEGER DEFAULT 0", "pending_changes JSON", "has_edit BOOLEAN DEFAULT FALSE"):
+            conn.execute(text(f"ALTER TABLE listings ADD COLUMN IF NOT EXISTS {column}"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_listings_expires_at ON listings (expires_at)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_listings_has_edit ON listings (has_edit)"))
+        # Listings published before expiry dates existed get 30 days from now
+        conn.execute(text("UPDATE listings SET expires_at = NOW() + INTERVAL '30 days', published_at = created_at "
+                          "WHERE status = 'approved' AND expires_at IS NULL"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_listings_price_amount ON listings (price_amount)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_listings_city_key ON listings (city_key)"))
         conn.execute(text("ALTER TABLE listings ALTER COLUMN city TYPE VARCHAR(100)"))

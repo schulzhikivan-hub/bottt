@@ -190,10 +190,11 @@ def test_cities_with_counts(client):
 
 # ---- editing keeps search working ----
 
-def test_edit_updates_search_and_goes_back_to_moderation(client):
+def test_edit_waits_for_moderation_while_the_old_version_stays_visible(client):
     lid = make(client, title="Старое название")
     r = client.put(f"/api/listings/{lid}", json={"title": "Новое название", "price_amount": 70_000}, headers=as_user(1))
-    assert r.status_code == 200 and r.json()["status"] == "pending"
+    assert r.status_code == 200 and r.json()["status"] == "approved" and r.json()["has_edit"] is True
+    assert ids(client, q="старое") == [lid] and ids(client, q="новое") == []  # nothing changed for visitors
     client.post(f"/api/admin/listings/{lid}/approve", headers=ADMIN)
     assert ids(client, q="новое") == [lid]
     assert ids(client, q="старое") == []

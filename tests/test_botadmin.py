@@ -2,10 +2,11 @@ import pytest
 from sqlalchemy import select
 
 from app import botadmin as ba
+from app import lifecycle
 from app import payments
 from app.config import settings
 from app.database import SessionLocal, engine
-from app.models import (Admin, AuditLog, DatingProfile, Listing, Payment, Pricing, Report, User)
+from app.models import (Admin, AuditLog, DatingProfile, Listing, ListingPhoto, Payment, Pricing, Report, User)
 from tests.tg import reset_db
 
 SUPER, MODERATOR, ADMIN_ID = 999, 555, 777
@@ -90,7 +91,7 @@ def test_approve_publishes_notifies_author_and_is_journaled(db):
     reply = press(db, MODERATOR, "L", "ok", str(item.id))
     db.refresh(item)
     assert item.status == "approved"
-    assert ("42", "Ваше объявление «Диван» одобрено и опубликовано.") in reply.notify
+    assert ("42", "Ваше объявление «Диван»: одобрено и опубликовано.") in reply.notify
     entry = db.scalar(select(AuditLog).order_by(AuditLog.id.desc()).limit(1))
     assert entry.actor == str(MODERATOR) and entry.action == "listing.approve"
 
@@ -310,3 +311,64 @@ def test_moderator_cannot_use_staff_input_even_with_stale_state(db):
     reply = ba.handle_text(db, MODERATOR, "moderator", "5555 super_admin")
     assert "Недостаточно прав" in reply.text
     assert db.get(Admin, "5555") is None
+
+
+# ---- edits of published listings, photos ----
+
+def test_waiting_edit_shows_what_changes_and_approving_tells_the_author(db):
+    item = listing(db, status="approved", title="Диван")
+    lifecycle.edit(db, item, {"title": "Диван угловой", "price_amount": 90000})
+    db.commit()
+    shown = press(db, MODERATOR, "L")
+    assert "Правка опубликованного" in shown.text
+    assert "Название: Диван → Диван угловой" in shown.text and "Сумма" in shown.text
+    done = press(db, MODERATOR, "L", "ok", str(item.id))
+    db.refresh(item)
+    assert item.title == "Диван угловой" and item.has_edit is False
+    assert any("изменения одобрены" in text for _, text in done.notify)
+
+
+def test_rejecting_an_edit_keeps_the_published_listing(db):
+    item = listing(db, status="approved", title="Диван")
+    lifecycle.edit(db, item, {"title": "Подозрительное"})
+    db.commit()
+    press(db, MODERATOR, "L", "no", str(item.id))
+    done = ba.handle_text(db, MODERATOR, "moderator", "Лишнее слово")
+    db.refresh(item)
+    assert item.status == "approved" and item.title == "Диван" and item.note == "Лишнее слово"
+    assert any("правка отклонена" in text for _, text in done.notify)
+
+
+def test_edit_counts_in_the_menu(db):
+    item = listing(db, status="approved")
+    lifecycle.edit(db, item, {"title": "Другое"})
+    db.commit()
+    assert "Объявления (1)" in texts(press(db, MODERATOR, "menu"))
+
+
+def test_listing_without_a_required_photo_cannot_be_approved_from_the_bot(db, monkeypatch):
+    monkeypatch.setattr(ba.lifecycle.settings, "require_photos", True)
+    item = listing(db, category="housing")
+    shown = press(db, MODERATOR, "L")
+    assert "Нет фото" in shown.text and "Одобрить" not in texts(shown)
+    reply = press(db, MODERATOR, "L", "ok", str(item.id))  # a stale button is refused as well
+    assert "фото" in reply.alert
+
+
+def test_moderator_gets_the_photo_with_the_card(db):
+    item = listing(db)
+    key = "a" * 32
+    (ba.photo_root() / f"{key}.jpg").write_bytes(b"\xff\xd8\xff" + b"0" * 30)
+    db.add(ListingPhoto(listing_id=item.id, key=key, position=0, status="live"))
+    db.commit()
+    assert press(db, MODERATOR, "L").photo is not None
+
+
+def test_card_shows_key_facts(db):
+    item = Listing(category="job", title="Работа", city="Асан", author_telegram_id="42", status="pending",
+                   price_amount=2_800_000, schedule="day", visas=",E-9,F-4,", housing_provided=True,
+                   details={"company": "Samin Motors"})
+    db.add(item)
+    db.commit()
+    text = press(db, MODERATOR, "L").text
+    assert "2 800 000 ₩" in text and "Samin Motors" in text and "E-9,F-4" in text and "жильё" in text

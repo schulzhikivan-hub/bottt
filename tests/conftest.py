@@ -13,3 +13,4 @@ os.environ["BOT_TOKEN"] = "123456:TEST-TOKEN"
 os.environ["ADMIN_IDS"] = "999"
 os.environ["ADMIN_API_KEY"] = "test-admin-key"
 os.environ["NOTIFICATIONS_ENABLED"] = "false"
+os.environ["REQUIRE_PHOTOS"] = "false"  # tests that need the rule switch it on explicitly

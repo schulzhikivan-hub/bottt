@@ -9,6 +9,9 @@ class Settings(BaseSettings):
     upload_dir: str = "uploads"
     notifications_enabled: bool = True
     bot_username: str = ""
+    require_photos: bool = True      # housing and goods need at least one photo before publication
+    max_photos: int = 10
+    listing_ttl_days: int = 30
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 settings = Settings()

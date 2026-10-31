@@ -76,3 +76,19 @@ def notify_user(db: Session, tg_id: str, text: str) -> None:
     if user is not None and not user.notify_messages:
         return
     send_telegram(tg_id, text)
+
+
+# ---- views counter ----
+_seen: dict[tuple, float] = {}
+
+
+def first_view(request, listing_id: int, window_seconds: int = 3600) -> bool:
+    """True if this visitor has not been counted for this listing within the last hour."""
+    forwarded = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+    visitor = (forwarded or (request.client.host if request.client else ""), request.headers.get("user-agent", "")[:80], listing_id)
+    moment = time.monotonic()
+    if len(_seen) > 50_000:
+        _seen.clear()
+    last = _seen.get(visitor)
+    _seen[visitor] = moment
+    return last is None or moment - last > window_seconds

@@ -1,11 +1,13 @@
 """Browsing and search of published listings: words, filters, sorting, pages, details, cities."""
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select, func, case, or_
 from sqlalchemy.orm import Session
 
-from app import fields, payments
+from app import fields, payments, photos
+from app.payments import now
+from app import guard
 from app.database import get_db
 from app.models import Listing, Placement
 from app.schemas import CATEGORIES, ListingOut
@@ -64,7 +66,7 @@ def search(db: Session, *, q: str = "", category: str | None = None, city: str |
            goods_category: str | None = None,
            limit: int = 20, offset: int = 0) -> tuple[list[Listing], int]:
     """Published listings matching every condition. Paid placements come first on every page."""
-    conditions = [Listing.status == "approved"]
+    conditions = [Listing.status == "approved", or_(Listing.expires_at.is_(None), Listing.expires_at > now())]
     if category:
         conditions.append(Listing.category == category)
     if region:
@@ -119,9 +121,20 @@ def search(db: Session, *, q: str = "", category: str | None = None, city: str |
     return list(rows), total
 
 
-def with_promo(db: Session, rows: list[Listing]) -> list[ListingOut]:
-    placed = payments.active_placements(db, [x.id for x in rows])
-    return [ListingOut.model_validate(x).model_copy(update={"promo": placed.get(x.id), "note": ""}) for x in rows]
+def with_promo(db: Session, rows: list[Listing], owner: bool = False) -> list[ListingOut]:
+    """Output for the app. Public: only what is shown. Owner: everything, incl. waiting photos and notes."""
+    ids = [x.id for x in rows]
+    placed = payments.active_placements(db, ids)
+    shots = photos.photos_map(db, ids, owner=owner)
+    out = []
+    for x in rows:
+        pics = shots.get(x.id, [])
+        update = {"promo": placed.get(x.id), "photos": pics,
+                  "cover": next((p["thumb"] for p in pics if p["status"] != "pending"), None)}
+        if not owner:
+            update.update(note="", has_edit=False, expires_at=None)
+        out.append(ListingOut.model_validate(x).model_copy(update=update))
+    return out
 
 
 @router.get("/api/catalog")
@@ -163,10 +176,13 @@ def cities(category: str | None = None, db: Session = Depends(get_db)):
 
 
 @router.get("/api/listings/{listing_id}", response_model=ListingOut)
-def listing_detail(listing_id: int, db: Session = Depends(get_db)):
+def listing_detail(listing_id: int, request: Request, db: Session = Depends(get_db)):
     item = db.get(Listing, listing_id)
     if item is None or item.status != "approved":
         raise HTTPException(404, "Объявление не найдено или снято с публикации")
+    if guard.first_view(request, listing_id):  # one view per visitor per hour, not per refresh
+        item.views = (item.views or 0) + 1
+        db.commit()
     return with_promo(db, [item])[0]
 
 

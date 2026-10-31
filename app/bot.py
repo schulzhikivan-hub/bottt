@@ -8,7 +8,7 @@ from aiogram.types import (
 )
 from sqlalchemy import select
 
-from app import payments, webauth
+from app import lifecycle, payments, webauth
 from app.botadmin import register_admin
 from app.config import settings
 from app.database import SessionLocal
@@ -262,10 +262,18 @@ async def notify_author(bot: Bot, item: Listing, text: str) -> None:
 
 
 def _expire_once() -> list[tuple[str, str]]:
-    """End finished placements. Returns (user_id, message) pairs to notify."""
+    """End finished placements and listings, warn about listings ending soon. Returns (user_id, message) pairs."""
     with SessionLocal() as db:
-        ended = payments.expire_placements(db)
         messages = []
+        for item in lifecycle.expiring_soon(db):
+            messages.append((item.author_telegram_id,
+                             f"Объявление «{item.title}» закончится через несколько дней. "
+                             "Продлите его: Профиль → Мои объявления → Продлить."))
+        for item in lifecycle.expire_listings(db):
+            messages.append((item.author_telegram_id,
+                             f"Срок объявления «{item.title}» истёк, его больше не видно в поиске. "
+                             "Продлить можно в приложении: Профиль → Мои объявления."))
+        ended = payments.expire_placements(db)
         for placement in ended:
             listing = db.get(Listing, placement.listing_id)
             if listing is None or not listing.author_telegram_id.isdigit():

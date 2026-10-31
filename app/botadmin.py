@@ -11,11 +11,12 @@ from sqlalchemy import select, func, desc
 from sqlalchemy.orm import Session
 
 from app import admin_ops as ops
-from app import payments
+from app import lifecycle, payments
+from app.photos import photo_root
 from app.admin_auth import MOD, ADM, SUP, ROLES
 from app.audit import log_action
 from app.dating import age_of, upload_root
-from app.models import (Admin, AuditLog, DatingProfile, Listing, Payment, Pricing, Report, User)
+from app.models import (Admin, AuditLog, DatingProfile, Listing, ListingPhoto, Payment, Pricing, Report, User)
 
 CATEGORY = {"job": "Работа", "housing": "Жильё", "marketplace": "Барахолка"}
 BACK = [("⬅️ В меню", "a:menu")]
@@ -55,7 +56,7 @@ def _short(text: str, limit: int) -> str:
 
 def menu(db: Session, role: str) -> Reply:
     rows = [
-        [(f"📋 Объявления ({_count(db, Listing, Listing.status == 'pending')})", "a:L"),
+        [(f"📋 Объявления ({_count(db, Listing, ops.queue_condition())})", "a:L"),
          (f"💗 Анкеты ({_count(db, DatingProfile, DatingProfile.status == 'pending')})", "a:D")],
         [(f"🚩 Жалобы ({_count(db, Report, Report.status == 'new')})", "a:R"),
          (f"🏢 Работодатели ({_count(db, User, User.employer_status == 'pending')})", "a:E")],
@@ -68,17 +69,73 @@ def menu(db: Session, role: str) -> Reply:
     return Reply("🛠 Админ-панель KOREA HUB\nВаша роль: " + role + "\nВыберите раздел:", rows)
 
 
+FIELD_LABELS = {"title": "Название", "description": "Описание", "contact": "Контакт", "price": "Пометка к цене",
+                "price_amount": "Сумма", "city": "Место", "region_code": "Регион", "district_id": "Район",
+                "details": "Подробности"}
+
+
+def _facts(item: Listing) -> str:
+    """Key facts a moderator needs: pay or price, visas, schedule, company…"""
+    d = item.details or {}
+    bits = []
+    if item.price_amount is not None:
+        bits.append(f"{item.price_amount:,}".replace(",", " ") + " ₩")
+    if item.category == "job":
+        bits += [x for x in (d.get("company"), d.get("position"), item.schedule, item.employment) if x]
+        if item.visas:
+            bits.append("визы " + item.visas.strip(","))
+        bits += [lbl for ok, lbl in ((item.housing_provided, "жильё"), (item.meals_provided, "питание")) if ok]
+    elif item.category == "housing":
+        bits += [str(x) for x in (item.housing_type, f"залог {item.deposit:,}".replace(",", " ") if item.deposit else None,
+                                  f"{item.area_m2} м²" if item.area_m2 else None, d.get("station")) if x]
+    else:
+        bits += [x for x in (item.goods_category, item.condition, d.get("brand")) if x]
+    return " · ".join(bits) or "—"
+
+
+def _edit_lines(item: Listing, db: Session) -> str:
+    lines = []
+    for key, new in (item.pending_changes or {}).items():
+        old = getattr(item, key, None)
+        lines.append(f"• {FIELD_LABELS.get(key, key)}: {_short(str(old), 60)} → {_short(str(new), 120)}")
+    waiting = db.scalars(select(ListingPhoto).where(ListingPhoto.listing_id == item.id,
+                                                    ListingPhoto.status.in_(["pending", "removal"]))).all()
+    added = sum(1 for p in waiting if p.status == "pending")
+    removed = len(waiting) - added
+    if added or removed:
+        lines.append(f"• Фото: +{added} / −{removed}")
+    return "\n".join(lines) or "• без изменений текста"
+
+
+def _listing_photo(item: Listing, db: Session) -> Path | None:
+    """The first photo a moderator should look at (waiting ones first on an edit)."""
+    rows = db.scalars(select(ListingPhoto).where(ListingPhoto.listing_id == item.id,
+                                                 ListingPhoto.status.in_(["pending", "live"]))
+                      .order_by(ListingPhoto.status.desc(), ListingPhoto.position)).all()
+    for p in rows:
+        path = photo_root() / f"{p.key}.jpg"
+        if path.exists():
+            return path
+    return None
+
+
 def listing_queue(db: Session, header: str = "") -> Reply:
-    item = db.scalar(select(Listing).where(Listing.status == "pending").order_by(Listing.id).limit(1))
-    waiting = _count(db, Listing, Listing.status == "pending")
+    item = db.scalar(select(Listing).where(ops.queue_condition()).order_by(Listing.id).limit(1))
+    waiting = _count(db, Listing, ops.queue_condition())
     if item is None:
         return Reply(header + "Очередь объявлений пуста ✅", [BACK])
-    text = (f"{header}📋 Объявление #{item.id} (в очереди: {waiting})\n"
-            f"{CATEGORY.get(item.category, item.category)} · {item.city} · {item.price or 'цена не указана'}\n"
-            f"Заголовок: {_short(item.title, 160)}\n\n{_short(item.description, 900)}\n\n"
-            f"Контакт: {item.contact or '—'}\nАвтор: {item.author_telegram_id}")
-    return Reply(text, [[("✅ Одобрить", f"a:L:ok:{item.id}"), ("✏️ Доработать", f"a:L:fix:{item.id}")],
-                        [("❌ Отклонить", f"a:L:no:{item.id}")], BACK])
+    edit = item.status == "approved" and item.has_edit
+    no_photo = (not edit) and lifecycle.needs_photo(db, item)
+    title = "✏️ Правка опубликованного" if edit else "📋 Объявление"
+    body = (f"Что меняется:\n{_edit_lines(item, db)}" if edit else
+            f"Заголовок: {_short(item.title, 160)}\n\n{_short(item.description, 800)}")
+    text = (f"{header}{title} #{item.id} (в очереди: {waiting})\n"
+            f"{CATEGORY.get(item.category, item.category)} · {item.city}\n{_facts(item)}\n\n{body}\n\n"
+            f"Контакт: {item.contact or '—'}\nАвтор: {item.author_telegram_id}"
+            + ("\n\n⚠️ Нет фото: для этого раздела они обязательны, одобрить нельзя" if no_photo else ""))
+    first = [] if no_photo else [("✅ " + ("Одобрить правку" if edit else "Одобрить"), f"a:L:ok:{item.id}")]
+    return Reply(text, [first + [("✏️ Доработать", f"a:L:fix:{item.id}")], [("❌ Отклонить", f"a:L:no:{item.id}")], BACK],
+                 photo=_listing_photo(item, db))
 
 
 def dating_queue(db: Session, header: str = "") -> Reply:
@@ -204,9 +261,12 @@ def _handle(db: Session, admin_id: int, role: str, parts: list[str]) -> Reply:
                               else "Напишите причину отказа (автор её увидит)") + ", или /cancel:",
                              state={"kind": f"listing_{action}", "id": int(arg)})
             if action == "ok":
+                before = db.get(Listing, int(arg))
+                was_edit = bool(before and before.status == "approved" and before.has_edit)
                 item = ops.moderate_listing(db, actor, int(arg), "approve")
-                reply = listing_queue(db, f"✅ #{item.id} опубликовано\n\n")
-                reply.notify.append((item.author_telegram_id, f"Ваше объявление «{_short(item.title, 60)}» одобрено и опубликовано."))
+                reply = listing_queue(db, f"✅ #{item.id} {'правка опубликована' if was_edit else 'опубликовано'}\n\n")
+                reply.notify.append((item.author_telegram_id, f"Ваше объявление «{_short(item.title, 60)}»: " +
+                                     ("изменения одобрены и опубликованы." if was_edit else "одобрено и опубликовано.")))
                 return reply
             return listing_queue(db)
         if section == "D":
@@ -294,9 +354,12 @@ def _handle_text(db: Session, admin_id: int, role: str, text: str) -> Reply | No
     kind = state["kind"]
     try:
         if kind in ("listing_fix", "listing_no"):
+            before = db.get(Listing, state["id"])
+            was_edit = bool(before and before.status == "approved" and before.has_edit)
             item = ops.moderate_listing(db, actor, state["id"], "needs_fix" if kind == "listing_fix" else "reject", text)
             PENDING_INPUT.pop(admin_id, None)
-            word = "нужно исправить" if kind == "listing_fix" else "отклонено"
+            word = ("правка отклонена, объявление осталось опубликованным" if was_edit
+                    else "нужно исправить" if kind == "listing_fix" else "отклонено")
             reply = listing_queue(db, f"{'✏️ Возвращено на доработку' if kind == 'listing_fix' else '❌ Отклонено'}: #{item.id}\n\n")
             reply.notify.append((item.author_telegram_id,
                                  f"Объявление «{_short(item.title, 60)}»: {word}.\nКомментарий: {item.note}"))

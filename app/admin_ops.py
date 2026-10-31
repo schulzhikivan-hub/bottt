@@ -5,9 +5,10 @@ so the bot and the API can never disagree.
 """
 from datetime import timedelta
 
-from sqlalchemy import select, func
+from sqlalchemy import select, func, or_, and_
 from sqlalchemy.orm import Session
 
+from app import lifecycle
 from app.audit import log_action
 from app.models import Listing, Report, User, DatingProfile, Payment
 from app.payments import now, aware
@@ -22,8 +23,16 @@ class OpError(Exception):
         self.message = message
 
 
+def queue_condition():
+    """What moderators look at: new listings and waiting edits of published ones."""
+    return or_(Listing.status == "pending", and_(Listing.status == "approved", Listing.has_edit.is_(True)))
+
+
 def moderate_listing(db: Session, actor: str, listing_id: int, decision: str, reason: str = "") -> Listing:
-    """decision: approve | reject (reason required) | needs_fix (comment required)."""
+    """decision: approve | reject (reason required) | needs_fix (comment required).
+
+    For a published listing with a waiting edit, approve publishes the edit and reject/needs_fix drops it
+    (the published version stays); for a new listing they publish or return it as before."""
     if decision not in {"approve", "reject", "needs_fix"}:
         raise OpError(400, "Решение: approve, reject или needs_fix")
     if decision in {"reject", "needs_fix"} and len(reason.strip()) < 3:
@@ -32,8 +41,21 @@ def moderate_listing(db: Session, actor: str, listing_id: int, decision: str, re
     if item is None:
         raise OpError(404, "Объявление не найдено")
     before = item.status
-    item.status = {"approve": "approved", "reject": "rejected", "needs_fix": "needs_fix"}[decision]
-    item.note = "" if decision == "approve" else reason.strip()
+    if item.status == "approved" and item.has_edit:
+        if decision == "approve":
+            lifecycle.apply_edit(db, item)
+        else:
+            lifecycle.reject_edit(db, item, reason.strip())
+        log_action(db, actor, f"listing.edit_{decision}", "listing", listing_id, reason)
+        db.commit()
+        return item
+    if decision == "approve":
+        if lifecycle.needs_photo(db, item):
+            raise OpError(400, "Для этого раздела нужно хотя бы одно фото")
+        lifecycle.publish(db, item)
+    else:
+        item.status = {"reject": "rejected", "needs_fix": "needs_fix"}[decision]
+        item.note = reason.strip()
     log_action(db, actor, f"listing.{decision}", "listing", listing_id, f"{before} -> {item.status}: {reason}")
     db.commit()
     return item

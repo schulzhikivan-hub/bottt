@@ -39,6 +39,7 @@ class ListingCreate(BaseModel):
     goods_category: GoodsCategory | None = None
     negotiable: bool | None = None
     details: dict | None = None  # descriptive details, validated per section (see app/fields.py)
+    draft: bool = False  # save without sending to moderation; "submit" sends it
 
 
 class ListingOut(BaseModel):
@@ -71,6 +72,12 @@ class ListingOut(BaseModel):
     goods_category: str | None = None
     negotiable: bool | None = None
     details: dict = {}
+    photos: list[dict] = []  # {id, url, thumb, status}; the first one is the cover
+    cover: str | None = None
+    views: int = 0
+    has_edit: bool = False  # owner only: changes wait for a moderator
+    published_at: datetime | None = None
+    expires_at: datetime | None = None  # owner only
     promo: str | None = None  # active paid placement: pin, vip, bump, highlight
     created_at: datetime | None = None
 

@@ -90,6 +90,13 @@
     <div><b id="sChats">0</b><small>диалогов</small></div>
   </div>
   <div class="section-head"><div><h2>Мои объявления</h2></div></div>
+  <div class="chips" id="ownChips">
+    <button class="chip active" data-own-filter="all">Все</button>
+    <button class="chip" data-own-filter="active">Активные</button>
+    <button class="chip" data-own-filter="review">На проверке</button>
+    <button class="chip" data-own-filter="draft">Черновики</button>
+    <button class="chip" data-own-filter="closed">Закрытые</button>
+  </div>
   <div id="myListings" class="listings"></div>
   <div class="menu-list">
     <button class="wide" data-menu="favorites">♡ Избранное</button>
@@ -225,7 +232,11 @@
 </div>
 <label>Описание<textarea name="description" rows="3" maxlength="4000" placeholder="Подробности. Телефон и ссылки пишите в поле «Контакт»"></textarea></label>
 <label>Контакт<input name="contact" maxlength="160" placeholder="@username или телефон"></label>
-<button class="submit" type="submit">Отправить на проверку</button></form></div></div>
+<label>Фото (до 10)</label>
+<div class="photos" id="photoPreview"></div>
+<p class="muted" id="photoHint">Для жилья и товаров нужно хотя бы одно фото.</p>
+<button class="submit" type="submit" id="sendBtn">Отправить на проверку</button>
+<button class="submit ghost" type="button" id="draftBtn">Сохранить черновик</button></form></div></div>
 
 <div id="filters" class="modal hidden"><div class="sheet"><div class="sheet-top"><b>Фильтры</b><button id="closeFilters">✕</button></div>
 <form id="filterForm">

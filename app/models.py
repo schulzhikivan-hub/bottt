@@ -75,7 +75,7 @@ class Listing(Base):
     contact: Mapped[str] = mapped_column(String(160), default="")
     author_telegram_id: Mapped[str] = mapped_column(String(40), default="", index=True)
     # pending, approved, rejected, hidden (hidden = reports or author deletion)
-    # pending, approved, rejected, needs_fix, hidden, closed, sold, archived
+    # draft, pending, approved, rejected, needs_fix, hidden, closed, sold, expired, archived
     status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
     note: Mapped[str] = mapped_column(String(300), default="")
     # Searchable fields (filters and sorting need numbers and flags, not free text)
@@ -97,6 +97,14 @@ class Listing(Base):
     goods_category: Mapped[str | None] = mapped_column(String(16), nullable=True)  # goods
     negotiable: Mapped[bool | None] = mapped_column(Boolean, nullable=True)        # goods
     details: Mapped[dict | None] = mapped_column(JSON, nullable=True)              # descriptive, not filtered
+    # Life cycle: draft -> pending -> approved -> (expired | closed | sold | archived)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    expiry_notified: Mapped[bool] = mapped_column(Boolean, default=False)
+    views: Mapped[int] = mapped_column(Integer, default=0)
+    # Edits of a published listing wait for a moderator while the old version stays visible
+    pending_changes: Mapped[dict | None] = mapped_column(JSON(none_as_null=True), nullable=True)
+    has_edit: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     # Lower-case copies kept by the application, so search ignores case in any database locale
     search_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     city_key: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
@@ -294,3 +302,15 @@ class District(Base):
     kind: Mapped[str] = mapped_column(String(4))  # gu, si, gun
     label: Mapped[str] = mapped_column(String(100), index=True)
     sort: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class ListingPhoto(Base):
+    """A photo of a listing. Files are processed JPEGs named by an unguessable key (see app/photos.py)."""
+    __tablename__ = "listing_photos"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    listing_id: Mapped[int] = mapped_column(ForeignKey("listings.id", ondelete="CASCADE"), index=True)
+    key: Mapped[str] = mapped_column(String(40), unique=True)
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    # live: shown; pending: added to a published listing, waits for a moderator; removal: asked to delete
+    status: Mapped[str] = mapped_column(String(10), default="live", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

@@ -32,12 +32,13 @@ def test_admin_needs_session(client):
     assert r.status_code == 401
 
 
-def test_edit_sends_listing_back_to_moderation(client):
+def test_edit_of_a_published_listing_does_not_take_it_down(client):
     lid = publish(client)
     r = client.put(f"/api/listings/{lid}", json={"price": "40 000 ₩"}, headers=as_user(1))
     assert r.status_code == 200
-    assert r.json()["status"] == "pending"
-    assert all(x["id"] != lid for x in client.get("/api/listings").json())
+    assert r.json()["status"] == "approved" and r.json()["has_edit"] is True
+    shown = {x["id"]: x for x in client.get("/api/listings").json()}
+    assert lid in shown and shown[lid]["price"] != "40 000 ₩"  # visitors still see the old version
 
 
 def test_only_owner_can_edit(client):

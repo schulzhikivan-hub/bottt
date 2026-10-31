@@ -14,7 +14,7 @@ from app.config import settings
 from app.database import Base, engine, get_db, SessionLocal, migrate
 from app.models import (
     Listing, Favorite, Conversation, Message, User, Block, Report,
-    Pricing, Placement, Payment, Group, Article,
+    Pricing, Placement, Payment, Group, Article, ListingPhoto,
 )
 from app.schemas import (
     ListingCreate, ListingOut, MessageIn, MessageOut, ConversationOut,
@@ -29,6 +29,7 @@ from app.manage import router as manage_router
 from app.guard import rate_limit, check_text, duplicate_note, notify_user
 from app import admin_ops as ops
 from app import catalog
+from app import photos
 from app import geo
 from app import fields as listing_fields
 from app.users import get_or_create_user, writer, is_blocked_pair
@@ -50,6 +51,7 @@ app.include_router(manage_router)
 app.include_router(admin_auth_router)
 app.include_router(webauth_router)
 app.include_router(catalog.router)
+app.include_router(photos.router)
 app.include_router(geo.router)
 app.include_router(listing_fields.router)
 STATIC = Path(__file__).parent / "static"
@@ -146,6 +148,9 @@ def delete_me(user_id: str = Depends(current_user_id), db: Session = Depends(get
     user.consent_at = None
     for listing in db.scalars(select(Listing).where(Listing.author_telegram_id == user_id)).all():
         listing.status = "hidden"
+        for photo in db.scalars(select(ListingPhoto).where(ListingPhoto.listing_id == listing.id)).all():
+            photos.delete_files(photo.key)  # the author's photos are removed with the account
+            db.delete(photo)
     for fav in db.scalars(select(Favorite).where(Favorite.user_tg_id == user_id)).all():
         db.delete(fav)
     for msg in db.scalars(select(Message).where(Message.sender_tg_id == user_id)).all():
@@ -258,14 +263,14 @@ def create_listing(payload: ListingCreate, user_id: str = Depends(writer), db: S
         select(func.count()).select_from(Listing).where(
             Listing.author_telegram_id == user_id,
             Listing.category == payload.category,
-            Listing.status.in_(["pending", "approved"]),
+            Listing.status.in_(["draft", "pending", "approved"]),
         )
     )
     if active >= MAX_ACTIVE_PER_CATEGORY:
         raise HTTPException(409, f"Лимит: не больше {MAX_ACTIVE_PER_CATEGORY} активных объявлений в разделе")
-    data = catalog.clean_extras(payload.category, payload.model_dump(exclude={"city", "region_code", "district_id"}))
+    data = catalog.clean_extras(payload.category, payload.model_dump(exclude={"city", "region_code", "district_id", "draft"}))
     item = Listing(**data, city=place.label, region_code=place.region_code, district_id=place.district_id,
-                   author_telegram_id=user_id, status="pending")
+                   author_telegram_id=user_id, status="draft" if payload.draft else "pending")
     db.add(item)
     db.commit()
     db.refresh(item)
@@ -279,9 +284,10 @@ def create_listing(payload: ListingCreate, user_id: str = Depends(writer), db: S
 
 @app.get("/api/me/listings", response_model=list[ListingOut])
 def my_listings(user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
-    return db.scalars(
+    rows = db.scalars(
         select(Listing).where(Listing.author_telegram_id == user_id).order_by(Listing.id.desc()).limit(100)
     ).all()
+    return catalog.with_promo(db, list(rows), owner=True)
 
 
 # ---------- Favorites ----------
@@ -302,13 +308,14 @@ def toggle_favorite(listing_id: int, user_id: str = Depends(writer), db: Session
 
 @app.get("/api/favorites", response_model=list[ListingOut])
 def my_favorites(user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
-    return db.scalars(
+    rows = db.scalars(
         select(Listing)
         .join(Favorite, Favorite.listing_id == Listing.id)
         .where(Favorite.user_tg_id == user_id, Listing.status == "approved")
         .order_by(desc(Favorite.id))
         .limit(100)
     ).all()
+    return catalog.with_promo(db, list(rows))
 
 
 # ---------- Chats ----------
@@ -489,9 +496,12 @@ def get_article(article_id: int, db: Session = Depends(get_db)):
 
 # ---------- Admin ----------
 
-@app.get("/api/admin/listings", response_model=list[ListingOut])
+@app.get("/api/admin/listings")
 def pending_listings(actor: str = Depends(staff(*MOD)), db: Session = Depends(get_db)):
-    return db.scalars(select(Listing).where(Listing.status == "pending").order_by(Listing.id)).all()
+    """New listings and waiting edits. For an edit, pending_changes shows what would change."""
+    rows = list(db.scalars(select(Listing).where(ops.queue_condition()).order_by(Listing.id)).all())
+    shown = catalog.with_promo(db, rows, owner=True)
+    return [{**o.model_dump(mode="json"), "pending_changes": x.pending_changes} for o, x in zip(shown, rows)]
 
 
 @app.post("/api/admin/listings/{listing_id}/{decision}")

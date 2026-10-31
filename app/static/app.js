@@ -9,7 +9,7 @@ const CAT = {job: "Работа", housing: "Жильё", marketplace: "Бара�
 const STATUS = {pending: ["На модерации", "pending"], approved: ["Опубликовано", "approved"],
                 rejected: ["Отклонено", "rejected"], needs_fix: ["Нужно исправить", "pending"],
                 hidden: ["Скрыто", "rejected"], closed: ["Закрыто", "rejected"], sold: ["Продано", "approved"],
-                archived: ["В архиве", "rejected"]};
+                archived: ["В архиве", "rejected"], draft: ["Черновик", "pending"], expired: ["Срок истёк", "rejected"]};
 const REASONS = {fraud: "Мошенничество", fake: "Поддельное объявление", spam: "Спам",
                  offensive: "Оскорбления", inappropriate: "Неприемлемый контент", rights: "Нарушение прав",
                  minor: "Несовершеннолетний", profile: "Жалоба на профиль"};
@@ -29,6 +29,11 @@ let favIds = new Set();
 let ownItems = {};
 let datingGender = "";
 let currentEditId = null;
+let formPhotos = [];   // уже загруженные: {id, thumb, status}
+let formFiles = [];    // новые файлы, ещё не отправленные
+let removedPhotos = [];
+let ownFilter = "all";
+let mineAll = [];
 
 // ---------- запросы ----------
 // Внутри Telegram вход автоматический (подпись initData). На сайте: сессия после входа через бота.
@@ -37,7 +42,7 @@ async function api(path, options = {}) {
   const headers = {};
   if (inTelegram) headers["X-Telegram-Init-Data"] = tg.initData;
   else if (localStorage.getItem("webSession")) headers["X-Web-Session"] = localStorage.getItem("webSession");
-  if (options.body) headers["Content-Type"] = "application/json";
+  if (options.body && typeof options.body === "string") headers["Content-Type"] = "application/json";
   const r = await fetch(path, {...options, headers: {...headers, ...(options.headers || {})}});
   let data = null;
   try { data = await r.json(); } catch (e) { data = null; }
@@ -218,6 +223,7 @@ function specs(x) {
 function listingCard(x) {
   const fav = favIds.has(x.id);
   return `<article class="listing ${x.promo === "highlight" ? "hl" : ""}" data-id="${x.id}" data-cat="${x.category}" data-open="${x.id}">
+    ${x.cover ? `<img class="cover" src="${esc(x.cover)}" alt="" loading="lazy">` : ""}
     ${promoBadge(x)}
     <h3>${esc(x.title)}</h3>
     <div class="meta">📍 ${esc(x.city)} · ${esc(CAT[x.category] || x.category)}</div>
@@ -378,6 +384,7 @@ async function openDetail(id, push = true) {
     const {phone, user} = contactLinks(x.contact);
     const fav = favIds.has(x.id);
     $("#detailBody").innerHTML = `<article class="detail" data-id="${x.id}" data-cat="${x.category}">
+      ${(x.photos || []).length ? `<div class="gallery">${x.photos.map((p) => `<img src="${esc(p.url)}" alt="" loading="lazy">`).join("")}</div>` : ""}
       ${promoBadge(x)}
       <h1>${esc(x.title)}</h1>
       <div class="meta">📍 ${esc(x.city)} · ${esc(CAT[x.category] || x.category)}</div>
@@ -486,7 +493,9 @@ $("#chatForm").onsubmit = async (e) => {
 const STATUS_BADGE = (x) => `<span class="status ${STATUS[x.status]?.[1] || ""}">${STATUS[x.status]?.[0] || esc(x.status)}</span>`;
 function ownCard(x) {
   const acts = [];
-  if (["pending", "approved", "rejected", "needs_fix"].includes(x.status)) acts.push('<button data-own="edit">✏️ Изменить</button>');
+  if (x.status === "draft") acts.push('<button data-own="submit">Отправить на проверку</button>');
+  if (["draft", "pending", "approved", "rejected", "needs_fix"].includes(x.status)) acts.push('<button data-own="edit" class="secondary">✏️ Изменить</button>');
+  if (["approved", "expired"].includes(x.status)) acts.push('<button data-own="renew">🔄 Продлить</button>');
   if (x.status === "approved") {
     acts.push('<button data-own="close" class="secondary">Закрыть</button>');
     if (x.category === "marketplace") acts.push('<button data-own="sold" class="secondary">Продано</button>');
@@ -495,11 +504,27 @@ function ownCard(x) {
   if (["closed", "sold"].includes(x.status)) acts.push('<button data-own="reopen">Вернуть</button>');
   if (x.status !== "archived") acts.push('<button data-own="archive" class="secondary">Удалить</button>');
   const note = x.note ? `<p class="note">Комментарий модератора: ${esc(x.note)}</p>` : "";
+  const edit = x.has_edit ? '<p class="muted">Правка на проверке — пока видна прежняя версия</p>' : "";
+  const until = x.status === "approved" && x.expires_at ? ` · до ${esc(fmtDate(x.expires_at).split(",")[0])}` : "";
+  const meta = x.status === "approved" ? `<p class="meta-line">👁 ${x.views || 0}${until}</p>` : "";
   return `<article class="listing" data-id="${x.id}" data-cat="${x.category}">
+    ${x.cover ? `<img class="cover" src="${esc(x.cover)}" alt="" loading="lazy">` : ""}
     <div class="listing-top"><div><h3>${esc(x.title)}</h3><div class="meta">📍 ${esc(x.city)}</div></div>${STATUS_BADGE(x)}</div>
-    <div class="price">${esc(priceText(x))}</div>${note}
+    <div class="price">${esc(priceText(x))}</div>${meta}${edit}${note}
     <div class="actions">${acts.join("")}</div></article>`;
 }
+const OWN_GROUPS = {active: ["approved"], review: ["pending", "needs_fix", "rejected"], draft: ["draft"],
+                    closed: ["closed", "sold", "expired", "hidden"]};
+function renderOwn() {
+  const visible = mineAll.filter((x) => x.status !== "archived" && (ownFilter === "all" || OWN_GROUPS[ownFilter].includes(x.status)));
+  $("#myListings").innerHTML = visible.length ? visible.map(ownCard).join("")
+    : `<div class="empty">${mineAll.length ? "В этом разделе пока пусто" : "Вы ещё не публиковали объявления. Нажмите «+» внизу."}</div>`;
+}
+document.querySelectorAll("[data-own-filter]").forEach((b) => b.onclick = () => {
+  ownFilter = b.dataset.ownFilter;
+  document.querySelectorAll("[data-own-filter]").forEach((c) => c.classList.toggle("active", c === b));
+  renderOwn();
+});
 function fillProfileHead() {
   const u = tg?.initDataUnsafe?.user;
   if (!u) return;
@@ -518,8 +543,8 @@ async function loadProfile() {
     $("#sFav").textContent = favs.length;
     $("#sChats").textContent = convs.length;
     ownItems = Object.fromEntries(mine.map((x) => [x.id, x]));
-    $("#myListings").innerHTML = mine.length ? mine.filter((x) => x.status !== "archived").map(ownCard).join("")
-      : '<div class="empty">Вы ещё не публиковали объявления. Нажмите «+» внизу.</div>';
+    mineAll = mine;
+    renderOwn();
   } catch (e) { $("#myListings").innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
 }
 function renderPayments(rows) {
@@ -586,9 +611,47 @@ async function deleteMyAccount() {
 function updateFormBlocks() {
   const category = $("#formCategory").value;
   showBlocks("#listingForm", category);
+  $("#photoHint").textContent = ["housing", "marketplace"].includes(category)
+    ? "Для жилья и товаров нужно хотя бы одно фото." : "Фото по желанию.";
   $("#amountLabel").textContent = {job: "Зарплата от, ₩", housing: "Аренда в месяц, ₩", marketplace: "Цена, ₩"}[category] || "Сумма, ₩";
 }
 $("#formCategory").onchange = updateFormBlocks;
+function renderPhotos() {
+  const cells = formPhotos.map((p, i) => `<div class="ph" data-ph="${p.id}"><img src="${esc(p.thumb)}" alt="">
+      ${p.status === "pending" ? '<small>на проверке</small>' : ""}${i === 0 ? "<small>обложка</small>" : ""}
+      <button type="button" data-ph-del="${p.id}" aria-label="Удалить">×</button></div>`)
+    .concat(formFiles.map((f, i) => `<div class="ph"><img src="${esc(f.preview)}" alt="">
+      <button type="button" data-file-del="${i}" aria-label="Убрать">×</button></div>`));
+  if (formPhotos.length + formFiles.length < 10) cells.push('<label class="ph add">＋<input type="file" id="photoInput" accept="image/jpeg,image/png,image/webp" multiple hidden></label>');
+  $("#photoPreview").innerHTML = cells.join("");
+  const input = $("#photoInput");
+  if (input) input.onchange = () => {
+    for (const file of input.files) {
+      if (formPhotos.length + formFiles.length >= 10) break;
+      formFiles.push({file, preview: URL.createObjectURL(file)});
+    }
+    renderPhotos();
+  };
+  document.querySelectorAll("[data-file-del]").forEach((b) => b.onclick = () => { formFiles.splice(Number(b.dataset.fileDel), 1); renderPhotos(); });
+  document.querySelectorAll("[data-ph-del]").forEach((b) => b.onclick = () => {
+    const id = Number(b.dataset.phDel);
+    removedPhotos.push(id);
+    formPhotos = formPhotos.filter((p) => p.id !== id);
+    renderPhotos();
+  });
+}
+async function uploadPhotos(listingId) {
+  for (const id of removedPhotos) await api(`/api/listings/${listingId}/photos/${id}`, {method: "DELETE"});
+  for (const f of formFiles) {
+    const body = new FormData();
+    body.append("file", f.file);
+    await api(`/api/listings/${listingId}/photos`, {method: "POST", body});
+  }
+}
+function resetPhotos(list) {
+  formPhotos = list || []; formFiles = []; removedPhotos = [];
+  renderPhotos();
+}
 async function openAdd(category) {
   if (category === "dating") return openMyDating();
   await loadFields();
@@ -599,6 +662,7 @@ async function openAdd(category) {
   await setGeo("#formGeo", me?.region_code || "", me?.district_id || "");
   f.category.disabled = false;
   $("#modalTitle").textContent = "Новое объявление";
+  resetPhotos([]);
   updateFormBlocks();
   $("#addSheet").classList.add("hidden");
   $("#modal").classList.remove("hidden");
@@ -622,6 +686,7 @@ async function openEdit(item) {
   for (const k of ["transport", "experience", "delivery"]) f["d_" + k].checked = Boolean(d[k]);
   document.querySelectorAll("#listingForm [data-visas] input").forEach((c) => { c.checked = (item.visas || []).includes(c.value); });
   $("#modalTitle").textContent = "Изменить объявление";
+  resetPhotos((item.photos || []).filter((p) => p.status !== "removal"));
   updateFormBlocks();
   $("#modal").classList.remove("hidden");
 }
@@ -652,23 +717,34 @@ function listingPayload(f) {
   data.details = Object.fromEntries(Object.entries(details).filter(([, x]) => x !== undefined && x !== ""));
   return Object.fromEntries(Object.entries(data).filter(([, x]) => x !== undefined));
 }
-$("#listingForm").onsubmit = async (e) => {
-  e.preventDefault();
-  const data = listingPayload(e.target);
+async function saveListing(send) {
+  const f = $("#listingForm");
+  const data = listingPayload(f);
+  if (send && ["housing", "marketplace"].includes(data.category || f.category.value) && !formPhotos.length && !formFiles.length) {
+    toast("Добавьте хотя бы одно фото"); return;
+  }
   try {
-    if (currentEditId) {
+    let id = currentEditId;
+    const wasDraft = id ? ownItems[id]?.status === "draft" : true;
+    const wasLive = id ? ownItems[id]?.status === "approved" : false;
+    if (id) {
       delete data.category;
-      await api(`/api/listings/${currentEditId}`, {method: "PUT", body: JSON.stringify(data)});
-      toast("Изменения отправлены на модерацию");
+      await api(`/api/listings/${id}`, {method: "PUT", body: JSON.stringify(data)});
     } else {
-      await api("/api/listings", {method: "POST", body: JSON.stringify(data)});
-      toast("Объявление отправлено на модерацию");
+      data.draft = true;  // сначала черновик, чтобы загрузить фото; потом отправим на проверку
+      id = (await api("/api/listings", {method: "POST", body: JSON.stringify(data)})).id;
     }
+    await uploadPhotos(id);
+    if (send && wasDraft) await api(`/api/listings/${id}/submit`, {method: "POST"});
+    toast(!send ? "Черновик сохранён" : wasLive ? "Изменения отправлены на проверку" : "Отправлено на проверку");
     currentEditId = null;
     $("#modal").classList.add("hidden");
     showView("profile");
+    loadProfile();
   } catch (err) { toast(err.message); }
-};
+}
+$("#listingForm").onsubmit = (e) => { e.preventDefault(); saveListing(true); };
+$("#draftBtn").onclick = () => saveListing(false);
 $("#closeModal").onclick = () => $("#modal").classList.add("hidden");
 $("#addBtn").onclick = async () => { if (await requireConsent()) $("#addSheet").classList.remove("hidden"); };
 $("#closeAdd").onclick = () => $("#addSheet").classList.add("hidden");
@@ -871,7 +947,7 @@ document.addEventListener("click", async (e) => {
       if (act === "edit") { openEdit(item); return; }
       if (act === "promo") { await openServices(id, item.category); return; }
       if (act === "archive" && !(await confirmDialog("Удалить объявление? Его не будет видно другим."))) return;
-      await api(`/api/listings/${id}/${{close: "close", sold: "sold", reopen: "reopen", archive: "archive"}[act]}`, {method: "POST"});
+      await api(`/api/listings/${id}/${{close: "close", sold: "sold", reopen: "reopen", archive: "archive", renew: "renew", submit: "submit"}[act]}`, {method: "POST"});
       toast("Готово");
       homeLoaded = false;
       loadProfile();
