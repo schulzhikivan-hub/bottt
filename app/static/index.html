@@ -8,7 +8,7 @@
 <div class="shell">
 
 <header class="topbar">
-  <div class="brand"><div class="logo">🇰🇷</div><div><b>KOREA HUB</b><small>Всё для жизни в Корее</small></div></div>
+  <div class="brand"><div class="logo">🇰🇷</div><div><b>KOREA HUB</b><small>Бот для жизни в Корее</small></div></div>
   <button class="link" id="loginTop" hidden>Войти</button>
 </header>
 
@@ -16,10 +16,10 @@
 
 <!-- Главная: поиск, фильтры, все объявления -->
 <section id="view-home" class="view landing">
-  <div class="hero"><div class="hero-text"><span>한국에서 나은 삶</span><b>KOREA HUB</b><small>Работа, жильё, знакомства и полезная информация</small></div><div class="hero-flag">🇰🇷</div></div>
+  <div class="hero"><div class="skyline"></div><div class="hero-text"><span>한국에서 나은 삶</span><b>KOREA HUB</b></div></div>
   <div class="sticky">
     <div class="searchbar">
-      <input id="search" type="search" placeholder="Поиск объявлений" enterkeyhint="search" autocomplete="off">
+      <input id="search" type="search" placeholder="Поиск (работа, жильё, товары...)" enterkeyhint="search" autocomplete="off">
       <button class="icon-btn" id="filterBtn" aria-label="Фильтры">
         <svg viewBox="0 0 24 24"><path d="M4 6h9M19 6h1M4 12h3M13 12h7M4 18h11M21 18h-1"/><circle cx="16" cy="6" r="2.2"/><circle cx="10" cy="12" r="2.2"/><circle cx="18" cy="18" r="2.2"/></svg>
         <span class="badge" id="filterBadge" hidden>0</span>
@@ -31,14 +31,20 @@
       <button class="chip" data-cat="housing">🏠 Жильё</button>
       <button class="chip" data-cat="marketplace">🛍️ Барахолка</button>
     </div>
+    <div class="cathead" id="catHead"><button class="back-btn" id="catBack" aria-label="Назад">←</button><b id="catTitle"></b></div>
+    <div class="pillrow" id="pillRow"></div>
   </div>
+  <div class="goods" id="goodsGrid"></div>
   <div class="tiles">
-    <button class="t-job" data-tile="job"><i>💼</i>Работа</button>
-    <button class="t-housing" data-tile="housing"><i>🏠</i>Жильё</button>
-    <button class="t-market" data-tile="marketplace"><i>🛍️</i>Барахолка</button>
-    <button class="t-dating" data-view="dating"><i>💗</i>Знакомства</button>
-    <button class="t-comm" data-view="community"><i>👥</i>Сообщество</button>
-    <button class="t-guide" data-view="guide"><i>📘</i>Гид по Корее</button>
+    <button class="t-job" data-tile="job"><svg viewBox="0 0 24 24"><path d="M3 8h18v11H3zM9 8V5h6v3M3 13h18"/></svg>Работа</button>
+    <button class="t-housing" data-tile="housing"><svg viewBox="0 0 24 24"><path d="M3 11l9-8 9 8v9H3zM10 20v-6h4v6"/></svg>Жильё</button>
+    <button class="t-market" data-tile="marketplace"><svg viewBox="0 0 24 24"><path d="M5 8h14l-1 12H6zM9 8a3 3 0 0 1 6 0"/></svg>Барахолка</button>
+    <button class="t-dating" data-view="dating"><svg viewBox="0 0 24 24"><path d="M12 20s-8-4.800-8-10.500A4.500 4.500 0 0 1 12 7a4.500 4.500 0 0 1 8 2.500C20 15.200 12 20 12 20z"/></svg>Знакомства</button>
+    <button class="t-comm" data-view="community"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2.500"/><path d="M3 20a6 6 0 0 1 12 0M15 15a5 5 0 0 1 6 5"/></svg>Сообщество</button>
+    <button class="t-car" data-tile="marketplace" data-goods="auto"><svg viewBox="0 0 24 24"><path d="M4 16V12l2-5h12l2 5v4zM4 16v2h3v-2M17 16v2h3v-2M4 12h16"/><circle cx="8" cy="14" r=".6"/><circle cx="16" cy="14" r=".6"/></svg>Автомобили</button>
+    <button class="t-docs" data-section="visas"><svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6zM14 3v5h5M9 12h7M9 16h7"/></svg>Документы</button>
+    <button class="t-med" data-section="medicine"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="4"/><path d="M12 8v8M8 12h8"/></svg>Медицина</button>
+    <button class="t-info" data-view="guide"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.500v.5"/></svg>Полезное</button>
   </div>
   <div class="results-head">
     <span id="resultCount" class="rc">Загружаем…</span>
@@ -85,15 +91,31 @@
 <section id="view-profile" class="view" hidden>
   <div class="profile-head">
     <div class="avatar" id="pAvatar">👤</div>
-    <div class="who"><b id="pName">Мой профиль</b><small id="pCity"></small></div>
-    <button class="link" id="cityBtn">Город</button>
+    <b id="pName">Мой профиль</b><small id="pCity"></small>
+    <button class="link" id="cityBtn">Изменить город</button>
   </div>
   <div class="stats">
-    <div><b id="sListings">0</b><small>объявлений</small></div>
-    <div><b id="sFav">0</b><small>в избранном</small></div>
-    <div><b id="sChats">0</b><small>диалогов</small></div>
+    <div><b id="sListings">0</b><small>Объявления</small></div>
+    <div><b id="sApps">0</b><small>Отклики</small></div>
+    <div><b id="sFav">0</b><small>Избранное</small></div>
   </div>
-  <div class="section-head"><div><h2>Мои объявления</h2></div></div>
+  <div class="menu-list">
+    <button class="wide" data-menu="mine"><i>📋</i>Мои объявления</button>
+    <button class="wide" data-menu="applications"><i>📨</i>Мои отклики</button>
+    <button class="wide" data-menu="favorites"><i>♡</i>Избранное</button>
+    <button class="wide" data-menu="chats"><i>💬</i>Сообщения<em id="sChats">0</em></button>
+    <button class="wide" data-menu="searches"><i>🔔</i>Мои поиски</button>
+    <button class="wide" data-menu="visa"><i>🛂</i>Моя виза</button>
+    <button class="wide" data-menu="payments"><i>⭐</i>История платежей</button>
+    <button class="wide" data-menu="employer"><i>🏢</i>Статус работодателя</button>
+    <button class="wide" data-menu="blocks"><i>🚫</i>Заблокированные</button>
+    <button class="wide" data-menu="help"><i>❓</i>Помощь и правила</button>
+    <button class="wide" data-menu="export"><i>📄</i>Выгрузить мои данные</button>
+    <button class="wide danger" data-menu="logout" id="logoutItem" hidden><i>⎋</i>Выйти</button>
+    <button class="wide danger" data-menu="delete"><i>🗑</i>Удалить аккаунт</button>
+  </div>
+  <div id="menuBody" class="listings"></div>
+  <div class="section-head" id="mineHead"><div><h2>Мои объявления</h2></div></div>
   <div class="chips" id="ownChips">
     <button class="chip active" data-own-filter="all">Все</button>
     <button class="chip" data-own-filter="active">Активные</button>
@@ -102,41 +124,26 @@
     <button class="chip" data-own-filter="closed">Закрытые</button>
   </div>
   <div id="myListings" class="listings"></div>
-  <div class="menu-list">
-    <button class="wide" data-menu="favorites">♡ Избранное</button>
-    <button class="wide" data-menu="chats">💬 Сообщения</button>
-    <button class="wide" data-menu="applications">📨 Мои отклики</button>
-    <button class="wide" data-menu="searches">🔔 Мои поиски</button>
-    <button class="wide" data-menu="visa">🛂 Моя виза</button>
-    <button class="wide" data-menu="payments">⭐ История платежей</button>
-    <button class="wide" data-menu="employer">🏢 Статус работодателя</button>
-    <button class="wide" data-menu="blocks">🚫 Заблокированные</button>
-    <button class="wide" data-menu="help">❓ Помощь и правила</button>
-    <button class="wide" data-menu="logout" id="logoutItem" hidden>🚪 Выйти</button>
-    <button class="wide" data-menu="export">📄 Выгрузить мои данные</button>
-    <button class="wide danger" data-menu="delete">Удалить аккаунт</button>
-  </div>
-  <div id="menuBody" class="listings"></div>
 </section>
 
 <section id="view-dating" class="view" hidden>
-  <div class="section-head"><div><span class="eyebrow">ЗНАКОМСТВА 18+</span><h2>Анкеты</h2></div>
+  <div class="section-head"><div><h2>💗 Знакомства <small class="age">18+</small></h2></div>
     <button class="link" id="myDatingBtn">Моя анкета</button></div>
   <div class="chips" id="datingChips">
     <button class="chip active" data-gender="">Все</button>
     <button class="chip" data-gender="f">Девушки</button>
     <button class="chip" data-gender="m">Парни</button>
   </div>
-  <div id="datingList" class="listings" style="margin-top:10px"></div>
+  <div id="datingList" class="dgrid"></div>
 </section>
 
 <section id="view-community" class="view" hidden>
-  <div class="section-head"><div><span class="eyebrow">СООБЩЕСТВО</span><h2>Группы по странам</h2></div></div>
+  <div class="section-head"><div><h2>👥 Сообщество</h2></div></div>
   <div id="groups" class="listings"></div>
 </section>
 
 <section id="view-guide" class="view" hidden>
-  <div class="section-head"><div><span class="eyebrow">ГИД ПО КОРЕЕ</span><h2>Разделы</h2></div></div>
+  <div class="section-head"><div><h2>📘 Гид по Корее</h2></div></div>
   <div id="guideSections" class="listings"></div>
 </section>
 
@@ -153,8 +160,8 @@
     <svg viewBox="0 0 24 24"><path d="M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>Главная</button>
   <button data-view="saved">
     <svg viewBox="0 0 24 24"><path d="M12 20.500s-7.500-4.600-9.200-9.400A5.400 5.400 0 0 1 12 6.200a5.400 5.400 0 0 1 9.200 4.900c-1.700 4.800-9.200 9.400-9.200 9.400z"/></svg>Избранное</button>
-  <button class="add" id="addBtn" aria-label="Добавить">
-    <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+  <button class="addwrap" id="addBtn" aria-label="Добавить"><span class="addc">
+    <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></span>Добавить</button>
   <button data-view="chats">
     <svg viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.600 7.100L4 20.500l1.100-4.600A8 8 0 1 1 21 12z"/></svg>Чаты</button>
   <button data-view="profile">
@@ -177,7 +184,7 @@
 <button class="wide" data-add="dating">💗 Анкета знакомств</button>
 </div></div></div>
 
-<div id="modal" class="modal hidden"><div class="sheet"><div class="sheet-top"><b id="modalTitle">Новое объявление</b><button id="closeModal">✕</button></div>
+<div id="modal" class="modal page hidden"><div class="sheet"><div class="sheet-top"><button id="closeModal" aria-label="Назад">←</button><b id="modalTitle">Новое объявление</b><span></span></div>
 <form id="listingForm">
 <label>Раздел<select name="category" id="formCategory"><option value="job">Работа</option><option value="housing">Жильё</option><option value="marketplace">Барахолка</option></select></label>
 <label>Заголовок<input name="title" required minlength="3" maxlength="160" placeholder="Например: Работа на заводе"></label>
@@ -242,7 +249,7 @@
 <label>Фото (до 10)</label>
 <div class="photos" id="photoPreview"></div>
 <p class="muted" id="photoHint">Для жилья и товаров нужно хотя бы одно фото.</p>
-<button class="submit" type="submit" id="sendBtn">Отправить на проверку</button>
+<button class="submit" type="submit" id="sendBtn">Опубликовать</button>
 <button class="submit ghost" type="button" id="draftBtn">Сохранить черновик</button></form></div></div>
 
 <div id="filters" class="modal hidden"><div class="sheet"><div class="sheet-top"><b>Фильтры</b><button id="closeFilters">✕</button></div>

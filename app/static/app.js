@@ -265,7 +265,40 @@ function updateFilterUi() {
   $("#sortSelect").value = filters.sort;
   // Без поиска и фильтров показываем «витрину»: баннер и плитки разделов
   $("#view-home").classList.toggle("landing", !filters.q && !filters.category && n === 0);
+  renderCategoryHead();
 }
+const PILLS = {
+  job: [["Город", "region_code"], ["Зарплата", "price_min"], ["График", "schedule"], ["Жильё", "housing_provided"], ["Виза", "visa"]],
+  housing: [["Город", "region_code"], ["Цена", "price_max"], ["Тип жилья", "housing_type"], ["Комнат", "rooms_min"]],
+  marketplace: [["Город", "region_code"], ["Цена", "price_max"], ["Состояние", "condition"]],
+};
+const GOODS = [["phones", "Телефоны", "📱"], ["furniture", "Мебель", "🛋️"], ["appliances", "Техника", "🔌"], ["auto", "Авто", "🚗"],
+               ["clothes", "Одежда", "👕"], ["kids", "Детские", "🧸"], ["tools", "Инструменты", "🛠️"], ["other", "Разное", "📦"]];
+function renderCategoryHead() {
+  const cat = filters.category;
+  $("#catHead").hidden = !cat;
+  $("#pillRow").hidden = !cat;
+  $("#chips").hidden = Boolean(cat);
+  $("#goodsGrid").hidden = cat !== "marketplace";
+  if (!cat) return;
+  $("#catTitle").textContent = {job: "💼 Работа", housing: "🏠 Жильё", marketplace: "🛍️ Барахолка"}[cat];
+  $("#pillRow").innerHTML = PILLS[cat].map(([label, key]) =>
+    `<button class="pill-btn ${filters[key] ? "on" : ""}" data-pill>${label} ▾</button>`).join("");
+  document.querySelectorAll("[data-pill]").forEach((b) => b.onclick = openFilters);
+  if (cat === "marketplace") {
+    $("#goodsGrid").innerHTML = GOODS.map(([v, label, icon]) =>
+      `<button class="${filters.goods_category === v ? "on" : ""}" data-goods-cat="${v}"><i>${icon}</i>${label}</button>`).join("");
+    document.querySelectorAll("[data-goods-cat]").forEach((b) => b.onclick = () => {
+      filters.goods_category = filters.goods_category === b.dataset.goodsCat ? "" : b.dataset.goodsCat;
+      reloadCatalog();
+    });
+  }
+}
+$("#catBack").onclick = () => {
+  filters.category = "";
+  for (const k of SECTION_FILTERS) filters[k] = DEFAULT_FILTERS[k];
+  reloadCatalog();
+};
 
 async function loadCatalog(append = false) {
   if (page.loading) return;
@@ -311,6 +344,7 @@ document.querySelectorAll("#chips .chip").forEach((chip) => chip.addEventListene
 document.querySelectorAll("[data-tile]").forEach((t) => t.addEventListener("click", () => {
   filters.category = t.dataset.tile;
   for (const k of SECTION_FILTERS) filters[k] = DEFAULT_FILTERS[k];
+  if (t.dataset.goods) filters.goods_category = t.dataset.goods;
   reloadCatalog();
 }));
 $("#sortSelect").onchange = () => { filters.sort = $("#sortSelect").value; reloadCatalog(); };
@@ -432,25 +466,27 @@ async function openDetail(id, push = true) {
     const x = await api(`/api/listings/${id}`, {quiet: true});
     const {phone, user} = contactLinks(x.contact);
     const fav = favIds.has(x.id);
+    const photos = x.photos || [];
+    const top = photos.length
+      ? `<div class="gallery">${photos.map((p) => `<img src="${esc(p.url)}" alt="" loading="lazy">`).join("")}</div>`
+      : `<div class="nophoto">${CAT_ICON[x.category] || "📄"}</div>`;
     $("#detailBody").innerHTML = `<article class="detail" data-id="${x.id}" data-cat="${x.category}">
-      ${(x.photos || []).length ? `<div class="gallery">${x.photos.map((p) => `<img src="${esc(p.url)}" alt="" loading="lazy">`).join("")}</div>` : ""}
-      ${promoBadge(x)}
-      <h1>${esc(x.title)}</h1>
-      <div class="meta">📍 ${esc(x.city)} · ${esc(CAT[x.category] || x.category)}</div>
+      <div class="dphoto">${top}
+        <div class="dtools"><button data-act="fav" class="rnd" aria-label="В избранное">${fav ? "♥" : "♡"}</button>
+        <button data-act="share" class="rnd" aria-label="Поделиться">⤴</button></div></div>
+      <div class="dhead"><h1>${esc(x.title)}</h1>${promoBadge(x)}</div>
       <div class="price big">${esc(priceText(x))}</div>
+      <div class="meta">📍 ${esc(x.city)} · ${esc(CAT[x.category] || x.category)}</div>
       ${specs(x)}
+      <h3 class="dsub">Описание</h3>
       <p class="desc">${esc(x.description || "Подробности уточняйте у автора")}</p>
       ${authorBlock(x)}
       <p class="muted">Опубликовано: ${esc(fmtDate(x.created_at).split(",")[0] || "")}${x.contact && !phone && !user ? " · Контакт: " + esc(x.contact) : ""}</p>
-      <div class="cta">
-        ${x.category === "job" ? '<button class="primary" data-act="apply">Откликнуться</button>' : ""}
-        <button class="${x.category === "job" ? "secondary" : "primary"}" data-act="chat">Написать</button>
-        ${phone ? `<a class="btn secondary" href="tel:${esc(phone)}">Позвонить</a>` : ""}
-        ${user ? `<a class="btn secondary" data-tglink href="https://t.me/${esc(user)}" target="_blank" rel="noopener">Telegram автора</a>` : ""}
-      </div>
-      <div class="cta">
-        <button class="secondary" data-act="fav">${fav ? "♥ В избранном" : "♡ В избранное"}</button>
-        <button class="secondary" data-act="share">Поделиться</button>
+      <div class="cta col">
+        ${x.category === "job" ? '<button class="primary apply" data-act="apply">Откликнуться</button>' : ""}
+        <button class="primary" data-act="chat">💬 Написать</button>
+        ${phone ? `<a class="btn call" href="tel:${esc(phone)}">📞 Позвонить</a>` : ""}
+        ${user ? `<a class="btn call" data-tglink href="https://t.me/${esc(user)}" target="_blank" rel="noopener">Telegram автора</a>` : ""}
       </div>
       <button class="linkbtn" data-act="report">⚑ Пожаловаться</button>
     </article>`;
@@ -594,13 +630,15 @@ function fillProfileHead() {
   const u = tg?.initDataUnsafe?.user;
   if (!u) return;
   $("#pName").textContent = [u.first_name, u.last_name].filter(Boolean).join(" ") || "Мой профиль";
+  $("#pName").dataset.id = u.id || "";
   const initials = ((u.first_name || "?")[0] + ((u.last_name || "")[0] || "")).toUpperCase();
   $("#pAvatar").innerHTML = u.photo_url ? `<img src="${esc(u.photo_url)}" alt="">` : esc(initials);
 }
 async function loadProfile() {
   fillProfileHead();
   try {
-    const [user, mine, favs, convs] = await Promise.all([api("/api/me"), api("/api/me/listings"), api("/api/favorites"), api("/api/conversations")]);
+    const [user, mine, favs, convs, apps] = await Promise.all([api("/api/me"), api("/api/me/listings"), api("/api/favorites"), api("/api/conversations"), api("/api/me/applications")]);
+    $("#sApps").textContent = apps.length;
     me = user;
     favIds = new Set(favs.map((x) => x.id));
     $("#pCity").textContent = "Город: " + user.city;
@@ -623,6 +661,7 @@ async function openMenu(key) {
   const body = $("#menuBody");
   if (key === "favorites") return showView("saved");
   if (key === "chats") return showView("chats");
+  if (key === "mine") return $("#mineHead").scrollIntoView({behavior: "smooth", block: "start"});
   if (key === "payments") body.innerHTML = renderPayments(await api("/api/me/payments"));
   if (key === "applications") {
     const rows = await api("/api/me/applications");
@@ -754,7 +793,7 @@ async function openAdd(category) {
   f.category.value = category;
   await setGeo("#formGeo", me?.region_code || "", me?.district_id || "");
   f.category.disabled = false;
-  $("#modalTitle").textContent = "Новое объявление";
+  $("#modalTitle").textContent = {job: "Добавить вакансию", housing: "Добавить жильё", marketplace: "Добавить товар"}[category] || "Новое объявление";
   resetPhotos([]);
   updateFormBlocks();
   $("#addSheet").classList.add("hidden");
@@ -847,12 +886,12 @@ document.querySelectorAll("[data-add]").forEach((b) => b.onclick = () => openAdd
 async function loadGroups() {
   try {
     const items = await api("/api/groups");
-    $("#groups").innerHTML = items.map((g) => `
-      <article class="listing"><h3>${esc(g.flag)} ${esc(g.name)}</h3><p>${esc(g.description)}</p>
-      ${g.telegram_link
-        ? `<div class="actions"><a class="btn" data-tglink href="${esc(g.telegram_link)}" target="_blank" rel="noopener">Перейти в Telegram-группу</a></div>`
-        : '<p class="muted">Ссылка появится после проверки</p>'}
-      </article>`).join("");
+    $("#groups").innerHTML = items.map((g) => {
+      const inner = `<span class="gflag">${esc(g.flag)}</span><span class="gtext"><b>${esc(g.name)}</b><small>${esc(g.description)}</small></span><span class="chev">›</span>`;
+      return g.telegram_link
+        ? `<a class="grow" data-tglink href="${esc(g.telegram_link)}" target="_blank" rel="noopener">${inner}</a>`
+        : `<div class="grow off">${inner}</div>`;
+    }).join("");
   } catch (e) { $("#groups").innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
 }
 async function loadGuide() {
@@ -915,12 +954,11 @@ async function loadDating() {
   try {
     const items = await api("/api/dating?" + params);
     box.innerHTML = items.length ? items.map((p) => `
-      <article class="listing" data-profile="${p.id}">
-        <img class="photo" src="${esc(p.photo_url)}" alt="" loading="lazy">
-        <h3>${p.age} · ${p.gender === "f" ? "девушка" : "парень"}</h3>
-        <div class="meta">📍 ${esc(p.city)}</div><p>${esc(p.bio)}</p>
-        <div class="actions"><button data-act="like">♥ Нравится</button>
-        <button data-act="dreport" class="secondary">⚑ Пожаловаться</button></div>
+      <article class="dcard" data-profile="${p.id}">
+        <img src="${esc(p.photo_url)}" alt="" loading="lazy">
+        <button class="dh" data-act="like" aria-label="Нравится">♡</button>
+        <button class="dr" data-act="dreport" aria-label="Пожаловаться">⚑</button>
+        <div class="dinfo"><b>${p.age} лет</b><span>📍 ${esc(p.city)}</span></div>
       </article>`).join("")
       : '<div class="empty">Анкет пока нет. Загляните позже.</div>';
   } catch (e) { box.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
@@ -987,7 +1025,7 @@ document.addEventListener("click", async (e) => {
         r.favorited ? favIds.add(Number(id)) : favIds.delete(Number(id));
         document.querySelectorAll(`[data-id="${id}"] [data-act="fav"]`).forEach((b) => {
           if (b.classList.contains("fav")) { b.textContent = r.favorited ? "♥" : "♡"; b.classList.toggle("on", r.favorited); }
-          else b.textContent = r.favorited ? "♥ В избранном" : "♡ В избранное";
+          else b.textContent = b.classList.contains("rnd") ? (r.favorited ? "♥" : "♡") : (r.favorited ? "♥ В избранном" : "♡ В избранное");
         });
         toast(r.favorited ? "Добавлено в избранное" : "Убрано из избранного");
       }
