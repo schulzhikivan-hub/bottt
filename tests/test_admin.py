@@ -5,15 +5,14 @@ from app.config import settings
 from app.database import Base, engine
 from app.main import app
 from app import bot as bot_module
-from tests.tg import as_user
+from tests.tg import as_user, reset_db, accept_terms
 
 
 @pytest.fixture()
 def client():
-    assert engine.url.drivername == "sqlite", "Tests must run on SQLite only"
-    Base.metadata.drop_all(bind=engine)
-    Base.metadata.create_all(bind=engine)
+    reset_db()
     with TestClient(app) as c:
+        accept_terms(c, 42)
         yield c
 
 

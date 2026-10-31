@@ -1,10 +1,13 @@
 import asyncio
 
-from aiogram import Bot, Dispatcher
+from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart, Command, CommandObject
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
+from aiogram.types import (
+    Message, PreCheckoutQuery, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo,
+)
 from sqlalchemy import select
 
+from app import payments
 from app.config import settings
 from app.database import SessionLocal
 from app.models import Listing
@@ -24,8 +27,10 @@ STATUS_RU = {
     "pending": "на модерации",
     "approved": "опубликовано",
     "rejected": "отклонено",
+    "hidden": "скрыто",
 }
 CATEGORY_RU = {"job": "Работа", "housing": "Жильё", "marketplace": "Барахолка"}
+EXPIRY_CHECK_SECONDS = 300
 
 
 def admin_ids() -> set[int]:
@@ -129,6 +134,42 @@ def register(dp: Dispatcher, bot: Bot) -> None:
         await message.answer(f"Объявление #{item.id} отклонено.")
         await notify_author(bot, item, f"Ваше объявление отклонено. Причина: {parts[1]}")
 
+    # ---- Paid services (ТЗ № 2) ----
+
+    @dp.pre_checkout_query()
+    async def pre_checkout(query: PreCheckoutQuery):
+        # Telegram requires an answer within 10 seconds; the check is a quick DB lookup.
+        with SessionLocal() as db:
+            error = payments.check_pre_checkout(
+                db, query.invoice_payload, str(query.from_user.id), query.currency, query.total_amount)
+        await bot.answer_pre_checkout_query(query.id, ok=error is None, error_message=error)
+
+    @dp.message(F.successful_payment)
+    async def paid(message: Message):
+        sp = message.successful_payment
+        user_id = str(message.from_user.id)
+        try:
+            with SessionLocal() as db:
+                placement = payments.process_successful_payment(
+                    db, user_id, sp.invoice_payload, sp.telegram_payment_charge_id,
+                    sp.currency, sp.total_amount)
+                ends = payments.aware(placement.ends_at).strftime("%d.%m.%Y %H:%M")
+            await message.answer(f"Оплата получена. Услуга активна до {ends} UTC.")
+        except payments.PaymentError as exc:
+            # Money was taken but the service cannot be given: return the stars automatically (ТЗ § 10.5)
+            try:
+                await asyncio.to_thread(payments.telegram_call, "refundStarPayment", {
+                    "user_id": message.from_user.id,
+                    "telegram_payment_charge_id": sp.telegram_payment_charge_id,
+                })
+                with SessionLocal() as db:
+                    payments.mark_failed(db, sp.invoice_payload)
+                await message.answer(f"Услуга не активирована ({exc}). Оплата возвращена.")
+            except Exception:
+                await message.answer(
+                    f"Услуга не активирована ({exc}). Возврат не прошёл автоматически. "
+                    "Напишите в поддержку с номером платежа: " + sp.telegram_payment_charge_id)
+
 
 async def notify_author(bot: Bot, item: Listing, text: str) -> None:
     if not item.author_telegram_id.isdigit():
@@ -138,6 +179,34 @@ async def notify_author(bot: Bot, item: Listing, text: str) -> None:
     except Exception:
         # Пользователь мог заблокировать бота. Модерация уже сохранена, поэтому ошибку не поднимаем.
         pass
+
+
+def _expire_once() -> list[tuple[str, str]]:
+    """End finished placements. Returns (user_id, message) pairs to notify."""
+    with SessionLocal() as db:
+        ended = payments.expire_placements(db)
+        messages = []
+        for placement in ended:
+            listing = db.get(Listing, placement.listing_id)
+            if listing is None or not listing.author_telegram_id.isdigit():
+                continue
+            messages.append((listing.author_telegram_id,
+                             f"Срок услуги «{placement.kind}» для #{listing.id} {listing.title} закончился. "
+                             "Продлить можно в приложении: Профиль → Мои объявления."))
+        return messages
+
+
+async def expiry_loop(bot: Bot) -> None:
+    while True:
+        try:
+            for user_id, text in await asyncio.to_thread(_expire_once):
+                try:
+                    await bot.send_message(int(user_id), text)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        await asyncio.sleep(EXPIRY_CHECK_SECONDS)
 
 
 async def main():
@@ -151,7 +220,8 @@ async def main():
     await bot.delete_webhook(drop_pending_updates=True)
     dp = Dispatcher()
     register(dp, bot)
-    await dp.start_polling(bot)
+    asyncio.create_task(expiry_loop(bot))
+    await dp.start_polling(bot, allowed_updates=["message", "pre_checkout_query"])
 
 
 if __name__ == "__main__":

@@ -3,7 +3,7 @@ from fastapi.testclient import TestClient
 
 from app.database import Base, engine
 from app.main import app
-from tests.tg import as_user, make_init_data, TEST_BOT_TOKEN
+from tests.tg import as_user, make_init_data, TEST_BOT_TOKEN, reset_db, accept_terms
 
 PAYLOAD = {"category": "marketplace", "title": "Диван в хорошем состоянии", "city": "Сеул",
            "price": "150 000 ₩", "description": "Самовывоз", "contact": "@seller"}
@@ -12,10 +12,10 @@ ADMIN = {"X-Admin-Key": "test-admin-key"}
 
 @pytest.fixture()
 def client():
-    assert engine.url.drivername == "sqlite", "Tests must run on SQLite only"
-    Base.metadata.drop_all(bind=engine)
-    Base.metadata.create_all(bind=engine)
+    reset_db()
     with TestClient(app) as c:
+        for uid in (1, 2, 3, 5, 6):
+            accept_terms(c, uid)
         yield c
 
 

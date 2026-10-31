@@ -3,15 +3,15 @@ from fastapi.testclient import TestClient
 
 from app.database import Base, engine
 from app.main import app
-from tests.tg import as_user, make_init_data
+from tests.tg import as_user, make_init_data, reset_db, accept_terms
 
 
 @pytest.fixture()
 def client():
-    assert engine.url.drivername == "sqlite", "Tests must run on SQLite only"
-    Base.metadata.drop_all(bind=engine)
-    Base.metadata.create_all(bind=engine)
+    reset_db()
     with TestClient(app) as c:
+        for uid in (1, 2, 777):
+            accept_terms(c, uid)
         yield c
 
 

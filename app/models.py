@@ -1,11 +1,44 @@
 from datetime import datetime, timezone
-from sqlalchemy import String, Text, DateTime, Integer, ForeignKey, UniqueConstraint
+from sqlalchemy import String, Text, DateTime, Integer, ForeignKey, UniqueConstraint, Boolean
 from sqlalchemy.orm import Mapped, mapped_column
 from app.database import Base
 
 
 def _now():
     return datetime.now(timezone.utc)
+
+
+class User(Base):
+    __tablename__ = "users"
+    tg_id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    language: Mapped[str] = mapped_column(String(8), default="ru")
+    city: Mapped[str] = mapped_column(String(80), default="Сеул")
+    consent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    blocked: Mapped[bool] = mapped_column(Boolean, default=False)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class Block(Base):
+    """User-level block: blocker does not want contact with blocked."""
+    __tablename__ = "blocks"
+    __table_args__ = (UniqueConstraint("blocker_tg_id", "blocked_tg_id", name="uq_block"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    blocker_tg_id: Mapped[str] = mapped_column(String(40), index=True)
+    blocked_tg_id: Mapped[str] = mapped_column(String(40), index=True)
+
+
+class Report(Base):
+    __tablename__ = "reports"
+    __table_args__ = (UniqueConstraint("reporter_tg_id", "target_type", "target_id", name="uq_report"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    reporter_tg_id: Mapped[str] = mapped_column(String(40))
+    target_type: Mapped[str] = mapped_column(String(16))
+    target_id: Mapped[str] = mapped_column(String(40))
+    reason: Mapped[str] = mapped_column(String(40))
+    comment: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[str] = mapped_column(String(16), default="new", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
 class Listing(Base):
@@ -18,6 +51,7 @@ class Listing(Base):
     description: Mapped[str] = mapped_column(Text, default="")
     contact: Mapped[str] = mapped_column(String(160), default="")
     author_telegram_id: Mapped[str] = mapped_column(String(40), default="", index=True)
+    # pending, approved, rejected, hidden (hidden = reports or author deletion)
     status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
@@ -49,3 +83,65 @@ class Message(Base):
     sender_tg_id: Mapped[str] = mapped_column(String(40))
     text: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, index=True)
+
+
+class Pricing(Base):
+    """Paid services (ТЗ № 2). Prices are editable by administrators."""
+    __tablename__ = "pricing"
+    code: Mapped[str] = mapped_column(String(40), primary_key=True)  # e.g. job_vip
+    category: Mapped[str] = mapped_column(String(30))
+    kind: Mapped[str] = mapped_column(String(16))  # bump, vip, pin, highlight
+    title: Mapped[str] = mapped_column(String(80))
+    stars: Mapped[int] = mapped_column(Integer)
+    duration_days: Mapped[int] = mapped_column(Integer)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class Placement(Base):
+    """An active paid placement (VIP, pin, bump, highlight) on a listing."""
+    __tablename__ = "placements"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    listing_id: Mapped[int] = mapped_column(ForeignKey("listings.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String(16))
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(String(16), default="active", index=True)  # active, ended, refunded
+    payment_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    notified_end: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class Payment(Base):
+    __tablename__ = "payments"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_tg_id: Mapped[str] = mapped_column(String(40), index=True)
+    listing_id: Mapped[int] = mapped_column(ForeignKey("listings.id", ondelete="CASCADE"), index=True)
+    service_code: Mapped[str] = mapped_column(String(40))
+    stars: Mapped[int] = mapped_column(Integer)
+    payload: Mapped[str] = mapped_column(String(64), unique=True)
+    telegram_payment_charge_id: Mapped[str | None] = mapped_column(String(128), unique=True, nullable=True)
+    # pending, paid, refunded, failed
+    status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class Group(Base):
+    __tablename__ = "groups"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(120))
+    flag: Mapped[str] = mapped_column(String(8), default="")
+    telegram_link: Mapped[str] = mapped_column(String(255), default="")
+    description: Mapped[str] = mapped_column(Text, default="")
+    members_count: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class Article(Base):
+    """Guide and info articles. Shown only when published with a checked date."""
+    __tablename__ = "articles"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    section: Mapped[str] = mapped_column(String(40), index=True)
+    title: Mapped[str] = mapped_column(String(200))
+    body: Mapped[str] = mapped_column(Text, default="")
+    source_url: Mapped[str] = mapped_column(String(255), default="")
+    checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    published: Mapped[bool] = mapped_column(Boolean, default=False, index=True)

@@ -13,9 +13,9 @@
     <button data-cat="job" class="tile blue"><span>💼</span><b>Работа</b><small>Вакансии и подработка</small></button>
     <button data-cat="housing" class="tile green"><span>🏠</span><b>Жильё</b><small>Квартиры и комнаты</small></button>
     <button data-cat="marketplace" class="tile orange"><span>🛍️</span><b>Барахолка</b><small>Купить и продать</small></button>
-    <button class="tile pink" data-soon="Знакомства"><span>💗</span><b>Знакомства</b><small>Скоро</small></button>
-    <button class="tile violet" data-soon="Сообщество"><span>👥</span><b>Сообщество</b><small>Скоро</small></button>
-    <button class="tile teal" data-soon="Услуги"><span>🛠️</span><b>Услуги</b><small>Скоро</small></button>
+    <button class="tile violet" data-view="community"><span>👥</span><b>Сообщество</b><small>Группы по странам</small></button>
+    <button class="tile teal" data-view="guide"><span>📘</span><b>Гид</b><small>Визы, документы, жильё</small></button>
+    <button class="tile pink" data-soon="Знакомства"><span>💗</span><b>Знакомства</b><small>В разработке</small></button>
   </section>
   <div class="section-head"><div><span class="eyebrow">СВЕЖИЕ ПУБЛИКАЦИИ</span><h2 id="listTitle">Последние объявления</h2></div><button class="link" id="allBtn">Все →</button></div>
   <div id="listings" class="listings"><div class="empty">Загружаем объявления…</div></div>
@@ -40,6 +40,29 @@
 <section id="view-profile" hidden>
   <div class="section-head"><div><span class="eyebrow">ЛИЧНЫЙ КАБИНЕТ</span><h2>Мои объявления</h2></div></div>
   <div id="myListings" class="listings"></div>
+  <div class="section-head"><div><span class="eyebrow">ОПЛАТА</span><h2>История платежей</h2></div></div>
+  <div id="payments" class="listings"></div>
+  <div class="section-head"><div><span class="eyebrow">НАСТРОЙКИ</span><h2>Аккаунт</h2></div></div>
+  <div class="listings">
+    <button class="wide" id="blocksBtn">Заблокированные пользователи</button>
+    <button class="wide" id="exportBtn">Выгрузить мои данные</button>
+    <button class="wide danger" id="deleteBtn">Удалить аккаунт</button>
+  </div>
+</section>
+
+<section id="view-community" hidden>
+  <div class="section-head"><div><span class="eyebrow">СООБЩЕСТВО</span><h2>Группы по странам</h2></div></div>
+  <div id="groups" class="listings"></div>
+</section>
+
+<section id="view-guide" hidden>
+  <div class="section-head"><div><span class="eyebrow">ГИД ПО КОРЕЕ</span><h2>Разделы</h2></div></div>
+  <div id="guideSections" class="listings"></div>
+</section>
+
+<section id="view-article" hidden>
+  <div class="section-head"><div><button class="link" id="articleBack">← Назад</button><h2 id="articleTitle"></h2></div></div>
+  <div id="articleBody" class="listings"></div>
 </section>
 
 <nav class="bottom">
@@ -51,10 +74,20 @@
 </nav>
 </div>
 
+<div id="consent" class="modal hidden"><div class="sheet"><div class="sheet-top"><b>Добро пожаловать</b></div>
+<p>Чтобы публиковать объявления, писать и покупать услуги, примите правила:</p>
+<label class="check"><input type="checkbox" id="consentRules"> Я принимаю <a href="#" data-doc="terms">пользовательское соглашение</a></label>
+<label class="check"><input type="checkbox" id="consentPrivacy"> Я согласен на обработку данных по <a href="#" data-doc="privacy">политике конфиденциальности</a></label>
+<button class="submit" id="consentOk" type="button">Продолжить</button></div></div>
+
 <div id="modal" class="modal hidden"><div class="sheet"><div class="sheet-top"><b>Новое объявление</b><button id="closeModal">✕</button></div>
 <form id="listingForm"><label>Категория<select name="category"><option value="job">Работа</option><option value="housing">Жильё</option><option value="marketplace">Барахолка</option></select></label>
 <label>Заголовок<input name="title" required minlength="3" maxlength="160" placeholder="Например: Работа на заводе"></label><label>Город<input name="city" required maxlength="80" placeholder="Например: Асан"></label>
 <label>Цена / зарплата<input name="price" maxlength="80" placeholder="Например: 2 800 000 ₩/мес"></label><label>Описание<textarea name="description" rows="3" maxlength="4000" placeholder="Подробности объявления"></textarea></label><label>Контакт<input name="contact" maxlength="160" placeholder="Telegram или телефон"></label>
 <button class="submit" type="submit">Отправить на проверку</button></form></div></div>
+
+<div id="services" class="modal hidden"><div class="sheet"><div class="sheet-top"><b>Продвижение</b><button id="closeServices">✕</button></div>
+<div id="serviceList"></div></div></div>
+
 <div id="toast" class="toast"></div>
 <script src="/static/app.js"></script></body></html>
