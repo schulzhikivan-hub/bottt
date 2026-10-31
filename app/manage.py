@@ -7,12 +7,20 @@ from sqlalchemy.orm import Session
 from app.audit import log_action
 from app.admin_auth import staff, MOD, ADM, SUP
 from app.guard import check_text
+from app import admin_ops as ops
 from app.database import get_db
 from app.models import Listing, User, Block, Report
 from app.schemas import CATEGORIES, ListingOut
 from app.users import writer, get_or_create_user
 
 router = APIRouter()
+
+
+def _run(operation, *args):
+    try:
+        return operation(*args)
+    except ops.OpError as exc:
+        raise HTTPException(exc.status, exc.message)
 EDITABLE = {"pending", "approved", "rejected", "needs_fix"}
 
 
@@ -159,25 +167,13 @@ def admin_users(q: str = Query(default="", max_length=40), actor: str = Depends(
 
 @router.post("/api/admin/users/{tg_id}/block")
 def admin_block(tg_id: str, payload: ReasonIn, actor: str = Depends(staff(*MOD)), db: Session = Depends(get_db)):
-    user = db.get(User, tg_id)
-    if user is None:
-        raise HTTPException(404, "Пользователь не найден")
-    user.blocked = True
-    user.block_reason = payload.reason
-    log_action(db, actor, "user.block", "user", tg_id, payload.reason)
-    db.commit()
+    _run(ops.block_user, db, actor, tg_id, payload.reason)
     return {"tg_id": tg_id, "blocked": True}
 
 
 @router.post("/api/admin/users/{tg_id}/unblock")
 def admin_unblock(tg_id: str, payload: ReasonIn, actor: str = Depends(staff(*MOD)), db: Session = Depends(get_db)):
-    user = db.get(User, tg_id)
-    if user is None:
-        raise HTTPException(404, "Пользователь не найден")
-    user.blocked = False
-    user.block_reason = ""
-    log_action(db, actor, "user.unblock", "user", tg_id, payload.reason)
-    db.commit()
+    _run(ops.unblock_user, db, actor, tg_id, payload.reason)
     return {"tg_id": tg_id, "blocked": False}
 
 
@@ -191,14 +187,7 @@ def admin_employers(status: str = "pending", actor: str = Depends(staff(*MOD)), 
 @router.post("/api/admin/employers/{tg_id}/{decision}")
 def admin_employer_decision(tg_id: str, decision: str, actor: str = Depends(staff(*MOD)),
                             db: Session = Depends(get_db)):
-    if decision not in {"approve", "reject"}:
-        raise HTTPException(400, "Решение: approve или reject")
-    user = db.get(User, tg_id)
-    if user is None or user.employer_status != "pending":
-        raise HTTPException(404, "Заявка не найдена")
-    user.employer_status = "approved" if decision == "approve" else "rejected"
-    log_action(db, actor, f"employer.{decision}", "user", tg_id, user.company_name)
-    db.commit()
+    user = _run(ops.decide_employer, db, actor, tg_id, decision)
     return {"tg_id": tg_id, "employer_status": user.employer_status}
 
 

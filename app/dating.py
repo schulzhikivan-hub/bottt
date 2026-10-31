@@ -14,6 +14,7 @@ from app.models import DatingProfile, DatingLike, Conversation, User, Block
 from app.payments import now
 from app.users import writer, is_blocked_pair, get_or_create_user
 from app.audit import log_action
+from app import admin_ops as ops
 from app.admin_auth import staff, MOD, ADM, SUP
 from app.admin_auth import staff, MOD, ADM, SUP
 
@@ -197,14 +198,8 @@ def admin_photo(profile_id: int, actor: str = Depends(staff(*MOD)),
 @router.post("/api/admin/dating/{profile_id}/{decision}")
 def decide(profile_id: int, decision: str, actor: str = Depends(staff(*MOD)),
            db: Session = Depends(get_db)):
-    if decision not in {"approve", "reject"}:
-        raise HTTPException(400, "Decision must be approve or reject")
-    profile = db.get(DatingProfile, profile_id)
-    if profile is None:
-        raise HTTPException(404, "Анкета не найдена")
-    if decision == "approve" and profile.photo_key is None:
-        raise HTTPException(400, "Нельзя опубликовать анкету без фото")
-    profile.status = "published" if decision == "approve" else "rejected"
-    log_action(db, actor, f"dating.{decision}", "dating", profile_id, profile.status)
-    db.commit()
+    try:
+        profile = ops.decide_dating(db, actor, profile_id, decision)
+    except ops.OpError as exc:
+        raise HTTPException(exc.status, exc.message)
     return {"id": profile.id, "status": profile.status}

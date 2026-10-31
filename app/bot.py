@@ -9,6 +9,7 @@ from aiogram.types import (
 from sqlalchemy import select
 
 from app import payments, webauth
+from app.botadmin import register_admin
 from app.config import settings
 from app.database import SessionLocal
 from app.models import Listing, Admin
@@ -66,8 +67,8 @@ def is_staff(tg_id: int) -> bool:
 
 
 def admin_button() -> list[InlineKeyboardButton]:
-    base = settings.webapp_url.rstrip("/")
-    return [InlineKeyboardButton(text="🛠 Админ-панель", web_app=WebAppInfo(url=f"{base}/admin"))]
+    # Админка открывается в этом же чате, без сайта
+    return [InlineKeyboardButton(text="🛠 Админ-панель", callback_data="a:menu")]
 
 
 def menu_markup(staff: bool = False) -> InlineKeyboardMarkup:
@@ -143,14 +144,6 @@ def register(dp: Dispatcher, bot: Bot) -> None:
         await message.answer(WELCOME + "\nВыберите нужный раздел:",
                              reply_markup=menu_markup(is_staff(message.from_user.id)))
 
-    @dp.message(Command("admin"))
-    async def admin_cmd(message: Message):
-        if not is_staff(message.from_user.id):
-            await message.answer("Команда доступна только сотрудникам.")
-            return
-        await message.answer("Админ-панель откроется внутри Telegram, вход автоматический.",
-                             reply_markup=InlineKeyboardMarkup(inline_keyboard=[admin_button()]))
-
     @dp.message(Command("help"))
     async def help_cmd(message: Message):
         await message.answer(HELP_TEXT)
@@ -218,6 +211,8 @@ def register(dp: Dispatcher, bot: Bot) -> None:
             return
         await message.answer(f"Объявление #{item.id} отклонено.")
         await notify_author(bot, item, f"Ваше объявление отклонено. Причина: {parts[1]}")
+
+    register_admin(dp, bot)
 
     # ---- Paid services (ТЗ № 2) ----
 

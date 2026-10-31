@@ -27,6 +27,7 @@ from app.audit import log_action
 from app.admin_auth import staff, MOD, ADM, SUP
 from app.manage import router as manage_router
 from app.guard import rate_limit, check_text, duplicate_note, notify_user
+from app import admin_ops as ops
 from app.users import get_or_create_user, writer, is_blocked_pair
 from app.models import DatingProfile
 from app.dating import router as dating_router
@@ -45,6 +46,14 @@ app.include_router(admin_auth_router)
 app.include_router(webauth_router)
 STATIC = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
+
+def _run(operation, *args):
+    """Run a shared admin action and turn its error into an HTTP error."""
+    try:
+        return operation(*args)
+    except ops.OpError as exc:
+        raise HTTPException(exc.status, exc.message)
+
 
 REPORT_REASONS = {"fraud", "fake", "spam", "offensive", "inappropriate", "rights", "minor", "profile"}
 REPORTS_TO_HIDE = 3  # distinct reporters that hide a listing until a moderator decides
@@ -448,18 +457,7 @@ def pending_listings(actor: str = Depends(staff(*MOD)), db: Session = Depends(ge
 def moderate_listing(listing_id: int, decision: str, reason: str = Query(default="", max_length=300),
                      actor: str = Depends(staff(*MOD)), db: Session = Depends(get_db)):
     """decision: approve | reject (reason required) | needs_fix (comment required)."""
-    if decision not in {"approve", "reject", "needs_fix"}:
-        raise HTTPException(400, "Решение: approve, reject или needs_fix")
-    if decision in {"reject", "needs_fix"} and len(reason.strip()) < 3:
-        raise HTTPException(400, "Укажите причину (не короче 3 символов)")
-    item = db.get(Listing, listing_id)
-    if not item:
-        raise HTTPException(404, "Listing not found")
-    before = item.status
-    item.status = {"approve": "approved", "reject": "rejected", "needs_fix": "needs_fix"}[decision]
-    item.note = "" if decision == "approve" else reason.strip()
-    log_action(db, actor, f"listing.{decision}", "listing", listing_id, f"{before} -> {item.status}: {reason}")
-    db.commit()
+    item = _run(ops.moderate_listing, db, actor, listing_id, decision, reason)
     return {"id": item.id, "status": item.status}
 
 
@@ -474,29 +472,7 @@ def admin_reports(status: str = "new", actor: str = Depends(staff(*MOD)),
 @app.post("/api/admin/reports/{report_id}/{decision}")
 def decide_report(report_id: int, decision: str, actor: str = Depends(staff(*MOD)),
                   db: Session = Depends(get_db)):
-    if decision not in {"resolve", "reject"}:
-        raise HTTPException(400, "Decision must be resolve or reject")
-    report = db.get(Report, report_id)
-    if report is None:
-        raise HTTPException(404, "Жалоба не найдена")
-    if report.status != "new":
-        raise HTTPException(409, "Жалоба уже рассмотрена")
-    if decision == "resolve":
-        if report.target_type == "listing" and report.target_id.isdigit():
-            listing = db.get(Listing, int(report.target_id))
-            if listing:
-                listing.status = "hidden"
-        if report.target_type == "dating" and report.target_id.isdigit():
-            profile = db.get(DatingProfile, int(report.target_id))
-            if profile:
-                profile.status = "rejected"
-        if report.target_type == "user":
-            user = db.get(User, report.target_id)
-            if user:
-                user.blocked = True
-    report.status = "resolved" if decision == "resolve" else "rejected"
-    log_action(db, actor, f"report.{decision}", "report", report_id, report.target_type + ":" + report.target_id)
-    db.commit()
+    report = _run(ops.decide_report, db, actor, report_id, decision)
     return {"id": report.id, "status": report.status}
 
 
@@ -546,27 +522,7 @@ def admin_refund(payment_id: int, actor: str = Depends(staff(*ADM)), db: Session
 
 @app.get("/api/admin/stats")
 def admin_stats(actor: str = Depends(staff(*ADM)), db: Session = Depends(get_db)):
-    current = now()
-    paid = db.scalars(select(Payment).where(Payment.status == "paid")).all()
-
-    def window(days: int):
-        since = current - timedelta(days=days)
-        rows = [p for p in paid if p.paid_at and aware(p.paid_at) >= since]
-        return {"sales": len(rows), "stars": sum(p.stars for p in rows)}
-
-    by_status = dict(db.execute(select(Listing.status, func.count()).group_by(Listing.status)).all())
-    top: dict[str, int] = {}
-    for p in paid:
-        top[p.service_code] = top.get(p.service_code, 0) + 1
-    return {
-        "users": db.scalar(select(func.count()).select_from(User)),
-        "listings": by_status,
-        "reports_new": db.scalar(select(func.count()).select_from(Report).where(Report.status == "new")),
-        "payers": len({p.user_tg_id for p in paid}),
-        "revenue_stars_total": sum(p.stars for p in paid),
-        "day": window(1), "week": window(7), "month": window(30),
-        "top_services": sorted(top.items(), key=lambda kv: -kv[1]),
-    }
+    return ops.compute_stats(db)
 
 
 @app.put("/api/admin/groups/{group_id}")
