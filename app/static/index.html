@@ -102,31 +102,45 @@
 <section id="view-profile" class="view" hidden>
   <div class="profile-head">
     <div class="avatar" id="pAvatar">👤</div>
-    <b id="pName">Мой профиль</b><small id="pCity"></small>
-    <button class="link" id="cityBtn">Изменить город</button>
+    <b id="pName">Мой профиль</b>
+    <div class="pchips">
+      <button class="pchip" id="cityBtn" aria-label="Изменить город">📍 <span id="pCity">Город</span></button>
+      <button class="pchip" id="visaChip" data-menu="settings" aria-label="Виза">🛂 <span id="pVisa">виза не указана</span></button>
+      <span class="pchip ok" id="pEmployer" hidden>✔ Работодатель</span>
+    </div>
   </div>
+  <button class="submit addbig" id="profileAdd" type="button">➕ Добавить объявление</button>
   <div class="stats">
-    <div><b id="sListings">0</b><small>Объявления</small></div>
-    <div><b id="sApps">0</b><small>Отклики</small></div>
-    <div><b id="sFav">0</b><small>Избранное</small></div>
+    <button data-menu="mine"><b id="sListings">0</b><small>Объявления</small></button>
+    <button data-menu="applications"><b id="sApps">0</b><small>Отклики</small></button>
+    <button data-menu="favorites"><b id="sFav">0</b><small>Избранное</small></button>
   </div>
+  <h4 class="grp">Моя активность</h4>
   <div class="menu-list">
-    <button class="wide" data-menu="mine"><i>📋</i>Мои объявления</button>
+    <button class="wide" data-menu="mine"><i>📋</i>Мои объявления<em id="sMineBadge" hidden>0</em></button>
     <button class="wide" data-menu="applications"><i>📨</i>Мои отклики</button>
     <button class="wide" data-menu="favorites"><i>♡</i>Избранное</button>
-    <button class="wide" data-menu="chats"><i>💬</i>Сообщения<em id="sChats">0</em></button>
+    <button class="wide" data-menu="chats"><i>💬</i>Сообщения<em id="sChats" hidden>0</em></button>
     <button class="wide" data-menu="searches"><i>🔔</i>Мои поиски</button>
-    <button class="wide" data-menu="visa"><i>🛂</i>Моя виза</button>
-    <button class="wide" data-menu="payments"><i>⭐</i>История платежей</button>
+  </div>
+  <h4 class="grp">Аккаунт</h4>
+  <div class="menu-list">
+    <button class="wide" data-menu="settings"><i>⚙️</i>Настройки</button>
     <button class="wide" data-menu="employer"><i>🏢</i>Статус работодателя</button>
+    <button class="wide" data-menu="payments"><i>⭐</i>История платежей</button>
     <button class="wide" data-menu="blocks"><i>🚫</i>Заблокированные</button>
+  </div>
+  <h4 class="grp">Помощь и данные</h4>
+  <div class="menu-list">
     <button class="wide" data-menu="help"><i>❓</i>Помощь и правила</button>
     <button class="wide" data-menu="export"><i>📄</i>Выгрузить мои данные</button>
     <button class="wide danger" data-menu="logout" id="logoutItem" hidden><i>⎋</i>Выйти</button>
     <button class="wide danger" data-menu="delete"><i>🗑</i>Удалить аккаунт</button>
   </div>
-  <div id="menuBody" class="listings"></div>
-  <div class="section-head" id="mineHead"><div><h2>Мои объявления</h2></div></div>
+</section>
+
+<section id="view-mine" class="view" hidden>
+  <div class="subhead"><button class="back-btn" data-back aria-label="Назад">←</button><b>Мои объявления</b></div>
   <div class="chips" id="ownChips">
     <button class="chip active" data-own-filter="all">Все</button>
     <button class="chip" data-own-filter="active">Активные</button>
@@ -135,6 +149,11 @@
     <button class="chip" data-own-filter="closed">Закрытые</button>
   </div>
   <div id="myListings" class="listings"></div>
+</section>
+
+<section id="view-sub" class="view" hidden>
+  <div class="subhead"><button class="back-btn" data-back aria-label="Назад">←</button><b id="subTitle"></b></div>
+  <div id="subBody" class="listings"></div>
 </section>
 
 <section id="view-dating" class="view" hidden>

@@ -19,7 +19,7 @@ const SECTIONS = {visas: "Визы и документы", registration: "Рег
 const PROMO = {pin: "📌 Закреплено", vip: "VIP", bump: "⬆ Поднято", highlight: "★ Выделено"};
 const NAV_VIEWS = ["home", "saved", "chats", "profile"];
 const MAIN_VIEWS = [...NAV_VIEWS, "dating", "community", "guide"];
-const ALL_VIEWS = [...MAIN_VIEWS, "detail", "chat", "article"];
+const ALL_VIEWS = [...MAIN_VIEWS, "detail", "chat", "article", "mine", "sub"];
 
 let currentChat = null;
 let chatTimer = null;
@@ -130,7 +130,7 @@ function showView(name, opts = {}) {
   currentView = name;
   for (const v of ALL_VIEWS) { const el = $("#view-" + v); if (el) el.hidden = v !== name; }
   box.classList.toggle("fill", name === "chat");
-  const parent = name === "detail" || name === "article" ? backStack[backStack.length - 1] : name;
+  const parent = ["detail", "article", "mine", "sub"].includes(name) ? backStack[backStack.length - 1] : name;
   const navName = name === "chat" ? "chats" : (NAV_VIEWS.includes(parent) ? parent : "");
   document.querySelectorAll(".bottom [data-view]").forEach((b) => b.classList.toggle("active", b.dataset.view === navName));
   if (name !== "chat") clearInterval(chatTimer);
@@ -138,13 +138,15 @@ function showView(name, opts = {}) {
   if (name === "home" && !homeLoaded) loadCatalog();
   if (name === "saved") loadFavorites();
   if (name === "chats") loadConversations();
-  if (name === "profile") loadProfile();
+  if (name === "profile" || name === "mine") loadProfile();
   if (name === "community") loadGroups();
   if (name === "guide") loadGuide();
   if (name === "dating") loadDating();
   box.scrollTop = opts.restore ? (scrollPos[name] || 0) : 0;
 }
 function goBack() {
+  const open = typeof modalOpen === "function" ? modalOpen() : null;
+  if (open) { closeModal(open); return; }
   const previous = backStack.pop() || "home";
   showView(previous, {back: true, restore: true});
 }
@@ -681,15 +683,15 @@ document.querySelectorAll("[data-own-filter]").forEach((b) => b.onclick = () => 
 });
 async function showApplicants(id) {
   const rows = await api(`/api/listings/${id}/applications`);
-  const body = $("#menuBody");
-  body.innerHTML = `<h3>Отклики: ${esc(ownItems[id]?.title || "")}</h3>` + (rows.map((a) => `<article class="listing" data-app="${a.id}">
+  SUB_TITLES.applicants = "Отклики";
+  openSub("applicants");
+  $("#subBody").innerHTML = `<h3>${esc(ownItems[id]?.title || "")}</h3>` + (rows.map((a) => `<article class="listing" data-app="${a.id}">
     <div class="listing-top"><div><b>${esc(a.contact)}</b><div class="meta">${a.city ? "📍 " + esc(a.city) : ""}${a.visa ? " · виза " + esc(a.visa) : ""}</div></div>
     <span class="status ${a.status === "invited" ? "approved" : a.status === "rejected" ? "rejected" : "pending"}">${APP_STATUS[a.status] || a.status}</span></div>
     ${a.message ? `<p>${esc(a.message)}</p>` : ""}${a.reply ? `<p class="muted">Ваш ответ: ${esc(a.reply)}</p>` : ""}<p class="muted">${esc(fmtDate(a.created_at))}</p>
     <div class="actions"><button data-appstatus="invited" data-appid="${a.id}">Пригласить</button>
     <button data-appstatus="rejected" data-appid="${a.id}" class="secondary">Отказать</button></div></article>`).join("")
     || '<div class="empty">Откликов пока нет</div>');
-  body.scrollIntoView({block: "nearest"});
   loadProfile();
 }
 function fillProfileHead() {
@@ -700,17 +702,35 @@ function fillProfileHead() {
   const initials = ((u.first_name || "?")[0] + ((u.last_name || "")[0] || "")).toUpperCase();
   $("#pAvatar").innerHTML = u.photo_url ? `<img src="${esc(u.photo_url)}" alt="">` : esc(initials);
 }
+function fillProfileHead() {
+  const u = tg?.initDataUnsafe?.user;
+  if (!u) return;
+  $("#pName").textContent = [u.first_name, u.last_name].filter(Boolean).join(" ") || "Мой профиль";
+  const initials = ((u.first_name || "?")[0] + ((u.last_name || "")[0] || "")).toUpperCase();
+  $("#pAvatar").innerHTML = u.photo_url ? `<img src="${esc(u.photo_url)}" alt="">` : esc(initials);
+}
+function showProfileChips() {
+  $("#pCity").textContent = me?.city || "Выберите город";
+  $("#pVisa").textContent = me?.visa ? "виза " + me.visa : "виза не указана";
+  $("#pEmployer").hidden = me?.employer_status !== "approved";
+  showCityChip();
+}
 async function loadProfile() {
   fillProfileHead();
   try {
     const [user, mine, favs, convs, apps] = await Promise.all([api("/api/me"), api("/api/me/listings"), api("/api/favorites"), api("/api/conversations"), api("/api/me/applications")]);
-    $("#sApps").textContent = apps.length;
     me = user;
+    showProfileChips();
     favIds = new Set(favs.map((x) => x.id));
-    $("#pCity").textContent = "Город: " + user.city;
-    $("#sListings").textContent = mine.filter((x) => x.status !== "archived").length;
+    const alive = mine.filter((x) => x.status !== "archived");
+    $("#sApps").textContent = apps.length;
+    $("#sListings").textContent = alive.length;
     $("#sFav").textContent = favs.length;
     $("#sChats").textContent = convs.length;
+    $("#sChats").hidden = convs.length === 0;
+    const attention = alive.filter((x) => ["pending", "needs_fix", "rejected", "draft"].includes(x.status) || x.has_edit).length;
+    $("#sMineBadge").textContent = attention;
+    $("#sMineBadge").hidden = attention === 0;
     ownItems = Object.fromEntries(mine.map((x) => [x.id, x]));
     mineAll = mine;
     renderOwn();
@@ -723,11 +743,31 @@ function renderPayments(rows) {
     <p class="muted">${fmtDate(p.paid_at || p.created_at)}</p></article>`).join("")
     : '<div class="empty">Платежей пока нет</div>';
 }
+const SUB_TITLES = {applications: "Мои отклики", searches: "Мои поиски", settings: "Настройки", employer: "Статус работодателя",
+                    payments: "История платежей", blocks: "Заблокированные", help: "Помощь и правила"};
+let currentSubKey = "";
+// Раздел кабинета открывается отдельной страницей со стрелкой «назад», а не под длинным списком
+function openSub(key) {
+  currentSubKey = key;
+  $("#subTitle").textContent = SUB_TITLES[key] || "";
+  if (currentView !== "sub") showView("sub", {push: true});
+}
 async function openMenu(key) {
-  const body = $("#menuBody");
   if (key === "favorites") return showView("saved");
   if (key === "chats") return showView("chats");
-  if (key === "mine") return $("#mineHead").scrollIntoView({behavior: "smooth", block: "start"});
+  if (key === "mine") return showView("mine", {push: true});
+  if (key === "export") return exportMyData();
+  if (key === "delete") return deleteMyAccount();
+  if (key === "logout") {
+    await api("/api/auth/logout", {method: "POST", quiet: true});
+    localStorage.removeItem("webSession");
+    location.reload();
+    return;
+  }
+  if (!SUB_TITLES[key]) return;
+  openSub(key);
+  const body = $("#subBody");
+  body.innerHTML = '<div class="skeleton"></div>';
   if (key === "payments") body.innerHTML = renderPayments(await api("/api/me/payments"));
   if (key === "applications") {
     const rows = await api("/api/me/applications");
@@ -738,59 +778,62 @@ async function openMenu(key) {
       ${a.listing_status !== "approved" ? '<p class="muted">Вакансия закрыта</p>' : ""}
       <p class="muted">${esc(fmtDate(a.created_at))}</p>
       ${a.can_withdraw ? `<div class="actions"><button class="secondary" data-withdraw="${a.id}">Отозвать отклик</button></div>` : ""}</article>`).join("")
-      : '<div class="empty">Вы пока не откликались на вакансии</div>';
+      : '<div class="empty">Вы пока не откликались на вакансии.<br>Откройте вакансию и нажмите «Откликнуться».</div>';
   }
   if (key === "searches") {
     const rows = await api("/api/me/searches");
-    body.innerHTML = rows.length ? rows.map((s) => `<article class="listing"><h3>${esc(s.name)}</h3>
-      <div class="actions"><button data-delsearch="${s.id}" class="secondary">Не следить</button></div></article>`).join("")
-      : '<div class="empty">Нет сохранённых поисков. Откройте «Фильтры» и нажмите «Следить за этим поиском».</div>';
+    body.innerHTML = rows.length ? rows.map((x) => `<article class="listing"><h3>${esc(x.name)}</h3>
+      <p class="muted">Пришлём уведомление в Telegram, когда появится новое подходящее объявление</p>
+      <div class="actions"><button data-delsearch="${x.id}" class="secondary">Не следить</button></div></article>`).join("")
+      : '<div class="empty">Нет сохранённых поисков.<br>На главной откройте «Фильтры» и нажмите «Следить за этим поиском».</div>';
   }
-  if (key === "visa") {
+  if (key === "settings") {
     await loadFields();
-    body.innerHTML = `<article class="listing"><h3>Моя виза</h3>
-      <p class="muted">Видна только вам. Используется в фильтре «Моя виза» и в откликах.</p>
-      <label>Тип визы<select id="myVisa"><option value="">Не указана</option>${fieldDefs.visas.map((v) => `<option value="${v.value}">${v.label}</option>`).join("")}</select></label>
-      <div class="actions"><button id="saveVisa">Сохранить</button></div></article>`;
+    try { await loadMe(); } catch (e) { /* без входа api() сам покажет окно входа */ }
+    body.innerHTML = `<article class="listing">
+      <div class="set-row"><div><b>Город</b><small>${esc(me?.city || "не выбран")}</small></div><button class="secondary" id="setCity">Изменить</button></div>
+      <div class="set-row"><div><b>Виза</b><small>Видна только вам: подставляется в отклики и фильтры</small></div>
+        <select id="myVisa"><option value="">Не указана</option>${fieldDefs.visas.map((v) => `<option value="${v.value}">${v.label}</option>`).join("")}</select></div>
+      <div class="set-row"><div><b>Уведомления в Telegram</b><small>Сообщения, отклики, решения модератора</small></div>
+        <label class="check" style="margin:0"><input type="checkbox" id="setNotify"></label></div>
+      <div class="set-row"><div><b>Язык</b><small>Сейчас доступен русский</small></div><span class="muted">RU</span></div></article>`;
     $("#myVisa").value = me?.visa || "";
-    $("#saveVisa").onclick = async () => {
-      try {
-        const r = await api("/api/me/settings", {method: "PUT", body: JSON.stringify({visa: $("#myVisa").value})});
-        me.visa = r.visa; toast("Сохранено");
-      } catch (err) { toast(err.message); }
+    $("#setNotify").checked = Boolean(me?.notify_messages);
+    $("#setCity").onclick = openCity;
+    $("#myVisa").onchange = async () => {
+      try { const r = await api("/api/me/settings", {method: "PUT", body: JSON.stringify({visa: $("#myVisa").value})}); me.visa = r.visa; showProfileChips(); toast("Сохранено"); }
+      catch (err) { toast(err.message); }
+    };
+    $("#setNotify").onchange = async (e) => {
+      try { await api("/api/me/notifications", {method: "PUT", body: JSON.stringify({messages: e.target.checked})}); me.notify_messages = e.target.checked; toast("Сохранено"); }
+      catch (err) { toast(err.message); e.target.checked = !e.target.checked; }
     };
   }
   if (key === "employer") {
     const st = me?.employer_status;
-    const text = {none: "Вы ещё не подавали заявку.", pending: "Заявка на проверке модератора.",
-                  approved: "Статус работодателя подтверждён.", rejected: "Заявка отклонена. Можно подать снова с верными данными."}[st] || "";
-    body.innerHTML = `<article class="listing"><p>${text}</p>
+    const text = {none: "Работодателям с подтверждённым статусом доверяют больше: у их вакансий появляется значок «Проверенный работодатель». Нужны название и номер регистрации компании.",
+                  pending: "Заявка на проверке модератора. Мы сообщим в Telegram о решении.",
+                  approved: `Статус подтверждён${me?.company_name ? ": " + me.company_name : ""}. На ваших вакансиях виден значок «Проверенный работодатель».`,
+                  rejected: "Заявка отклонена. Можно подать снова с верными данными."}[st] || "";
+    body.innerHTML = `<article class="listing"><p>${esc(text)}</p>
       ${(st === "none" || st === "rejected") ? '<div class="actions"><button data-own="employer-apply">Подать заявку</button></div>' : ""}</article>`;
   }
   if (key === "blocks") {
-    const ids = await api("/api/me/blocks");
-    body.innerHTML = ids.length ? ids.map((id) => `
-      <article class="listing"><h3>Пользователь ${esc(id)}</h3>
-      <div class="actions"><button data-unblock="${esc(id)}" class="secondary">Разблокировать</button></div></article>`).join("")
-      : '<div class="empty">Вы никого не блокировали</div>';
+    const rows = await api("/api/me/blocks");
+    body.innerHTML = rows.length ? rows.map((r) => `
+      <article class="listing"><h3>${esc(r.label)}</h3>
+      <div class="actions"><button data-unblock="${r.id}" class="secondary">Разблокировать</button></div></article>`).join("")
+      : '<div class="empty">Вы никого не блокировали.<br>Заблокировать можно из чата.</div>';
   }
   if (key === "help") {
     body.innerHTML = `<article class="listing"><h3>Как пользоваться</h3>
-      <p>1. Опубликуйте объявление: модератор проверит его обычно в течение 24 часов.</p>
-      <p>2. Общение только внутри приложения: телефон в объявлении указывайте по желанию.</p>
-      <p>3. Оплата услуг — в звёздах Telegram (⭐). Возврат — через поддержку.</p>
+      <p>1. Опубликуйте объявление: модератор проверит его обычно в течение суток.</p>
+      <p>2. Общение внутри приложения: телефон указывайте по желанию, только в поле «Контакт».</p>
+      <p>3. Оплата услуг продвижения — в звёздах Telegram (⭐). Возврат — через поддержку.</p>
       <p>4. Жалобы на объявления и людей — кнопка «Пожаловаться».</p>
+      <p>5. Объявление живёт 30 дней. За 3 дня и за день мы напомним, продлить можно в один шаг.</p>
       <p>Вопросы: команда /help в боте.</p></article>`;
   }
-  if (key === "logout") {
-    await api("/api/auth/logout", {method: "POST", quiet: true});
-    localStorage.removeItem("webSession");
-    location.reload();
-    return;
-  }
-  if (key === "export") return exportMyData();
-  if (key === "delete") return deleteMyAccount();
-  body.scrollIntoView({block: "nearest"});
 }
 async function exportMyData() {
   try {
@@ -1037,13 +1080,13 @@ async function saveListing(send) {
       $("#doneText").textContent = wasLive ? "Пока модератор проверяет, остаётся прежняя версия."
         : "Мы сообщим в Telegram, когда модератор примет решение. Объявление будет показано 30 дней.";
       $("#doneSheet").classList.remove("hidden");
-    } else { toast("Черновик сохранён: он в профиле, вкладка «Черновики»"); showView("profile"); }
+    } else { toast("Черновик сохранён: Профиль → Мои объявления → Черновики"); showView("profile"); showView("mine", {push: true}); }
     loadProfile();
   } catch (err) { toast(err.message); }
 }
 $("#listingForm").onsubmit = (e) => { e.preventDefault(); if (wizStep < 4) { $("#nextBtn").onclick(); return; } saveListing(true); };
 $("#draftBtn").onclick = () => saveListing(false);
-$("#doneMine").onclick = () => { $("#doneSheet").classList.add("hidden"); showView("profile"); };
+$("#doneMine").onclick = () => { $("#doneSheet").classList.add("hidden"); showView("profile"); showView("mine", {push: true}); };
 $("#doneMore").onclick = () => { $("#doneSheet").classList.add("hidden"); $("#addSheet").classList.remove("hidden"); };
 $("#closeModal").onclick = () => $("#modal").classList.add("hidden");
 $("#addBtn").onclick = async () => { if (await requireConsent()) $("#addSheet").classList.remove("hidden"); };
@@ -1237,7 +1280,7 @@ document.addEventListener("click", async (e) => {
   if (menu) { try { await openMenu(menu.dataset.menu); } catch (err) { toast(err.message); } return; }
   const unblock = e.target.closest("[data-unblock]");
   if (unblock) {
-    try { await api(`/api/users/${unblock.dataset.unblock}/block`, {method: "DELETE"}); toast("Пользователь разблокирован"); openMenu("blocks"); }
+    try { await api(`/api/me/blocks/${unblock.dataset.unblock}`, {method: "DELETE"}); toast("Пользователь разблокирован"); openMenu("blocks"); }
     catch (err) { toast(err.message); }
     return;
   }
@@ -1310,7 +1353,7 @@ $("#consentOk").onclick = async () => {
   } catch (err) { toast(err.message); }
 };
 function showCityChip() { $("#cityChipText").textContent = (me?.city || "Город").split(",")[0]; }
-$("#cityChip").onclick = () => $("#cityBtn").onclick();
+$("#cityChip").onclick = () => openCity();
 $("#langBtn").onclick = () => toast("Сейчас приложение на русском. Другие языки появятся позже");
 $("#bellBtn").onclick = async () => {
   if (!(await requireConsent())) return;
@@ -1322,10 +1365,11 @@ $("#notifToggle").onchange = async (e) => {
   try { await api("/api/me/notifications", {method: "PUT", body: JSON.stringify({messages: e.target.checked})}); me.notify_messages = e.target.checked; toast("Сохранено"); }
   catch (err) { toast(err.message); e.target.checked = !e.target.checked; }
 };
-$("#cityBtn").onclick = async () => {
+async function openCity() {
   await setGeo("#cityGeo", me?.region_code || "", me?.district_id || "");
   $("#cityModal").classList.remove("hidden");
-};
+}
+$("#cityBtn").onclick = openCity;
 $("#closeCity").onclick = () => $("#cityModal").classList.add("hidden");
 $("#cityForm").onsubmit = async (e) => {
   e.preventDefault();
@@ -1337,6 +1381,7 @@ $("#cityForm").onsubmit = async (e) => {
     toast("Город сохранён");
     await loadMe(); showCityChip();
     loadProfile();
+    if (currentView === "sub" && currentSubKey === "settings") openMenu("settings");
   } catch (err) { toast(err.message); }
 };
 $("#closeEmployer").onclick = () => $("#employerModal").classList.add("hidden");
@@ -1412,3 +1457,19 @@ api("/api/me", {quiet: true})
     if ((dy > 0 && el.scrollTop <= 0) || (dy < 0 && el.scrollTop + el.clientHeight >= el.scrollHeight)) e.preventDefault();
   }, {passive: false});
 })();
+
+
+// ---------- кабинет и окна ----------
+document.querySelectorAll("[data-back]").forEach((b) => b.onclick = goBack);
+$("#profileAdd").onclick = () => $("#addBtn").onclick();
+// Окно закрывается нажатием на затемнённый фон, клавишей Esc и кнопкой «Назад» Telegram.
+// Обязательное окно согласия и страница создания объявления так не закрываются.
+const modalOpen = () => [...document.querySelectorAll(".modal:not(.hidden):not(.page):not(#consent):not(#webLogin)")].pop();
+function closeModal(el) {
+  const closer = el.querySelector(".sheet-top button");
+  if (closer) closer.click(); else el.classList.add("hidden");
+}
+document.addEventListener("click", (e) => {
+  if (e.target.classList?.contains("modal") && !e.target.classList.contains("page") && e.target.id !== "consent") closeModal(e.target);
+});
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") { const m = modalOpen(); if (m) closeModal(m); } });

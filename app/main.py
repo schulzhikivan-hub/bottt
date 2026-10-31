@@ -164,7 +164,19 @@ def delete_me(user_id: str = Depends(current_user_id), db: Session = Depends(get
 
 @app.get("/api/me/blocks")
 def my_blocks(user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
-    return db.scalars(select(Block.blocked_tg_id).where(Block.blocker_tg_id == user_id)).all()
+    """Who I blocked. Only a number of the entry is returned, never the other person's Telegram ID."""
+    rows = db.scalars(select(Block).where(Block.blocker_tg_id == user_id).order_by(Block.id)).all()
+    return [{"id": b.id, "label": f"Пользователь №{i}"} for i, b in enumerate(rows, 1)]
+
+
+@app.delete("/api/me/blocks/{block_id}")
+def unblock_by_entry(block_id: int, user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
+    row = db.get(Block, block_id)
+    if row is None or row.blocker_tg_id != user_id:
+        raise HTTPException(404, "Запись не найдена")
+    db.delete(row)
+    db.commit()
+    return {"blocked": False}
 
 
 @app.post("/api/users/{target}/block")
