@@ -52,6 +52,12 @@ def duplicate_note(db: Session, author: str, title: str, description: str, listi
     rows = [r for r in rows if r.id != listing_id]
     if rows:
         return f"Возможный дубликат: #{rows[0].id}"
+    if len(description) >= 30:   # one text spread over several accounts is the mark of a spammer
+        authors = set(db.scalars(select(Listing.author_telegram_id).where(
+            Listing.description == description, Listing.author_telegram_id != author,
+            Listing.status.in_(["pending", "approved", "hidden", "rejected"]))).all())
+        if len(authors) >= 2:
+            return f"Тот же текст у {len(authors) + 1} разных аккаунтов"
     return ""
 
 

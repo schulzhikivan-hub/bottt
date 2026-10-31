@@ -78,7 +78,7 @@ def test_big_files_are_refused_and_big_pictures_are_shrunk(client):
 
 def test_metadata_is_removed_and_orientation_applied(client):
     lid = make(client)
-    img = Image.new("RGB", (40, 20), "blue")
+    img = Image.new("RGB", (160, 120), "blue")
     exif = Image.Exif()
     exif[0x010F] = "SecretCam"      # camera make
     exif[0x0112] = 6                # rotated 90 degrees
@@ -86,7 +86,7 @@ def test_metadata_is_removed_and_orientation_applied(client):
     img.save(out, "JPEG", exif=exif)
     r = upload(client, lid, out.getvalue()).json()
     result = Image.open(io.BytesIO(client.get(r["url"]).content))
-    assert result.size == (20, 40)                      # turned upright
+    assert result.size == (120, 160)                    # turned upright (width and height swapped)
     assert len(result.getexif()) == 0                   # nothing from the original metadata is left
 
 

@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from app import payments
 from app.auth import optional_user_id, current_user_id
 from app.config import settings
-from app.database import Base, engine, get_db, SessionLocal, migrate
+from app.database import Base, engine, get_db, SessionLocal, migrate, upgrade_schema, startup_lock
 from app.models import (
     Listing, Favorite, Conversation, Message, User, Block, Report,
     Pricing, Placement, Payment, Group, Article, ListingPhoto, ArticleBookmark,
@@ -31,7 +31,7 @@ from app.manage import router as manage_router
 from app.guard import rate_limit, check_text, duplicate_note, notify_user
 from app import admin_ops as ops
 from app import catalog
-from app import photos, applications, searches, inbox, promos, adminx
+from app import photos, applications, searches, inbox, promos, adminx, observe
 from app import geo
 from app import fields as listing_fields
 from app.users import get_or_create_user, writer, is_blocked_pair
@@ -39,13 +39,15 @@ from app.models import DatingProfile
 from app.dating import router as dating_router
 from app.payments import PaymentError, aware, now
 
-Base.metadata.create_all(bind=engine)
-migrate()
-with SessionLocal() as _db:
-    seed_reference(_db)
-    bootstrap_admins(_db)
-    geo.backfill_places(_db)
-    catalog.backfill_search_fields(_db)
+with startup_lock():   # with several workers only one prepares the database at a time
+    Base.metadata.create_all(bind=engine)
+    migrate()
+    upgrade_schema()
+    with SessionLocal() as _db:
+        seed_reference(_db)
+        bootstrap_admins(_db)
+        geo.backfill_places(_db)
+        catalog.backfill_search_fields(_db)
 
 app = FastAPI(title="KOREA HUB API", version="0.4.0")
 app.include_router(dating_router)
@@ -87,9 +89,7 @@ def admin_page():
     return FileResponse(STATIC / "admin.html")
 
 
-@app.get("/health")
-def health():
-    return {"status": "ok", "service": "korea-hub"}
+observe.install(app)  # /health, /health/extended, request IDs, JSON logs, security headers
 
 
 # ---------- Users, consent, blocks ----------
@@ -301,6 +301,14 @@ def create_listing(payload: ListingCreate, user_id: str = Depends(writer), db: S
     if payload.category not in CATEGORIES:
         raise HTTPException(400, "Неизвестная категория")
     rate_limit(user_id, "listing", 10, 3600)
+    newcomer = get_or_create_user(db, user_id)
+    if settings.new_account_minutes and newcomer.created_at is not None \
+            and (now() - aware(newcomer.created_at)).total_seconds() < settings.new_account_minutes * 60:
+        try:
+            rate_limit(user_id, "listing_new_account", 1, 3600)
+        except HTTPException:
+            raise HTTPException(429, "Новый аккаунт может публиковать не больше одного объявления в час. "
+                                     "Подождите или дополните уже созданное")
     check_text(payload.title, payload.description)
     place = geo.resolve_place(db, payload.district_id, payload.region_code, payload.city)
     if place is None:
@@ -667,8 +675,8 @@ def pending_listings(actor: str = Depends(staff(*MOD)), db: Session = Depends(ge
     """New listings and waiting edits. For an edit, pending_changes shows what would change."""
     rows = list(db.scalars(select(Listing).where(ops.queue_condition()).order_by(Listing.id)).all())
     shown = catalog.with_promo(db, rows, owner=True)
-    return [{**o.model_dump(mode="json"), "pending_changes": x.pending_changes, "author_id": x.author_telegram_id}
-            for o, x in zip(shown, rows)]
+    return [{**o.model_dump(mode="json"), "pending_changes": x.pending_changes, "author_id": x.author_telegram_id,
+             "flags": adminx.listing_flags(db, x)} for o, x in zip(shown, rows)]
 
 
 @app.get("/api/admin/listings/{listing_id}")
@@ -677,7 +685,8 @@ def admin_listing(listing_id: int, actor: str = Depends(staff(*MOD)), db: Sessio
     if item is None:
         raise HTTPException(404, "Объявление не найдено")
     shown = catalog.with_promo(db, [item], owner=True)[0]
-    return {**shown.model_dump(mode="json"), "pending_changes": item.pending_changes, "author_id": item.author_telegram_id}
+    return {**shown.model_dump(mode="json"), "pending_changes": item.pending_changes, "author_id": item.author_telegram_id,
+            "flags": adminx.listing_flags(db, item)}
 
 
 @app.post("/api/admin/listings/{listing_id}/{decision}")

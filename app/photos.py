@@ -5,6 +5,7 @@ Every upload is opened, checked, rotated by its EXIF orientation and saved again
 Files are named by a random key. A photo added to an already published listing waits for a
 moderator (status "pending") while the old photos stay visible; the same goes for removals.
 """
+import hashlib
 import io
 import re
 import uuid
@@ -60,6 +61,19 @@ def process_image(data: bytes) -> tuple[bytes, bytes]:
     except Exception:
         raise HTTPException(400, "Нужна фотография в формате JPEG, PNG или WebP")
     return _jpeg(img, FULL_SIDE), _jpeg(img, THUMB_SIDE)
+
+
+MIN_SIDE, MAX_ASPECT = 80, 5
+
+
+def check_shape(full_jpeg: bytes) -> None:
+    """A listing photo must be a real picture: not a thumbnail-sized dot and not a thin strip."""
+    img = Image.open(io.BytesIO(full_jpeg))
+    short, long = sorted(img.size)
+    if short < MIN_SIDE:
+        raise HTTPException(400, f"Фото слишком маленькое: меньшая сторона не меньше {MIN_SIDE} пикселей")
+    if long / short > MAX_ASPECT:
+        raise HTTPException(400, "Странные пропорции фото: загрузите обычный снимок, не узкую полосу")
 
 
 def url(key: str, thumb: bool = False) -> str:
@@ -118,15 +132,22 @@ async def add_photo(listing_id: int, file: UploadFile = File(...), user_id: str 
     if len(data) > MAX_UPLOAD_BYTES:
         raise HTTPException(413, "Фото больше 8 МБ")
     full, thumb = process_image(data)
+    check_shape(full)
+    sha = hashlib.sha256(full).hexdigest()
     key = uuid.uuid4().hex
     (photo_root() / f"{key}.jpg").write_bytes(full)
     (photo_root() / f"{key}_t.jpg").write_bytes(thumb)
     last = db.scalar(select(func.max(ListingPhoto.position)).where(ListingPhoto.listing_id == listing_id))
     # On a published listing a new photo waits for a moderator; elsewhere it is shown once the listing is
     status = "pending" if item.status == "approved" else "live"
-    photo = ListingPhoto(listing_id=listing_id, key=key, position=(last if last is not None else -1) + 1, status=status)
+    photo = ListingPhoto(listing_id=listing_id, key=key, position=(last if last is not None else -1) + 1, status=status, sha=sha)
     db.add(photo)
     db.flush()
+    same = db.scalar(select(Listing.id).join(ListingPhoto, ListingPhoto.listing_id == Listing.id).where(
+        ListingPhoto.sha == sha, Listing.author_telegram_id != user_id).limit(1))
+    if same is not None:   # the same picture under another account: a moderator should look (the author is not told)
+        from app.audit import log_action
+        log_action(db, "system", "photo.duplicate_suspected", "listing", listing_id, f"то же фото, что в #{same}")
     refresh_edit_flag(db, item)
     db.commit()
     return {"id": photo.id, "url": url(key), "thumb": url(key, True), "status": status}

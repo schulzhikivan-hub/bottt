@@ -346,6 +346,7 @@ class ListingPhoto(Base):
     position: Mapped[int] = mapped_column(Integer, default=0)
     # live: shown; pending: added to a published listing, waits for a moderator; removal: asked to delete
     status: Mapped[str] = mapped_column(String(10), default="live", index=True)
+    sha: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)  # fingerprint of the stored picture
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
@@ -430,3 +431,10 @@ class Banner(Base):
     ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class Heartbeat(Base):
+    """"I am alive" marks written by background processes (the bot), read by /health."""
+    __tablename__ = "heartbeats"
+    name: Mapped[str] = mapped_column(String(30), primary_key=True)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

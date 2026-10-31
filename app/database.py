@@ -19,6 +19,53 @@ def get_db():
         db.close()
 
 
+from contextlib import contextmanager
+
+
+@contextmanager
+def startup_lock():
+    """Several web workers start at once: on PostgreSQL only one at a time may create tables, migrate and seed."""
+    if engine.dialect.name != "postgresql":
+        yield
+        return
+    with engine.connect() as conn:
+        conn.execute(text("select pg_advisory_lock(727001)"))
+        try:
+            yield
+        finally:
+            conn.execute(text("select pg_advisory_unlock(727001)"))
+            conn.commit()
+
+
+def upgrade_schema(url: str | None = None) -> str:
+    """Bring the schema to the latest Alembic revision. A database made before Alembic is only stamped, never rebuilt.
+
+    Returns "stamped", "upgraded" or "skipped". On SQLite (tests, local runs) nothing happens unless a url is given."""
+    from pathlib import Path
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, inspect
+    target = url or settings.database_url
+    if url is None and not target.startswith("postgresql"):
+        return "skipped"
+    root = Path(__file__).resolve().parent.parent
+    if not (root / "alembic.ini").exists():
+        return "skipped"
+    cfg = Config(str(root / "alembic.ini"))
+    cfg.set_main_option("script_location", str(root / "alembic"))
+    cfg.attributes["url"] = target
+    probe = create_engine(target)
+    try:
+        has_version = "alembic_version" in inspect(probe).get_table_names()
+    finally:
+        probe.dispose()
+    if not has_version:
+        command.stamp(cfg, "head")
+        return "stamped"
+    command.upgrade(cfg, "head")
+    return "upgraded"
+
+
 def migrate() -> None:
     """Small idempotent schema changes for databases created by earlier versions.
 
@@ -53,6 +100,8 @@ def migrate() -> None:
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_listings_expires_at ON listings (expires_at)"))
         conn.execute(text("ALTER TABLE applications ADD COLUMN IF NOT EXISTS reply VARCHAR(500) DEFAULT ''"))
         conn.execute(text("ALTER TABLE applications ADD COLUMN IF NOT EXISTS name VARCHAR(40) DEFAULT ''"))
+        conn.execute(text("ALTER TABLE listing_photos ADD COLUMN IF NOT EXISTS sha VARCHAR(64)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_listing_photos_sha ON listing_photos (sha)"))
         conn.execute(text("ALTER TABLE payments ADD COLUMN IF NOT EXISTS promo_code VARCHAR(24) DEFAULT ''"))
         conn.execute(text("ALTER TABLE payments ADD COLUMN IF NOT EXISTS list_stars INTEGER"))
         conn.execute(text("ALTER TABLE placements ADD COLUMN IF NOT EXISTS reminded BOOLEAN DEFAULT FALSE"))

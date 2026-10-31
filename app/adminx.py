@@ -35,6 +35,20 @@ REASON_TEMPLATES = [
 TEMPLATE_MAP = dict(REASON_TEMPLATES)
 
 
+def listing_flags(db: Session, item: Listing) -> list[str]:
+    """Things a moderator should look at twice: the same text or the same photo under other accounts."""
+    from app.models import AuditLog
+    out = []
+    note = guard.duplicate_note(db, item.author_telegram_id, item.title, item.description or "", item.id)
+    if note:
+        out.append(note)
+    last = db.scalars(select(AuditLog).where(AuditLog.action == "photo.duplicate_suspected",
+                                             AuditLog.object_id == str(item.id)).order_by(AuditLog.id.desc()).limit(1)).first()
+    if last is not None:
+        out.append(last.details)
+    return out
+
+
 @router.get("/api/admin/templates")
 def templates(actor: str = Depends(staff(*MOD))):
     return [{"key": k, "text": t} for k, t in REASON_TEMPLATES]
@@ -85,7 +99,7 @@ def listing_list(category: str | None = None, status: str | None = None, q: str 
     rows = list(db.scalars(stmt.order_by(Listing.id.desc()).limit(limit).offset(offset)).all())
     shown = catalog.with_promo(db, rows, owner=True)
     return {"total": total, "items": [{**o.model_dump(mode="json"), "pending_changes": x.pending_changes,
-                                       "author_id": x.author_telegram_id} for o, x in zip(shown, rows)]}
+                                       "author_id": x.author_telegram_id, "flags": listing_flags(db, x)} for o, x in zip(shown, rows)]}
 
 
 # ---------- content: articles and groups ----------

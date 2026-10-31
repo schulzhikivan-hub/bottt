@@ -28,7 +28,8 @@ services:
       - "8000"
     volumes:
       - uploads_data:/srv/uploads
-    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    # Two web processes by default (set WEB_WORKERS in .env). Rate limits are counted per process: see docs/LOAD.md
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "${WEB_WORKERS:-2}"]
 
   bot:
     build: .
@@ -38,6 +39,9 @@ services:
       DATABASE_URL: postgresql+psycopg://koreahub:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/koreahub
     depends_on:
       - api
+    # The bot shows listing and profile photos in the chat and in the admin screens: it needs the same files as the API
+    volumes:
+      - uploads_data:/srv/uploads
     command: ["python", "-m", "app.bot"]
 
   caddy:

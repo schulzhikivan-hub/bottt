@@ -8,7 +8,7 @@ from aiogram.types import (
 )
 from sqlalchemy import select
 
-from app import guard, lifecycle, payments, searches, webauth
+from app import guard, lifecycle, observe, payments, searches, webauth
 from app.botadmin import register_admin
 from app.botbrowse import register_browse
 from app.config import settings
@@ -315,16 +315,27 @@ def _expire_once() -> list[tuple[str, str]]:
         return out
 
 
+def _heartbeat() -> None:
+    with SessionLocal() as db:
+        observe.beat(db, "bot")
+
+
 async def expiry_loop(bot: Bot) -> None:
+    failures = 0
     while True:
         try:
+            await asyncio.to_thread(_heartbeat)       # "the bot is alive": /health reports it
             for user_id, text in await asyncio.to_thread(_expire_once):
                 try:
                     await bot.send_message(int(user_id), text)
                 except Exception:
                     pass
-        except Exception:
-            pass
+            failures = 0
+        except Exception as exc:  # noqa: BLE001
+            failures += 1
+            observe.event(40, "expiry loop failed", error=type(exc).__name__, count=failures)
+            if failures == 5:
+                observe.alert_admins("фоновые задачи бота (сроки, уведомления) не работают: 5 ошибок подряд")
         await asyncio.sleep(EXPIRY_CHECK_SECONDS)
 
 
@@ -360,7 +371,14 @@ async def main():
     register(dp, bot)
     asyncio.create_task(expiry_loop(bot))
     asyncio.create_task(broadcast_loop(bot))
-    await dp.start_polling(bot, allowed_updates=["message", "pre_checkout_query", "callback_query"])
+    observe.setup_logging()
+    observe.event(20, "bot started")
+    try:
+        await dp.start_polling(bot, allowed_updates=["message", "pre_checkout_query", "callback_query"])
+    except Exception as exc:  # noqa: BLE001
+        observe.event(40, "bot stopped", error=type(exc).__name__)
+        observe.alert_admins("бот остановился и перезапускается (" + type(exc).__name__ + ")")
+        raise
 
 
 if __name__ == "__main__":

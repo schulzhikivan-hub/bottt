@@ -224,6 +224,7 @@ function listingCardHtml(x, opts = {}) {
     <b>#${x.id} ${esc(x.title)}</b> <span class="badge">${esc(STATUS_RU[x.status] || x.status)}${edit ? " · правка" : ""}</span>
     <div class="meta">${esc(CAT[x.category] || x.category)} · ${esc(x.city)} · ${esc(x.price || "цена не указана")}</div>
     <div class="meta">${esc(factsOf(x))}</div>
+    ${(x.flags || []).length ? `<div style="color:#b45309;font-weight:600">⚠ ${(x.flags || []).map(esc).join(" · ")}</div>` : ""}
     ${edit ? `<div><b>Что меняется:</b><ul>${diff || "<li>только фото</li>"}</ul></div>` : `<p>${esc(x.description || "")}</p>`}
     <div class="thumbs">${photos || '<span class="muted">Фото нет</span>'}${waiting ? ` <span class="muted">(ждут решения: ${waiting})</span>` : ""}</div>
     <p class="muted">Контакт: ${esc(x.contact || "—")} · Автор: ${esc(x.author_id || "—")} · просмотров: ${x.views || 0}${x.note ? " · комментарий: " + esc(x.note) : ""}</p>

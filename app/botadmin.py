@@ -185,6 +185,7 @@ def listing_queue(db: Session, header: str = "") -> Reply:
     text = (f"{header}{title} #{item.id} (в очереди: {waiting})\n"
             f"{CATEGORY.get(item.category, item.category)} · {item.city}\n{_facts(item)}\n\n{body}\n\n"
             f"Контакт: {item.contact or '—'}\nАвтор: {item.author_telegram_id}"
+            + ("".join(f"\n⚠️ {f}" for f in adminx.listing_flags(db, item)))
             + ("\n\n⚠️ Нет фото: для этого раздела они обязательны, одобрить нельзя" if no_photo else ""))
     first = [] if no_photo else [("✅ " + ("Одобрить правку" if edit else "Одобрить"), f"a:L:ok:{item.id}")]
     return Reply(text, [first + [("✏️ Доработать", f"a:L:fix:{item.id}")], [("❌ Отклонить", f"a:L:no:{item.id}")], BACK],
