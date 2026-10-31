@@ -47,6 +47,27 @@ def open_app_markup() -> InlineKeyboardMarkup:
     ]])
 
 
+# Разделы меню бота (ТЗ § 5.1). Mini App открывает нужный раздел по параметру ?section=
+MENU_SECTIONS = [
+    ("💼 Работа", "job"),
+    ("🏠 Жильё", "housing"),
+    ("🛍️ Барахолка", "marketplace"),
+    ("💗 Знакомства", "dating"),
+    ("👥 Сообщество", "community"),
+    ("📘 Гид", "guide"),
+]
+
+
+def menu_markup() -> InlineKeyboardMarkup:
+    base = settings.webapp_url.rstrip("/")
+    rows = []
+    for i in range(0, len(MENU_SECTIONS), 2):
+        row = [InlineKeyboardButton(text=label, web_app=WebAppInfo(url=f"{base}/?section={key}"))
+               for label, key in MENU_SECTIONS[i:i + 2]]
+        rows.append(row)
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
 def moderate(listing_id: int, decision: str, reason: str = "") -> tuple[Listing | None, str]:
     """Change status of a pending listing. Returns (listing, error message)."""
     with SessionLocal() as db:
@@ -64,7 +85,7 @@ def moderate(listing_id: int, decision: str, reason: str = "") -> tuple[Listing 
 def register(dp: Dispatcher, bot: Bot) -> None:
     @dp.message(CommandStart())
     async def start(message: Message):
-        await message.answer(WELCOME, reply_markup=open_app_markup())
+        await message.answer(WELCOME + "\nВыберите нужный раздел:", reply_markup=menu_markup())
 
     @dp.message(Command("help"))
     async def help_cmd(message: Message):

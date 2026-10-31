@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app import payments
 from app.auth import current_user_id
 from app.config import settings
-from app.database import Base, engine, get_db, SessionLocal
+from app.database import Base, engine, get_db, SessionLocal, migrate
 from app.models import (
     Listing, Favorite, Conversation, Message, User, Block, Report,
     Pricing, Placement, Payment, Group, Article,
@@ -21,19 +21,24 @@ from app.schemas import (
     CATEGORIES, MAX_ACTIVE_PER_CATEGORY,
 )
 from app.seed import seed_reference
+from app.users import get_or_create_user, writer, is_blocked_pair
+from app.models import DatingProfile
+from app.dating import router as dating_router
 from app.payments import PaymentError, aware, now
 
 Base.metadata.create_all(bind=engine)
+migrate()
 with SessionLocal() as _db:
     seed_reference(_db)
 
-app = FastAPI(title="KOREA HUB API", version="0.3.0")
+app = FastAPI(title="KOREA HUB API", version="0.4.0")
+app.include_router(dating_router)
 STATIC = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
 REPORT_REASONS = {"fraud", "fake", "spam", "offensive", "inappropriate", "rights", "minor", "profile"}
 REPORTS_TO_HIDE = 3  # distinct reporters that hide a listing until a moderator decides
-REPORT_TARGETS = {"listing", "user", "message"}
+REPORT_TARGETS = {"listing", "user", "message", "dating"}
 
 
 @app.get("/")
@@ -52,33 +57,6 @@ def health():
 
 
 # ---------- Users, consent, blocks ----------
-
-def get_or_create_user(db: Session, tg_id: str) -> User:
-    user = db.get(User, tg_id)
-    if user is None:
-        user = User(tg_id=tg_id)
-        db.add(user)
-        db.commit()
-        db.refresh(user)
-    return user
-
-
-def writer(user_id: str = Depends(current_user_id), db: Session = Depends(get_db)) -> str:
-    """Dependency for actions that change data: account must be active and consented."""
-    user = get_or_create_user(db, user_id)
-    if user.deleted_at is not None or user.blocked:
-        raise HTTPException(403, "Аккаунт недоступен")
-    if user.consent_at is None:
-        raise HTTPException(403, "Сначала примите пользовательское соглашение в приложении")
-    return user_id
-
-
-def is_blocked_pair(db: Session, a: str, b: str) -> bool:
-    return db.scalar(select(Block.id).where(or_(
-        (Block.blocker_tg_id == a) & (Block.blocked_tg_id == b),
-        (Block.blocker_tg_id == b) & (Block.blocked_tg_id == a),
-    )).limit(1)) is not None
-
 
 class ConsentIn(BaseModel):
     accept: bool
@@ -188,6 +166,10 @@ def create_report(payload: ReportIn, user_id: str = Depends(writer), db: Session
         listing = db.get(Listing, int(payload.target_id)) if payload.target_id.isdigit() else None
         if listing is None or listing.author_telegram_id == user_id:
             raise HTTPException(400, "Нельзя пожаловаться на это объявление")
+    if payload.target_type == "dating":
+        profile = db.get(DatingProfile, int(payload.target_id)) if payload.target_id.isdigit() else None
+        if profile is None or profile.owner_tg_id == user_id:
+            raise HTTPException(400, "Нельзя пожаловаться на эту анкету")
     if payload.target_type == "user" and payload.target_id == user_id:
         raise HTTPException(400, "Нельзя пожаловаться на себя")
     existing = db.scalar(select(Report).where(
@@ -326,13 +308,14 @@ def my_conversations(user_id: str = Depends(current_user_id), db: Session = Depe
         other = conv.seller_tg_id if conv.buyer_tg_id == user_id else conv.buyer_tg_id
         if is_blocked_pair(db, user_id, other):
             continue
-        listing = db.get(Listing, conv.listing_id)
+        listing = db.get(Listing, conv.listing_id) if conv.listing_id else None
         last = db.scalar(select(Message).where(Message.conversation_id == conv.id)
                          .order_by(desc(Message.id)).limit(1))
         out.append(ConversationOut(
             id=conv.id,
             listing_id=conv.listing_id,
-            listing_title=listing.title if listing else "Объявление удалено",
+            listing_title=("Знакомство" if conv.match_key else
+                           (listing.title if listing else "Объявление удалено")),
             last_text=last.text if last else "",
             last_at=last.created_at if last else None,
         ))
@@ -485,6 +468,10 @@ def decide_report(report_id: int, decision: str, x_admin_key: str | None = Heade
             listing = db.get(Listing, int(report.target_id))
             if listing:
                 listing.status = "hidden"
+        if report.target_type == "dating" and report.target_id.isdigit():
+            profile = db.get(DatingProfile, int(report.target_id))
+            if profile:
+                profile.status = "rejected"
         if report.target_type == "user":
             user = db.get(User, report.target_id)
             if user:

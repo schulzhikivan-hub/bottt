@@ -66,14 +66,39 @@ class Favorite(Base):
 
 
 class Conversation(Base):
-    """A chat between a buyer and the listing's author, about one listing."""
+    """Chat about a listing (buyer and seller) or a dating match (match_key = "id1:id2")."""
     __tablename__ = "conversations"
     __table_args__ = (UniqueConstraint("listing_id", "buyer_tg_id", name="uq_conversation"),)
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    listing_id: Mapped[int] = mapped_column(ForeignKey("listings.id", ondelete="CASCADE"), index=True)
+    listing_id: Mapped[int | None] = mapped_column(
+        ForeignKey("listings.id", ondelete="CASCADE"), index=True, nullable=True)
     buyer_tg_id: Mapped[str] = mapped_column(String(40), index=True)
     seller_tg_id: Mapped[str] = mapped_column(String(40), index=True)
+    match_key: Mapped[str | None] = mapped_column(String(80), unique=True, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class DatingProfile(Base):
+    """Dating profile. Visible only after moderation; contacts are never shown."""
+    __tablename__ = "dating_profiles"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    owner_tg_id: Mapped[str] = mapped_column(String(40), unique=True, index=True)
+    birth_year: Mapped[int] = mapped_column(Integer)
+    gender: Mapped[str] = mapped_column(String(1))  # f or m
+    city: Mapped[str] = mapped_column(String(80), index=True)
+    bio: Mapped[str] = mapped_column(Text, default="")
+    photo_key: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    # pending, published, rejected
+    status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class DatingLike(Base):
+    __tablename__ = "dating_likes"
+    __table_args__ = (UniqueConstraint("from_tg", "to_tg", name="uq_dating_like"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    from_tg: Mapped[str] = mapped_column(String(40), index=True)
+    to_tg: Mapped[str] = mapped_column(String(40), index=True)
 
 
 class Message(Base):

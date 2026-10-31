@@ -26,6 +26,8 @@ services:
     # Not published to the host: only Caddy reaches it.
     expose:
       - "8000"
+    volumes:
+      - uploads_data:/srv/uploads
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 
   bot:
@@ -55,5 +57,6 @@ services:
 
 volumes:
   postgres_data:
+  uploads_data:
   caddy_data:
   caddy_config:

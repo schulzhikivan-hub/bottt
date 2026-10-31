@@ -15,7 +15,7 @@
     <button data-cat="marketplace" class="tile orange"><span>🛍️</span><b>Барахолка</b><small>Купить и продать</small></button>
     <button class="tile violet" data-view="community"><span>👥</span><b>Сообщество</b><small>Группы по странам</small></button>
     <button class="tile teal" data-view="guide"><span>📘</span><b>Гид</b><small>Визы, документы, жильё</small></button>
-    <button class="tile pink" data-soon="Знакомства"><span>💗</span><b>Знакомства</b><small>В разработке</small></button>
+    <button class="tile pink" data-view="dating"><span>💗</span><b>Знакомства</b><small>Анкеты 18+</small></button>
   </section>
   <div class="section-head"><div><span class="eyebrow">СВЕЖИЕ ПУБЛИКАЦИИ</span><h2 id="listTitle">Последние объявления</h2></div><button class="link" id="allBtn">Все →</button></div>
   <div id="listings" class="listings"><div class="empty">Загружаем объявления…</div></div>
@@ -48,6 +48,13 @@
     <button class="wide" id="exportBtn">Выгрузить мои данные</button>
     <button class="wide danger" id="deleteBtn">Удалить аккаунт</button>
   </div>
+</section>
+
+<section id="view-dating" hidden>
+  <div class="section-head"><div><span class="eyebrow">ЗНАКОМСТВА 18+</span><h2>Анкеты</h2></div>
+    <button class="link" id="myDatingBtn">Моя анкета</button></div>
+  <div class="search"><select id="datingGender"><option value="">Все</option><option value="f">Девушки</option><option value="m">Парни</option></select></div>
+  <div id="datingList" class="listings"></div>
 </section>
 
 <section id="view-community" hidden>
@@ -88,6 +95,15 @@
 
 <div id="services" class="modal hidden"><div class="sheet"><div class="sheet-top"><b>Продвижение</b><button id="closeServices">✕</button></div>
 <div id="serviceList"></div></div></div>
+
+<div id="datingModal" class="modal hidden"><div class="sheet"><div class="sheet-top"><b>Моя анкета</b><button id="closeDating">✕</button></div>
+<form id="datingForm"><label>Год рождения<input name="birth_year" type="number" min="1930" max="2100" required></label>
+<label>Пол<select name="gender"><option value="f">Женщина</option><option value="m">Мужчина</option></select></label>
+<label>Город<input name="city" required maxlength="80" placeholder="Например: Сеул"></label>
+<label>О себе<textarea name="bio" rows="3" maxlength="500"></textarea></label>
+<label>Фото (JPEG, PNG или WebP, до 5 МБ)<input name="photo" type="file" accept="image/jpeg,image/png,image/webp"></label>
+<p class="muted">Анкета появится после проверки модератором. Контакты в анкете не нужны: общение только в приложении.</p>
+<button class="submit" type="submit">Сохранить</button></form></div></div>
 
 <div id="toast" class="toast"></div>
 <script src="/static/app.js"></script></body></html>

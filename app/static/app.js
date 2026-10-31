@@ -205,8 +205,60 @@ async function buy(listingId, code) {
   });
 }
 
+async function loadDating() {
+  const box = $("#datingList");
+  box.innerHTML = '<div class="empty">Загружаем анкеты…</div>';
+  const params = new URLSearchParams();
+  if ($("#datingGender").value) params.set("gender", $("#datingGender").value);
+  try {
+    const items = await api("/api/dating?" + params);
+    box.innerHTML = items.length ? items.map((p) => `
+      <article class="listing" data-profile="${p.id}">
+        <img class="photo" src="${esc(p.photo_url)}" alt="" loading="lazy">
+        <h3>${p.age} · ${p.gender === "f" ? "девушка" : "парень"}</h3>
+        <p>📍 ${esc(p.city)}</p><p>${esc(p.bio)}</p>
+        <div class="actions"><button data-act="like">♥ Нравится</button>
+        <button data-act="dreport" class="secondary">⚑ Пожаловаться</button></div>
+      </article>`).join("")
+      : '<div class="empty">Анкет пока нет. Загляните позже.</div>';
+  } catch (e) { box.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+
+async function openMyDating() {
+  if (!(await requireConsent())) return;
+  const f = $("#datingForm");
+  try {
+    const me = await api("/api/dating/me");
+    if (me) {
+      f.birth_year.value = me.age ? new Date().getFullYear() - me.age : "";
+      f.gender.value = me.gender; f.city.value = me.city;
+      toast("Статус анкеты: " + ({pending: "на проверке", published: "опубликована", rejected: "отклонена"}[me.status] || me.status));
+    }
+  } catch (e) { toast(e.message); }
+  $("#datingModal").classList.remove("hidden");
+}
+
+$("#datingForm").onsubmit = async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  try {
+    await api("/api/dating/profile", {method: "PUT", body: JSON.stringify({
+      birth_year: Number(f.birth_year.value), gender: f.gender.value,
+      city: f.city.value.trim(), bio: f.bio.value.trim()})});
+    if (f.photo.files[0]) {
+      const data = new FormData();
+      data.append("file", f.photo.files[0]);
+      const r = await fetch("/api/dating/photo", {method: "POST", body: data,
+        headers: {"X-Telegram-Init-Data": tg?.initData || ""}});
+      if (!r.ok) throw new Error((await r.json()).detail || "Не удалось загрузить фото");
+    }
+    $("#datingModal").classList.add("hidden");
+    toast("Анкета отправлена на проверку");
+  } catch (err) { toast(err.message); }
+};
+
 function showView(name) {
-  for (const v of ["home", "saved", "chats", "chat", "profile", "community", "guide", "article"]) {
+  for (const v of ["home", "saved", "chats", "chat", "profile", "community", "guide", "article", "dating"]) {
     const el = $("#view-" + v);
     if (el) el.hidden = v !== name;
   }
@@ -219,6 +271,7 @@ function showView(name) {
   if (name === "profile") loadProfile();
   if (name === "community") loadGroups();
   if (name === "guide") loadGuide();
+  if (name === "dating") loadDating();
   window.scrollTo({top: 0});
 }
 
@@ -247,6 +300,27 @@ document.addEventListener("click", async (e) => {
         if (!(await requireConsent())) return;
         const c = await api(`/api/listings/${id}/conversation`, {method: "POST"});
         openChat(c.id, article.querySelector("h3")?.textContent);
+      }
+      if (btn.dataset.act === "like") {
+        if (!(await requireConsent())) return;
+        const profileId = article.dataset.profile;
+        const r = await api(`/api/dating/${profileId}/like`, {method: "POST"});
+        if (r.match) {
+          toast("Взаимная симпатия! Можно писать");
+          openChat(r.conversation_id, "Знакомство");
+        } else {
+          article.remove();
+          toast("Отправлено");
+        }
+      }
+      if (btn.dataset.act === "dreport") {
+        if (!(await requireConsent())) return;
+        const profileId = article.dataset.profile;
+        const reason = prompt("Причина:\n" + Object.entries(REASONS).map(([k, v]) => k + " — " + v).join("\n"), "profile");
+        if (!reason || !REASONS[reason.trim()]) return;
+        await api("/api/reports", {method: "POST", body: JSON.stringify(
+          {target_type: "dating", target_id: profileId, reason: reason.trim()})});
+        toast("Жалоба отправлена. Спасибо!");
       }
       if (btn.dataset.act === "promo") {
         if (!(await requireConsent())) return;
@@ -286,6 +360,23 @@ $("#addBtn").onclick = async () => { if (await requireConsent()) $("#modal").cla
 $("#closeModal").onclick = () => $("#modal").classList.add("hidden");
 $("#closeServices").onclick = () => $("#services").classList.add("hidden");
 $("#chatBack").onclick = () => showView("chats");
+$("#myDatingBtn").onclick = openMyDating;
+$("#closeDating").onclick = () => $("#datingModal").classList.add("hidden");
+$("#datingGender").onchange = loadDating;
+
+// Переход из меню бота: ?section=job|housing|marketplace|dating|community|guide
+function openFromMenu() {
+  const section = new URLSearchParams(location.search).get("section");
+  if (!section) return false;
+  if (["job", "housing", "marketplace"].includes(section)) {
+    currentCategory = section;
+    $("#listTitle").textContent = CAT[section];
+    showView("home");
+    return true;
+  }
+  if (["dating", "community", "guide"].includes(section)) { showView(section); return true; }
+  return false;
+}
 $("#articleBack").onclick = () => showView("guide");
 
 $("#consentOk").onclick = async () => {
@@ -354,4 +445,4 @@ $("#chatForm").onsubmit = async (e) => {
 };
 
 loadMe().then(() => { if (!me.consent) $("#consent").classList.remove("hidden"); }).catch(() => {});
-loadListings();
+if (!openFromMenu()) loadListings();

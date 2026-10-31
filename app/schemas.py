@@ -39,7 +39,7 @@ class MessageOut(BaseModel):
 
 class ConversationOut(BaseModel):
     id: int
-    listing_id: int
+    listing_id: int | None
     listing_title: str
     last_text: str
     last_at: datetime | None

@@ -6,6 +6,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./koreahub.db"
     admin_api_key: str = "change-me"
     admin_ids: str = ""
+    upload_dir: str = "uploads"
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 settings = Settings()
