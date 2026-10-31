@@ -504,7 +504,17 @@ def pending_listings(actor: str = Depends(staff(*MOD)), db: Session = Depends(ge
     """New listings and waiting edits. For an edit, pending_changes shows what would change."""
     rows = list(db.scalars(select(Listing).where(ops.queue_condition()).order_by(Listing.id)).all())
     shown = catalog.with_promo(db, rows, owner=True)
-    return [{**o.model_dump(mode="json"), "pending_changes": x.pending_changes} for o, x in zip(shown, rows)]
+    return [{**o.model_dump(mode="json"), "pending_changes": x.pending_changes, "author_id": x.author_telegram_id}
+            for o, x in zip(shown, rows)]
+
+
+@app.get("/api/admin/listings/{listing_id}")
+def admin_listing(listing_id: int, actor: str = Depends(staff(*MOD)), db: Session = Depends(get_db)):
+    item = db.get(Listing, listing_id)
+    if item is None:
+        raise HTTPException(404, "Объявление не найдено")
+    shown = catalog.with_promo(db, [item], owner=True)[0]
+    return {**shown.model_dump(mode="json"), "pending_changes": item.pending_changes, "author_id": item.author_telegram_id}
 
 
 @app.post("/api/admin/listings/{listing_id}/{decision}")

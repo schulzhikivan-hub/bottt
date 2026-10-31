@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app import admin_ops as ops
 from app import lifecycle, payments
+from app.fields import LABELS
 from app.photos import photo_root
 from app.admin_auth import MOD, ADM, SUP, ROLES
 from app.audit import log_action
@@ -24,7 +25,7 @@ BACK = [("⬅️ В меню", "a:menu")]
 LEVEL = {"L": MOD, "D": MOD, "R": MOD, "E": MOD, "U": MOD, "S": ADM, "P": ADM, "C": ADM, "J": ADM, "T": SUP}
 # A text answer the bot is waiting for from an administrator: {admin_id: {"kind": ..., ...}}
 PENDING_INPUT: dict[int, dict] = {}
-INPUT_LEVEL = {"listing_fix": MOD, "listing_no": MOD, "find_user": MOD, "block": MOD, "unblock": MOD,
+INPUT_LEVEL = {"listing_hide": MOD, "find_listing": MOD, "listing_fix": MOD, "listing_no": MOD, "find_user": MOD, "block": MOD, "unblock": MOD,
                "price": ADM, "add_staff": SUP}
 
 
@@ -60,7 +61,7 @@ def menu(db: Session, role: str) -> Reply:
          (f"💗 Анкеты ({_count(db, DatingProfile, DatingProfile.status == 'pending')})", "a:D")],
         [(f"🚩 Жалобы ({_count(db, Report, Report.status == 'new')})", "a:R"),
          (f"🏢 Работодатели ({_count(db, User, User.employer_status == 'pending')})", "a:E")],
-        [("👥 Пользователи", "a:U")],
+        [("👥 Пользователи", "a:U"), ("🔎 Найти объявление", "a:L:find")],
     ]
     if role in ADM:
         rows += [[("📊 Статистика", "a:S"), ("💳 Платежи", "a:P")], [("💰 Цены", "a:C"), ("📜 Журнал", "a:J")]]
@@ -89,7 +90,13 @@ def _facts(item: Listing) -> str:
         bits += [str(x) for x in (item.housing_type, f"залог {item.deposit:,}".replace(",", " ") if item.deposit else None,
                                   f"{item.area_m2} м²" if item.area_m2 else None, d.get("station")) if x]
     else:
-        bits += [x for x in (item.goods_category, item.condition, d.get("brand")) if x]
+        goods = {k: v for k, v in LABELS["goods_category"]}.get(item.goods_category or "", item.goods_category)
+        cond = {k: v for k, v in LABELS["condition"]}.get(item.condition or "", item.condition)
+        bits += [str(x) for x in (goods, cond, d.get("brand"), d.get("model"),
+                                  f"{d['year']} г." if d.get("year") else None,
+                                  f"{d['mileage_km']:,} км".replace(",", " ") if d.get("mileage_km") is not None else None,
+                                  f"выезд: {d['service_area']}" if d.get("service_area") else None,
+                                  f"опыт {d['experience_years']} лет" if d.get("experience_years") is not None else None) if x]
     return " · ".join(bits) or "—"
 
 
@@ -117,6 +124,34 @@ def _listing_photo(item: Listing, db: Session) -> Path | None:
         if path.exists():
             return path
     return None
+
+
+STATUS_WORD = {"draft": "черновик", "pending": "на проверке", "approved": "опубликовано", "rejected": "отклонено",
+               "needs_fix": "на доработке", "hidden": "скрыто", "closed": "закрыто автором", "sold": "продано",
+               "expired": "срок истёк", "archived": "удалено автором"}
+
+
+def listing_card(db: Session, listing_id: int, header: str = "") -> Reply:
+    """Any listing by its number, with the actions that fit its state."""
+    item = db.get(Listing, listing_id)
+    if item is None:
+        return Reply(header + f"Объявление #{listing_id} не найдено.", [[("🔎 Искать ещё", "a:L:find")], BACK])
+    photos = db.scalar(select(func.count()).select_from(ListingPhoto).where(ListingPhoto.listing_id == item.id)) or 0
+    text = (f"{header}Объявление #{item.id}: {STATUS_WORD.get(item.status, item.status)}"
+            f"{' · есть правка на проверке' if item.has_edit else ''}\n"
+            f"{CATEGORY.get(item.category, item.category)} · {item.city}\n{_facts(item)}\n\n"
+            f"{_short(item.title, 160)}\n{_short(item.description, 600)}\n\n"
+            f"Фото: {photos} · просмотров: {item.views or 0}\nКонтакт: {item.contact or '—'}\nАвтор: {item.author_telegram_id}"
+            + (f"\nКомментарий: {item.note}" if item.note else ""))
+    rows = []
+    if item.status == "approved":
+        rows.append([("🙈 Скрыть", f"a:L:hide:{item.id}")])
+    if item.status == "hidden":
+        rows.append([("👁 Показать", f"a:L:show:{item.id}")])
+    if item.status == "pending" or item.has_edit:
+        rows.append([("📋 К очереди", "a:L")])
+    rows += [[("🔎 Искать ещё", "a:L:find")], BACK]
+    return Reply(text, rows, photo=_listing_photo(item, db))
 
 
 def listing_queue(db: Session, header: str = "") -> Reply:
@@ -260,6 +295,16 @@ def _handle(db: Session, admin_id: int, role: str, parts: list[str]) -> Reply:
                 return Reply(("Напишите, что исправить (автор это увидит)" if action == "fix"
                               else "Напишите причину отказа (автор её увидит)") + ", или /cancel:",
                              state={"kind": f"listing_{action}", "id": int(arg)})
+            if action == "find":
+                return Reply("Отправьте номер объявления (число) или /cancel:", state={"kind": "find_listing"})
+            if action in ("hide", "show"):
+                if action == "hide":
+                    return Reply("Напишите причину, почему скрыть (автор её увидит), или /cancel:",
+                                 state={"kind": "listing_hide", "id": int(arg)})
+                item = ops.moderate_listing(db, actor, int(arg), "show")
+                reply = listing_card(db, item.id, "👁 Объявление снова опубликовано\n\n")
+                reply.notify.append((item.author_telegram_id, f"Объявление «{_short(item.title, 60)}» снова опубликовано."))
+                return reply
             if action == "ok":
                 before = db.get(Listing, int(arg))
                 was_edit = bool(before and before.status == "approved" and before.has_edit)
@@ -363,6 +408,17 @@ def _handle_text(db: Session, admin_id: int, role: str, text: str) -> Reply | No
             reply = listing_queue(db, f"{'✏️ Возвращено на доработку' if kind == 'listing_fix' else '❌ Отклонено'}: #{item.id}\n\n")
             reply.notify.append((item.author_telegram_id,
                                  f"Объявление «{_short(item.title, 60)}»: {word}.\nКомментарий: {item.note}"))
+            return reply
+        if kind == "find_listing":
+            if not text.isdigit():
+                return Reply("Номер — это число. Отправьте ещё раз или /cancel.", state=state)
+            PENDING_INPUT.pop(admin_id, None)
+            return listing_card(db, int(text))
+        if kind == "listing_hide":
+            item = ops.moderate_listing(db, actor, state["id"], "hide", text)
+            PENDING_INPUT.pop(admin_id, None)
+            reply = listing_card(db, item.id, "🙈 Объявление скрыто\n\n")
+            reply.notify.append((item.author_telegram_id, f"Объявление «{_short(item.title, 60)}» скрыто модератором.\nПричина: {item.note}"))
             return reply
         if kind == "find_user":
             if not text.isdigit():

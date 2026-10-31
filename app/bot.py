@@ -10,14 +10,15 @@ from sqlalchemy import select
 
 from app import lifecycle, payments, searches, webauth
 from app.botadmin import register_admin
+from app.botbrowse import register_browse
 from app.config import settings
 from app.database import SessionLocal
 from app.models import Listing, Admin
 
-WELCOME = "🇰🇷 Добро пожаловать в KOREA HUB!\nРабота, жильё и объявления для жизни в Корее."
+WELCOME = "🇰🇷 Добро пожаловать в KOREA HUB!\nРабота, жильё, знакомства и полезная информация для жизни в Корее."
 HELP_TEXT = (
     "Команды:\n"
-    "/start — открыть приложение\n"
+    "/start — разделы: работа, жильё, барахолка, знакомства, сообщество, гид (смотреть можно прямо в чате)\n"
     "/my — мои объявления и их статус\n"
     "/help — эта справка\n\n"
     "Для администраторов:\n"
@@ -72,27 +73,28 @@ def admin_button() -> list[InlineKeyboardButton]:
 
 
 def menu_markup(staff: bool = False) -> InlineKeyboardMarkup:
-    base = settings.webapp_url.rstrip("/")
-    rows = []
-    for i in range(0, len(MENU_SECTIONS), 2):
-        row = [InlineKeyboardButton(text=label, web_app=WebAppInfo(url=f"{base}/?section={key}"))
-               for label, key in MENU_SECTIONS[i:i + 2]]
-        rows.append(row)
+    """Sections open right here in the chat (see botbrowse); the Mini App button is for writing and adding."""
+    from app import botbrowse
+    markup = botbrowse._markup(botbrowse.home_view().rows)
     if staff:
-        rows.append(admin_button())
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+        markup.inline_keyboard.append(admin_button())
+    return markup
 
 
 def moderate(listing_id: int, decision: str, reason: str = "") -> tuple[Listing | None, str]:
-    """Change status of a pending listing. Returns (listing, error message)."""
+    """Commands /approve and /reject use the same rules as the admin panel (photos, lifetime, journal)."""
+    from app import admin_ops as ops
     with SessionLocal() as db:
-        item = db.get(Listing, listing_id)
-        if item is None:
+        current = db.get(Listing, listing_id)
+        if current is None:
             return None, f"Объявление #{listing_id} не найдено."
-        if item.status != "pending":
-            return item, f"Объявление #{listing_id} уже {STATUS_RU.get(item.status, item.status)}."
-        item.status = "approved" if decision == "approve" else "rejected"
-        db.commit()
+        if current.status != "pending" and not (current.status == "approved" and current.has_edit):
+            return current, f"Объявление #{listing_id} уже {STATUS_RU.get(current.status, current.status)}."
+        try:
+            item = ops.moderate_listing(db, "bot-command", listing_id,
+                                        "approve" if decision == "approve" else "reject", reason or "Отклонено модератором")
+        except ops.OpError as e:
+            return None, e.message
         db.refresh(item)
         return item, ""
 
@@ -212,6 +214,7 @@ def register(dp: Dispatcher, bot: Bot) -> None:
         await message.answer(f"Объявление #{item.id} отклонено.")
         await notify_author(bot, item, f"Ваше объявление отклонено. Причина: {parts[1]}")
 
+    register_browse(dp, bot)  # before the admin text handler, so a search word is not swallowed
     register_admin(dp, bot)
 
     # ---- Paid services (ТЗ № 2) ----

@@ -124,18 +124,64 @@ async function loadDash() {
 }
 
 // ---- модерация объявлений ----
+const STATUS_RU = {draft: "черновик", pending: "на проверке", approved: "опубликовано", rejected: "отклонено", needs_fix: "на доработке",
+                   hidden: "скрыто", closed: "закрыто автором", sold: "продано", expired: "срок истёк", archived: "удалено автором"};
+const DIFF_LABELS = {title: "Название", description: "Описание", contact: "Контакт", price: "Пометка к цене", price_amount: "Сумма",
+                     city: "Место", region_code: "Регион", district_id: "Район", details: "Подробности"};
+function factsOf(x) {
+  const d = x.details || {};
+  const bits = [];
+  if (x.price_amount != null) bits.push(new Intl.NumberFormat("ru-RU").format(x.price_amount) + " ₩");
+  if (x.category === "job") {
+    bits.push(...[d.company, d.position, x.schedule, x.employment].filter(Boolean));
+    if ((x.visas || []).length) bits.push("визы " + x.visas.join(", "));
+    if (x.housing_provided) bits.push("жильё");
+    if (x.meals_provided) bits.push("питание");
+  } else if (x.category === "housing") {
+    bits.push(...[x.housing_type, x.deposit ? "залог " + x.deposit : "", x.area_m2 ? x.area_m2 + " м²" : "", d.station].filter(Boolean));
+  } else {
+    bits.push(...[x.goods_category, x.condition, d.brand, d.model, d.year, d.mileage_km ? d.mileage_km + " км" : "",
+                  d.service_area ? "выезд: " + d.service_area : "", d.experience_years != null ? "опыт " + d.experience_years + " лет" : ""].filter(Boolean));
+  }
+  return bits.join(" · ") || "—";
+}
+function listingCardHtml(x, queue) {
+  const edit = x.status === "approved" && x.has_edit;
+  const diff = edit ? Object.entries(x.pending_changes || {}).map(([k, v]) =>
+    `<li><b>${esc(DIFF_LABELS[k] || k)}:</b> ${esc(typeof v === "object" ? JSON.stringify(v) : String(v))}</li>`).join("") : "";
+  const photos = (x.photos || []).filter((p) => p.status !== "removal").map((p) =>
+    `<a href="${esc(p.url)}" target="_blank"><img src="${esc(p.thumb)}" style="height:90px;border-radius:8px;margin:2px;${p.status === "pending" ? "outline:2px solid orange" : ""}" alt=""></a>`).join("");
+  const waiting = (x.photos || []).filter((p) => p.status === "pending" || p.status === "removal").length;
+  const buttons = (edit || x.status === "pending")
+    ? `<button class="act ok" data-act="approve">${edit ? "Одобрить правку" : "Одобрить"}</button>
+       <button class="act warn" data-act="needs_fix">${edit ? "Отклонить правку с комментарием" : "Вернуть на доработку"}</button>
+       <button class="act no" data-act="reject">Отклонить</button>`
+    : x.status === "approved" ? '<button class="act no" data-act="hide">Скрыть</button>'
+    : x.status === "hidden" ? '<button class="act ok" data-act="show">Показать</button>' : "";
+  return `<div class="card" data-id="${x.id}">
+    <b>#${x.id} ${esc(x.title)}</b> <span class="muted">· ${esc(STATUS_RU[x.status] || x.status)}${edit ? " · правка на проверке" : ""}</span>
+    <div class="meta">${esc(CAT[x.category] || x.category)} · ${esc(x.city)} · ${esc(x.price || "цена не указана")}</div>
+    <div class="meta">${esc(factsOf(x))}</div>
+    ${edit ? `<div><b>Что меняется:</b><ul>${diff || "<li>только фото</li>"}</ul></div>` : `<p>${esc(x.description || "")}</p>`}
+    <div>${photos || '<span class="muted">Фото нет</span>'}${waiting ? ` <span class="muted">(ждут решения: ${waiting})</span>` : ""}</div>
+    <p class="muted">Контакт: ${esc(x.contact || "—")} · Автор: ${esc(x.author_id || "—")} · просмотров: ${x.views || 0}${x.note ? " · комментарий: " + esc(x.note) : ""}</p>
+    ${buttons}
+  </div>`;
+}
 async function loadListings() {
   const rows = await api("/api/admin/listings");
-  $("#tab-listings").innerHTML = rows.length ? rows.map((x) => `
-    <div class="card" data-id="${x.id}">
-      <b>#${x.id} ${esc(x.title)}</b>
-      <div class="meta">${esc(CAT[x.category] || x.category)} · ${esc(x.city)} · ${esc(x.price || "цена не указана")}</div>
-      <p>${esc(x.description || "")}</p>
-      <p class="muted">Контакт: ${esc(x.contact || "—")}</p>
-      <button class="act ok" data-act="approve">Одобрить</button>
-      <button class="act warn" data-act="needs_fix">Вернуть на доработку</button>
-      <button class="act no" data-act="reject">Отклонить</button>
-    </div>`).join("") : '<div class="card muted">Очередь модерации пуста.</div>';
+  $("#tab-listings").innerHTML = `
+    <div class="card"><b>Найти объявление по номеру</b>
+      <input id="findId" type="number" min="1" placeholder="Например: 125" style="width:140px">
+      <button class="act ok" id="findBtn">Найти</button><div id="found"></div></div>
+    <h3>Очередь модерации (${rows.length})</h3>` +
+    (rows.length ? rows.map((x) => listingCardHtml(x, true)).join("") : '<div class="card muted">Очередь модерации пуста.</div>');
+  $("#findBtn").onclick = async () => {
+    const id = $("#findId").value;
+    if (!id) return;
+    try { $("#found").innerHTML = listingCardHtml(await api(`/api/admin/listings/${id}`), false); }
+    catch (err) { $("#found").innerHTML = `<p class="muted">${esc(err.message)}</p>`; }
+  };
 }
 $("#tab-listings").addEventListener("click", async (e) => {
   const btn = e.target.closest("[data-act]");
@@ -143,8 +189,8 @@ $("#tab-listings").addEventListener("click", async (e) => {
   const id = btn.closest("[data-id]").dataset.id;
   const act = btn.dataset.act;
   let url = `/api/admin/listings/${id}/${act}`;
-  if (act !== "approve") {
-    const reason = ask(act === "reject" ? "Причина отказа (автор её увидит):" : "Что исправить (автор её увидит):");
+  if (act !== "approve" && act !== "show") {
+    const reason = ask(act === "reject" ? "Причина отказа (автор её увидит):" : act === "hide" ? "Причина, почему скрыть (автор её увидит):" : "Что исправить (автор её увидит):");
     if (!reason) return;
     url += "?reason=" + encodeURIComponent(reason);
   }

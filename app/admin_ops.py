@@ -33,14 +33,28 @@ def moderate_listing(db: Session, actor: str, listing_id: int, decision: str, re
 
     For a published listing with a waiting edit, approve publishes the edit and reject/needs_fix drops it
     (the published version stays); for a new listing they publish or return it as before."""
-    if decision not in {"approve", "reject", "needs_fix"}:
-        raise OpError(400, "Решение: approve, reject или needs_fix")
-    if decision in {"reject", "needs_fix"} and len(reason.strip()) < 3:
+    if decision not in {"approve", "reject", "needs_fix", "hide", "show"}:
+        raise OpError(400, "Решение: approve, reject, needs_fix, hide или show")
+    if decision in {"reject", "needs_fix", "hide"} and len(reason.strip()) < 3:
         raise OpError(400, "Укажите причину (не короче 3 символов)")
     item = db.get(Listing, listing_id)
     if item is None:
         raise OpError(404, "Объявление не найдено")
     before = item.status
+    if decision == "hide":
+        if item.status != "approved":
+            raise OpError(409, "Скрыть можно только опубликованное объявление")
+        item.status, item.note = "hidden", reason.strip()
+        log_action(db, actor, "listing.hide", "listing", listing_id, reason)
+        db.commit()
+        return item
+    if decision == "show":
+        if item.status != "hidden":
+            raise OpError(409, "Это объявление не скрыто")
+        item.status, item.note = "approved", ""
+        log_action(db, actor, "listing.show", "listing", listing_id, "")
+        db.commit()
+        return item
     if item.status == "approved" and item.has_edit:
         if decision == "approve":
             lifecycle.apply_edit(db, item)
