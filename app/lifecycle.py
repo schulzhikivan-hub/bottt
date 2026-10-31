@@ -60,6 +60,7 @@ def publish(db: Session, item: Listing) -> None:
     item.published_at = item.published_at or moment
     item.expires_at = moment + dt.timedelta(days=settings.listing_ttl_days)
     item.expiry_notified = False
+    item.expiry_notified_1d = False
     show_waiting_photos(db, item)
     db.flush()
     photos.refresh_edit_flag(db, item)
@@ -111,6 +112,7 @@ def renew(item: Listing) -> None:
     item.status = "approved"
     item.expires_at = now() + dt.timedelta(days=settings.listing_ttl_days)
     item.expiry_notified = False
+    item.expiry_notified_1d = False
 
 
 def expire_listings(db: Session, at: dt.datetime | None = None) -> list[Listing]:
@@ -131,5 +133,17 @@ def expiring_soon(db: Session, days: int = 3, at: dt.datetime | None = None) -> 
             if x.expires_at is not None and moment < aware(x.expires_at) <= moment + dt.timedelta(days=days)]
     for item in soon:
         item.expiry_notified = True
+    db.commit()
+    return soon
+
+
+def expiring_tomorrow(db: Session, at: dt.datetime | None = None) -> list[Listing]:
+    """Listings that end within a day and whose author has not had the last reminder yet."""
+    moment = at or now()
+    soon = [x for x in db.scalars(select(Listing).where(Listing.status == "approved", Listing.expiry_notified_1d.is_(False))).all()
+            if x.expires_at is not None and moment < aware(x.expires_at) <= moment + dt.timedelta(days=1)]
+    for item in soon:
+        item.expiry_notified_1d = True
+        item.expiry_notified = True  # a listing that jumps straight to "tomorrow" needs no 3-day reminder
     db.commit()
     return soon

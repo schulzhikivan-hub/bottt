@@ -23,6 +23,7 @@ class ApplyIn(BaseModel):
 
 class StatusIn(BaseModel):
     status: Literal["invited", "rejected"]
+    reply: str = Field(default="", max_length=500)
 
 
 def _vacancy(db: Session, listing_id: int) -> Listing:
@@ -42,13 +43,17 @@ def apply(listing_id: int, payload: ApplyIn, user_id: str = Depends(writer), db:
     if is_blocked_pair(db, user_id, item.author_telegram_id):
         raise HTTPException(403, "Отклик недоступен")
     guard.rate_limit(user_id, "apply", 20, 3600)
-    if db.scalar(select(Application.id).where(Application.listing_id == listing_id,
-                                              Application.applicant_tg_id == user_id)):
-        raise HTTPException(409, "Вы уже откликались на эту вакансию")
     user = get_or_create_user(db, user_id)
-    row = Application(listing_id=listing_id, applicant_tg_id=user_id, message=payload.message.strip(),
-                      contact=payload.contact.strip(), visa=user.visa or "", city=user.city or "")
-    db.add(row)
+    row = db.scalar(select(Application).where(Application.listing_id == listing_id,
+                                              Application.applicant_tg_id == user_id))
+    if row is not None and row.status != "withdrawn":
+        raise HTTPException(409, "Вы уже откликались на эту вакансию")
+    if row is None:
+        row = Application(listing_id=listing_id, applicant_tg_id=user_id)
+        db.add(row)
+    # a withdrawn reply can be sent again: the same row starts over
+    row.message, row.contact = payload.message.strip(), payload.contact.strip()
+    row.visa, row.city, row.status, row.reply = user.visa or "", user.city or "", "new", ""
     db.commit()
     guard.notify_user(db, item.author_telegram_id, f"📩 Новый отклик на вакансию «{item.title}». Откройте «Профиль» → «Отклики».")
     return {"id": row.id, "status": row.status}
@@ -58,8 +63,23 @@ def apply(listing_id: int, payload: ApplyIn, user_id: str = Depends(writer), db:
 def my_applications(user_id: str = Depends(writer), db: Session = Depends(get_db)):
     rows = db.execute(select(Application, Listing).join(Listing, Listing.id == Application.listing_id)
                       .where(Application.applicant_tg_id == user_id).order_by(Application.id.desc())).all()
-    return [{"id": a.id, "listing_id": l.id, "title": l.title, "city": l.city, "status": a.status,
-             "listing_status": l.status, "created_at": a.created_at} for a, l in rows]
+    return [{"id": a.id, "listing_id": l.id, "title": l.title, "city": l.city, "status": a.status, "reply": a.reply,
+             "listing_status": l.status, "created_at": a.created_at,
+             "can_withdraw": a.status in ("new", "viewed", "invited")} for a, l in rows]
+
+
+@router.post("/api/applications/{app_id}/withdraw")
+def withdraw(app_id: int, user_id: str = Depends(writer), db: Session = Depends(get_db)):
+    row = db.get(Application, app_id)
+    if row is None or row.applicant_tg_id != user_id:
+        raise HTTPException(404, "Отклик не найден")
+    if row.status == "withdrawn":
+        raise HTTPException(409, "Отклик уже отозван")
+    if row.status == "rejected":
+        raise HTTPException(409, "Работодатель уже ответил отказом")
+    row.status = "withdrawn"
+    db.commit()
+    return {"id": row.id, "status": row.status}
 
 
 @router.get("/api/listings/{listing_id}/applications")
@@ -67,10 +87,12 @@ def listing_applications(listing_id: int, user_id: str = Depends(writer), db: Se
     item = db.get(Listing, listing_id)
     if item is None or item.author_telegram_id != user_id:
         raise HTTPException(404, "Вакансия не найдена")
-    rows = db.scalars(select(Application).where(Application.listing_id == listing_id)
+    rows = db.scalars(select(Application).join(User, User.tg_id == Application.applicant_tg_id)
+                      .where(Application.listing_id == listing_id, Application.status != "withdrawn",
+                             User.blocked.is_(False), User.deleted_at.is_(None))
                       .order_by(Application.id.desc())).all()
     out = [{"id": a.id, "message": a.message, "contact": a.contact, "visa": a.visa, "city": a.city,
-            "status": a.status, "created_at": a.created_at} for a in rows]
+            "status": a.status, "reply": a.reply, "created_at": a.created_at} for a in rows]
     for a in rows:  # opening the list marks new ones as seen (the answer shows the state before)
         if a.status == "new":
             a.status = "viewed"
@@ -84,10 +106,15 @@ def set_status(app_id: int, payload: StatusIn, user_id: str = Depends(writer), d
     item = db.get(Listing, row.listing_id) if row else None
     if row is None or item is None or item.author_telegram_id != user_id:
         raise HTTPException(404, "Отклик не найден")
+    if row.status == "withdrawn":
+        raise HTTPException(409, "Соискатель отозвал отклик")
     row.status = payload.status
+    row.reply = payload.reply.strip()
     db.commit()
     text = {"invited": f"🎉 Вас приглашают по вакансии «{item.title}». Автор свяжется с вами по контакту из отклика.",
             "rejected": f"По вакансии «{item.title}» автор выбрал другого кандидата."}[payload.status]
+    if row.reply:
+        text += f"\nОтвет работодателя: {row.reply}"
     guard.notify_user(db, row.applicant_tg_id, text)
     return {"id": row.id, "status": row.status}
 
@@ -98,7 +125,7 @@ def counts(db: Session, listing_ids: list[int]) -> dict[int, dict]:
         return {}
     out: dict[int, dict] = {}
     for lid, status, n in db.execute(select(Application.listing_id, Application.status, func.count())
-                                     .where(Application.listing_id.in_(listing_ids))
+                                     .where(Application.listing_id.in_(listing_ids), Application.status != "withdrawn")
                                      .group_by(Application.listing_id, Application.status)).all():
         c = out.setdefault(lid, {"total": 0, "new": 0})
         c["total"] += n
@@ -115,3 +142,14 @@ def author_card(db: Session, item: Listing) -> dict:
     verified = bool(user and user.employer_status == "approved")
     return {"verified": verified, "company": user.company_name if verified else "",
             "active": active, "since": user.created_at.year if user and user.created_at else None}
+
+
+def notify_ended(db: Session, item: Listing, why: str) -> int:
+    """A vacancy is closed, hidden or over: tell the people who are still waiting for an answer."""
+    if item.category != "job":
+        return 0
+    waiting = db.scalars(select(Application).where(Application.listing_id == item.id,
+                                                   Application.status.in_(["new", "viewed", "invited"]))).all()
+    for row in waiting:
+        guard.notify_user(db, row.applicant_tg_id, f"Вакансия «{item.title}» {why}.")
+    return len(waiting)

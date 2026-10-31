@@ -227,7 +227,10 @@ def create_report(payload: ReportIn, user_id: str = Depends(writer), db: Session
         listing = db.get(Listing, int(payload.target_id))
         if count >= REPORTS_TO_HIDE and listing and listing.status == "approved":
             listing.status = "hidden"
+            listing.note = "Скрыто по жалобам пользователей, пока модератор проверяет"
             db.commit()
+            notify_user(db, listing.author_telegram_id,
+                        f"Объявление «{listing.title}» временно скрыто: на него пожаловались несколько человек. Модератор проверит его.")
     return {"received": True}
 
 
@@ -380,10 +383,15 @@ def my_conversations(user_id: str = Depends(current_user_id), db: Session = Depe
 
 
 @app.get("/api/conversations/{conv_id}/messages", response_model=list[MessageOut])
-def get_messages(conv_id: int, user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
+def get_messages(conv_id: int, before_id: int | None = Query(default=None, ge=1),
+                 limit: int = Query(default=100, ge=1, le=100),
+                 user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
+    """Latest messages; pass before_id (the oldest id on screen) to load earlier ones."""
     _get_conversation_for(db, conv_id, user_id)
-    msgs = db.scalars(select(Message).where(Message.conversation_id == conv_id)
-                      .order_by(desc(Message.id)).limit(100)).all()
+    stmt = select(Message).where(Message.conversation_id == conv_id)
+    if before_id is not None:
+        stmt = stmt.where(Message.id < before_id)
+    msgs = db.scalars(stmt.order_by(desc(Message.id)).limit(limit)).all()
     return [MessageOut(id=m.id, mine=m.sender_tg_id == user_id, text=m.text, created_at=m.created_at)
             for m in reversed(msgs)]
 
@@ -393,7 +401,8 @@ def send_message(conv_id: int, payload: MessageIn, user_id: str = Depends(writer
                  db: Session = Depends(get_db)):
     conv = _get_conversation_for(db, conv_id, user_id)
     other = conv.seller_tg_id if conv.buyer_tg_id == user_id else conv.buyer_tg_id
-    if is_blocked_pair(db, user_id, other):
+    other_user = db.get(User, other)
+    if is_blocked_pair(db, user_id, other) or (other_user is not None and (other_user.blocked or other_user.deleted_at)):
         raise HTTPException(403, "Диалог недоступен")
     text = payload.text.strip()
     if not text:

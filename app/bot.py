@@ -13,7 +13,7 @@ from app.botadmin import register_admin
 from app.botbrowse import register_browse
 from app.config import settings
 from app.database import SessionLocal
-from app.models import Listing, Admin
+from app.models import Application, Listing, Admin
 
 WELCOME = "🇰🇷 Добро пожаловать в KOREA HUB!\nРабота, жильё, знакомства и полезная информация для жизни в Корее."
 HELP_TEXT = (
@@ -272,10 +272,18 @@ def _expire_once() -> list[tuple[str, str]]:
             messages.append((item.author_telegram_id,
                              f"Объявление «{item.title}» закончится через несколько дней. "
                              "Продлите его: Профиль → Мои объявления → Продлить."))
+        for item in lifecycle.expiring_tomorrow(db):
+            messages.append((item.author_telegram_id,
+                             f"Завтра закончится срок объявления «{item.title}». Продлить можно в один шаг: "
+                             "Профиль → Мои объявления → Продлить."))
         for item in lifecycle.expire_listings(db):
             messages.append((item.author_telegram_id,
                              f"Срок объявления «{item.title}» истёк, его больше не видно в поиске. "
                              "Продлить можно в приложении: Профиль → Мои объявления."))
+            if item.category == "job":
+                for row in db.scalars(select(Application).where(Application.listing_id == item.id,
+                                                                Application.status.in_(["new", "viewed", "invited"]))).all():
+                    messages.append((row.applicant_tg_id, f"Вакансия «{item.title}» закрыта: срок объявления истёк."))
         ended = payments.expire_placements(db)
         for placement in ended:
             listing = db.get(Listing, placement.listing_id)

@@ -8,9 +8,11 @@ from datetime import timedelta
 from sqlalchemy import select, func, or_, and_
 from sqlalchemy.orm import Session
 
-from app import lifecycle
+from app import applications, guard, lifecycle
 from app.audit import log_action
 from app.models import Listing, Report, User, DatingProfile, Payment
+
+BLOCK_NOTE = "Аккаунт автора заблокирован"
 from app.payments import now, aware
 
 
@@ -47,6 +49,7 @@ def moderate_listing(db: Session, actor: str, listing_id: int, decision: str, re
         item.status, item.note = "hidden", reason.strip()
         log_action(db, actor, "listing.hide", "listing", listing_id, reason)
         db.commit()
+        applications.notify_ended(db, item, "скрыта модератором")
         return item
     if decision == "show":
         if item.status != "hidden":
@@ -83,11 +86,15 @@ def decide_report(db: Session, actor: str, report_id: int, decision: str) -> Rep
         raise OpError(404, "Жалоба не найдена")
     if report.status != "new":
         raise OpError(409, "Жалоба уже рассмотрена")
+    hidden_listing = None
     if decision == "resolve":
         if report.target_type == "listing" and report.target_id.isdigit():
             listing = db.get(Listing, int(report.target_id))
             if listing:
+                if listing.status == "approved":
+                    hidden_listing = listing
                 listing.status = "hidden"
+                listing.note = "Скрыто по жалобам пользователей"
         if report.target_type == "dating" and report.target_id.isdigit():
             profile = db.get(DatingProfile, int(report.target_id))
             if profile:
@@ -96,10 +103,37 @@ def decide_report(db: Session, actor: str, report_id: int, decision: str) -> Rep
             user = db.get(User, report.target_id)
             if user:
                 user.blocked = True
+                user.block_reason = "По жалобам пользователей"
     report.status = "resolved" if decision == "resolve" else "rejected"
     log_action(db, actor, f"report.{decision}", "report", report_id, report.target_type + ":" + report.target_id)
     db.commit()
+    # the person who complained learns the result; the author learns why the listing is gone
+    guard.notify_user(db, report.reporter_tg_id,
+                      "Спасибо за жалобу. Мы проверили и приняли меры." if decision == "resolve"
+                      else "Мы проверили вашу жалобу: нарушений не нашли. Спасибо, что помогаете делать KOREA HUB лучше.")
+    if hidden_listing is not None:
+        guard.notify_user(db, hidden_listing.author_telegram_id,
+                          f"Объявление «{hidden_listing.title}» скрыто по жалобам пользователей. Если это ошибка, напишите в поддержку.")
+        applications.notify_ended(db, hidden_listing, "скрыта модератором")
     return report
+
+
+def hide_user_listings(db: Session, tg_id: str) -> list[Listing]:
+    """A blocked account disappears from the site: its published listings are hidden (and come back on unblock)."""
+    items = list(db.scalars(select(Listing).where(Listing.author_telegram_id == tg_id, Listing.status == "approved")).all())
+    for item in items:
+        item.status, item.note = "hidden", BLOCK_NOTE
+    return items
+
+
+def restore_user_listings(db: Session, tg_id: str) -> int:
+    count = 0
+    for item in db.scalars(select(Listing).where(Listing.author_telegram_id == tg_id, Listing.status == "hidden",
+                                                 Listing.note == BLOCK_NOTE)).all():
+        expired = item.expires_at is not None and aware(item.expires_at) <= now()
+        item.status, item.note = ("expired" if expired else "approved"), ""
+        count += 1
+    return count
 
 
 def block_user(db: Session, actor: str, tg_id: str, reason: str) -> User:
@@ -110,8 +144,11 @@ def block_user(db: Session, actor: str, tg_id: str, reason: str) -> User:
         raise OpError(404, "Пользователь не найден")
     user.blocked = True
     user.block_reason = reason.strip()[:300]
-    log_action(db, actor, "user.block", "user", tg_id, reason)
+    hidden = hide_user_listings(db, tg_id)
+    log_action(db, actor, "user.block", "user", tg_id, f"{reason}; скрыто объявлений: {len(hidden)}")
     db.commit()
+    for item in hidden:
+        applications.notify_ended(db, item, "скрыта модератором")
     return user
 
 
@@ -123,7 +160,8 @@ def unblock_user(db: Session, actor: str, tg_id: str, reason: str) -> User:
         raise OpError(404, "Пользователь не найден")
     user.blocked = False
     user.block_reason = ""
-    log_action(db, actor, "user.unblock", "user", tg_id, reason)
+    back = restore_user_listings(db, tg_id)
+    log_action(db, actor, "user.unblock", "user", tg_id, f"{reason}; возвращено объявлений: {back}")
     db.commit()
     return user
 

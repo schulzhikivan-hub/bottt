@@ -24,6 +24,8 @@ const ALL_VIEWS = [...MAIN_VIEWS, "detail", "chat", "article"];
 let currentChat = null;
 let chatTimer = null;
 let lastMessageKey = "";
+let olderMessages = [];   // подгруженные по кнопке «Ранее»
+let hasOlder = false;
 let me = null;
 let favIds = new Set();
 let ownItems = {};
@@ -479,7 +481,19 @@ function authorBlock(x) {
   if (a.since) parts.push(`На сайте с ${a.since}`);
   return parts.length ? `<p class="author">${parts.join(" · ")}</p>` : "";
 }
-const APP_STATUS = {new: "Отправлен", viewed: "Просмотрен", invited: "Приглашение", rejected: "Отказ"};
+const APP_STATUS = {new: "Отправлен", viewed: "Просмотрен", invited: "Приглашение", rejected: "Отказ", withdrawn: "Отозван"};
+// Окно с коротким текстом (ответ работодателя): системное prompt() в Telegram может не открыться
+function askText(title, placeholder = "") {
+  return new Promise((resolve) => {
+    $("#textTitle").textContent = title;
+    $("#textInput").value = "";
+    $("#textInput").placeholder = placeholder;
+    $("#textSheet").classList.remove("hidden");
+    const done = (value) => { $("#textSheet").classList.add("hidden"); resolve(value); };
+    $("#textOk").onclick = () => done($("#textInput").value.trim());
+    $("#closeText").onclick = () => done(null);
+  });
+}
 let applyListingId = null;
 $("#closeApply").onclick = () => $("#applyModal").classList.add("hidden");
 $("#applyForm").onsubmit = async (e) => {
@@ -560,27 +574,46 @@ async function loadConversations() {
 }
 async function openChat(id, title) {
   currentChat = id;
-  lastMessageKey = "";
+  lastMessageKey = ""; olderMessages = []; hasOlder = false;
   $("#chatTitle").textContent = title || "Чат";
   showView("chat", {push: true});
   await loadMessages();
   clearInterval(chatTimer);
   chatTimer = setInterval(loadMessages, 5000);
 }
+const msgHtml = (m) => `
+      <div class="bubble ${m.mine ? "mine" : ""}">${esc(m.text)}<small>${new Date(m.created_at).toLocaleTimeString("ru-RU", {hour: "2-digit", minute: "2-digit"})}</small></div>`;
+function renderMessages(items, stick) {
+  const all = [...olderMessages, ...items];
+  const box = $("#messages");
+  const before = box.scrollHeight;
+  box.innerHTML = (hasOlder ? '<button class="link older" data-older>Ранее</button>' : "") +
+    (all.length ? all.map(msgHtml).join("") : '<div class="empty">Напишите первое сообщение</div>');
+  box.scrollTop = stick ? box.scrollHeight : box.scrollHeight - before;
+}
 async function loadMessages() {
   if (!currentChat) return;
   try {
-    const items = await api(`/api/conversations/${currentChat}/messages`);
+    const items = await api(`/api/conversations/${currentChat}/messages?limit=50`);
     const key = items.length + ":" + (items[items.length - 1]?.id || 0);
     if (key === lastMessageKey) return;  // ничего нового: не перерисовываем, экран не дёргается
+    if (lastMessageKey === "") hasOlder = items.length === 50;
     lastMessageKey = key;
-    const box = $("#messages");
-    box.innerHTML = items.length ? items.map((m) => `
-      <div class="bubble ${m.mine ? "mine" : ""}">${esc(m.text)}<small>${new Date(m.created_at).toLocaleTimeString("ru-RU", {hour: "2-digit", minute: "2-digit"})}</small></div>`).join("")
-      : '<div class="empty">Напишите первое сообщение</div>';
-    box.scrollTop = box.scrollHeight;
+    renderMessages(items, true);
+    window.__latest = items;
   } catch (e) { toast(e.message); }
 }
+async function loadOlder() {
+  const oldest = (olderMessages[0] || window.__latest?.[0])?.id;
+  if (!oldest) return;
+  try {
+    const older = await api(`/api/conversations/${currentChat}/messages?limit=50&before_id=${oldest}`);
+    hasOlder = older.length === 50;
+    olderMessages = [...older, ...olderMessages];
+    renderMessages(window.__latest || [], false);
+  } catch (e) { toast(e.message); }
+}
+document.addEventListener("click", (e) => { if (e.target.closest("[data-older]")) loadOlder(); });
 $("#chatBack").onclick = goBack;
 $("#chatBlock").onclick = async () => {
   if (!currentChat || !(await confirmDialog("Заблокировать собеседника? Он больше не сможет вам писать."))) return;
@@ -604,7 +637,7 @@ $("#chatForm").onsubmit = async (e) => {
   try {
     await api(`/api/conversations/${currentChat}/messages`, {method: "POST", body: JSON.stringify({text})});
     input.value = "";
-    lastMessageKey = "";
+    lastMessageKey = ""; olderMessages = []; hasOlder = false;
     await loadMessages();
   } catch (err) { toast(err.message); }
 };
@@ -652,7 +685,7 @@ async function showApplicants(id) {
   body.innerHTML = `<h3>Отклики: ${esc(ownItems[id]?.title || "")}</h3>` + (rows.map((a) => `<article class="listing" data-app="${a.id}">
     <div class="listing-top"><div><b>${esc(a.contact)}</b><div class="meta">${a.city ? "📍 " + esc(a.city) : ""}${a.visa ? " · виза " + esc(a.visa) : ""}</div></div>
     <span class="status ${a.status === "invited" ? "approved" : a.status === "rejected" ? "rejected" : "pending"}">${APP_STATUS[a.status] || a.status}</span></div>
-    ${a.message ? `<p>${esc(a.message)}</p>` : ""}<p class="muted">${esc(fmtDate(a.created_at))}</p>
+    ${a.message ? `<p>${esc(a.message)}</p>` : ""}${a.reply ? `<p class="muted">Ваш ответ: ${esc(a.reply)}</p>` : ""}<p class="muted">${esc(fmtDate(a.created_at))}</p>
     <div class="actions"><button data-appstatus="invited" data-appid="${a.id}">Пригласить</button>
     <button data-appstatus="rejected" data-appid="${a.id}" class="secondary">Отказать</button></div></article>`).join("")
     || '<div class="empty">Откликов пока нет</div>');
@@ -700,8 +733,11 @@ async function openMenu(key) {
     const rows = await api("/api/me/applications");
     body.innerHTML = rows.length ? rows.map((a) => `<article class="listing" data-open="${a.listing_id}">
       <div class="listing-top"><div><h3>${esc(a.title)}</h3><div class="meta">📍 ${esc(a.city)}</div></div>
-      <span class="status ${a.status === "invited" ? "approved" : a.status === "rejected" ? "rejected" : "pending"}">${APP_STATUS[a.status] || a.status}</span></div>
-      <p class="muted">${esc(fmtDate(a.created_at))}</p></article>`).join("")
+      <span class="status ${a.status === "invited" ? "approved" : ["rejected", "withdrawn"].includes(a.status) ? "rejected" : "pending"}">${APP_STATUS[a.status] || a.status}</span></div>
+      ${a.reply ? `<p><b>Ответ работодателя:</b> ${esc(a.reply)}</p>` : ""}
+      ${a.listing_status !== "approved" ? '<p class="muted">Вакансия закрыта</p>' : ""}
+      <p class="muted">${esc(fmtDate(a.created_at))}</p>
+      ${a.can_withdraw ? `<div class="actions"><button class="secondary" data-withdraw="${a.id}">Отозвать отклик</button></div>` : ""}</article>`).join("")
       : '<div class="empty">Вы пока не откликались на вакансии</div>';
   }
   if (key === "searches") {
@@ -1211,10 +1247,20 @@ document.addEventListener("click", async (e) => {
     catch (err) { toast(err.message); }
     return;
   }
+  const wd = e.target.closest("[data-withdraw]");
+  if (wd) {
+    if (!(await confirmDialog("Отозвать отклик? Работодатель его больше не увидит."))) return;
+    try { await api(`/api/applications/${wd.dataset.withdraw}/withdraw`, {method: "POST"}); toast("Отклик отозван"); openMenu("applications"); }
+    catch (err) { toast(err.message); }
+    return;
+  }
   const st = e.target.closest("[data-appstatus]");
   if (st) {
     try {
-      await api(`/api/applications/${st.dataset.appid}`, {method: "PUT", body: JSON.stringify({status: st.dataset.appstatus})});
+      const reply = await askText(st.dataset.appstatus === "invited" ? "Что передать кандидату?" : "Что ответить кандидату?",
+                                  st.dataset.appstatus === "invited" ? "Когда и куда прийти" : "Например: место уже занято");
+      if (reply === null) return;
+      await api(`/api/applications/${st.dataset.appid}`, {method: "PUT", body: JSON.stringify({status: st.dataset.appstatus, reply})});
       const badge = st.closest("[data-app]").querySelector(".status");
       badge.textContent = APP_STATUS[st.dataset.appstatus];
       badge.className = "status " + (st.dataset.appstatus === "invited" ? "approved" : "rejected");

@@ -101,7 +101,8 @@ class Listing(Base):
     # Life cycle: draft -> pending -> approved -> (expired | closed | sold | archived)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
-    expiry_notified: Mapped[bool] = mapped_column(Boolean, default=False)
+    expiry_notified: Mapped[bool] = mapped_column(Boolean, default=False)       # warned 3 days ahead
+    expiry_notified_1d: Mapped[bool] = mapped_column(Boolean, default=False)    # warned 1 day ahead
     views: Mapped[int] = mapped_column(Integer, default=0)
     # Edits of a published listing wait for a moderator while the old version stays visible
     pending_changes: Mapped[dict | None] = mapped_column(JSON(none_as_null=True), nullable=True)
@@ -328,7 +329,8 @@ class Application(Base):
     contact: Mapped[str] = mapped_column(String(160), default="")
     visa: Mapped[str] = mapped_column(String(8), default="")
     city: Mapped[str] = mapped_column(String(100), default="")
-    status: Mapped[str] = mapped_column(String(12), default="new")  # new, viewed, invited, rejected
+    status: Mapped[str] = mapped_column(String(12), default="new")  # new, viewed, invited, rejected, withdrawn
+    reply: Mapped[str] = mapped_column(String(500), default="")  # the employer's answer to the applicant
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 

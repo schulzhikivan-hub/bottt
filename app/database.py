@@ -47,9 +47,11 @@ def migrate() -> None:
                        "furnished BOOLEAN", "goods_category VARCHAR(16)", "negotiable BOOLEAN", "details JSON"):
             conn.execute(text(f"ALTER TABLE listings ADD COLUMN IF NOT EXISTS {column}"))
         for column in ("published_at TIMESTAMPTZ", "expires_at TIMESTAMPTZ", "expiry_notified BOOLEAN DEFAULT FALSE",
-                       "views INTEGER DEFAULT 0", "pending_changes JSON", "has_edit BOOLEAN DEFAULT FALSE"):
+                       "views INTEGER DEFAULT 0", "pending_changes JSON", "has_edit BOOLEAN DEFAULT FALSE",
+                       "expiry_notified_1d BOOLEAN DEFAULT FALSE"):
             conn.execute(text(f"ALTER TABLE listings ADD COLUMN IF NOT EXISTS {column}"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_listings_expires_at ON listings (expires_at)"))
+        conn.execute(text("ALTER TABLE applications ADD COLUMN IF NOT EXISTS reply VARCHAR(500) DEFAULT ''"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_listings_has_edit ON listings (has_edit)"))
         # Listings published before expiry dates existed get 30 days from now
         conn.execute(text("UPDATE listings SET expires_at = NOW() + INTERVAL '30 days', published_at = created_at "

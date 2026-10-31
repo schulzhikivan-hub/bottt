@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.audit import log_action
 from app.admin_auth import staff, MOD, ADM, SUP
 from app.guard import check_text
-from app import catalog, lifecycle
+from app import applications, catalog, lifecycle
 from app.catalog import drop_irrelevant
 from app.fields import (VisaCode, Employment, Schedule, SalaryPeriod, HousingType, GoodsCategory)
 from app import admin_ops as ops
@@ -125,8 +125,10 @@ def renew_listing(listing_id: int, user_id: str = Depends(writer), db: Session =
 
 @router.post("/api/listings/{listing_id}/close", response_model=ListingOut)
 def close_listing(listing_id: int, user_id: str = Depends(writer), db: Session = Depends(get_db)):
-    return _set_status(db, listing_id, user_id, {"approved"}, "closed",
-                       "Закрыть можно только опубликованное объявление")
+    result = _set_status(db, listing_id, user_id, {"approved"}, "closed",
+                         "Закрыть можно только опубликованное объявление")
+    applications.notify_ended(db, db.get(Listing, listing_id), "закрыта")
+    return result
 
 
 @router.post("/api/listings/{listing_id}/sold", response_model=ListingOut)
@@ -148,8 +150,11 @@ def reopen_listing(listing_id: int, user_id: str = Depends(writer), db: Session 
 @router.post("/api/listings/{listing_id}/archive")
 def archive_listing(listing_id: int, user_id: str = Depends(writer), db: Session = Depends(get_db)):
     item = _own_listing(db, listing_id, user_id)
+    was_live = item.status == "approved"
     item.status = "archived"
     db.commit()
+    if was_live:
+        applications.notify_ended(db, item, "снята с публикации")
     return {"id": item.id, "status": "archived"}
 
 
