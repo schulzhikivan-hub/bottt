@@ -24,6 +24,7 @@
   <div class="hero"><div class="skyline"></div><div class="hero-text"><span>한국에서 나은 삶</span><b>KOREA HUB</b></div></div>
   <div class="sticky">
     <div class="searchbar">
+      <div class="suggest" id="suggestBox" hidden></div>
       <input id="search" type="search" placeholder="Поиск вакансий, жилья, товаров и услуг…" enterkeyhint="search" autocomplete="off">
       <button class="icon-btn" id="filterBtn" aria-label="Фильтры">
         <svg viewBox="0 0 24 24"><path d="M4 6h9M19 6h1M4 12h3M13 12h7M4 18h11M21 18h-1"/><circle cx="16" cy="6" r="2.2"/><circle cx="10" cy="12" r="2.2"/><circle cx="18" cy="18" r="2.2"/></svg>
@@ -176,11 +177,18 @@
 
 <section id="view-community" class="view" hidden>
   <div class="section-head"><div><h2>👥 Сообщество</h2></div></div>
+  <div class="chips" id="groupTabs">
+    <button class="chip active" data-kind="nation">Национальности</button>
+    <button class="chip" data-kind="city">Города</button>
+  </div>
   <div id="groups" class="listings"></div>
 </section>
 
 <section id="view-guide" class="view" hidden>
   <div class="section-head"><div><h2>📘 Гид по Корее</h2></div></div>
+  <input id="guideSearch" type="search" class="gsearch" placeholder="Поиск по статьям" autocomplete="off">
+  <div id="guideFound" class="listings"></div>
+  <div id="guideMarks"></div>
   <div id="guideSections" class="listings"></div>
 </section>
 
@@ -357,6 +365,13 @@
 <div data-for="marketplace" hidden>
   <label>Категория<select name="goods_category" data-list="goods_category" data-any="Любая"></select></label>
   <label>Состояние<select name="condition" data-list="condition" data-any="Любое"></select></label>
+  <div id="carFilters" hidden>
+    <div class="row2">
+      <label>Год от<input name="year_min" type="number" inputmode="numeric" min="1950" max="2100" placeholder="2012"></label>
+      <label>Год до<input name="year_max" type="number" inputmode="numeric" min="1950" max="2100" placeholder="2024"></label>
+    </div>
+    <label>Пробег до, км<input name="mileage_max" type="number" inputmode="numeric" min="0" placeholder="150000"></label>
+  </div>
 </div>
 <p class="muted" id="filterHint">Выберите раздел «Работа», «Жильё» или «Барахолка», чтобы появились дополнительные фильтры.</p>
 <button class="submit" type="submit">Показать</button>

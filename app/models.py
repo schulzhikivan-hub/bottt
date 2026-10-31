@@ -112,6 +112,9 @@ class Listing(Base):
     pending_changes: Mapped[dict | None] = mapped_column(JSON(none_as_null=True), nullable=True)
     has_edit: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     # Lower-case copies kept by the application, so search ignores case in any database locale
+    year: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)       # cars: copied from details for filters
+    mileage_km: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    reserved: Mapped[bool] = mapped_column(Boolean, default=False)  # goods, cars, services: "someone is already buying"
     search_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     city_key: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
@@ -123,6 +126,9 @@ def _refresh_search_fields(mapper, connection, target):
     extra = [str(v) for k, v in (target.details or {}).items() if k in ("company", "position", "station", "brand")]
     target.search_text = " ".join([target.title or "", target.description or "", target.city or "", *extra]).lower()
     target.city_key = (target.city or "").strip().lower()
+    d = target.details or {}
+    target.year = d.get("year") if isinstance(d.get("year"), int) else None
+    target.mileage_km = d.get("mileage_km") if isinstance(d.get("mileage_km"), int) else None
 
 
 class Favorite(Base):
@@ -231,6 +237,7 @@ class Group(Base):
     telegram_link: Mapped[str] = mapped_column(String(255), default="")
     description: Mapped[str] = mapped_column(Text, default="")
     members_count: Mapped[int] = mapped_column(Integer, default=0)
+    kind: Mapped[str] = mapped_column(String(10), default="nation")  # nation | city
 
 
 class Article(Base):
@@ -361,3 +368,12 @@ class Notification(Base):
     text: Mapped[str] = mapped_column(String(600))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, index=True)
     read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ArticleBookmark(Base):
+    __tablename__ = "article_bookmarks"
+    __table_args__ = (UniqueConstraint("user_tg_id", "article_id", name="uq_article_bookmark"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_tg_id: Mapped[str] = mapped_column(String(40), index=True)
+    article_id: Mapped[int] = mapped_column(ForeignKey("articles.id", ondelete="CASCADE"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

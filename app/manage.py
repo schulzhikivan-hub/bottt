@@ -97,6 +97,24 @@ def _set_status(db: Session, listing_id: int, user_id: str, allowed: set[str], n
     return item
 
 
+class ReserveIn(BaseModel):
+    on: bool = True
+
+
+@router.post("/api/listings/{listing_id}/reserve", response_model=ListingOut)
+def reserve_listing(listing_id: int, payload: ReserveIn, user_id: str = Depends(writer), db: Session = Depends(get_db)):
+    """«Зарезервировано»: the listing stays visible with a mark, so people know someone is already buying."""
+    item = _own_listing(db, listing_id, user_id)
+    if item.category != "marketplace":
+        raise HTTPException(400, "Отметка «зарезервировано» есть только у товаров, автомобилей и услуг")
+    if item.status != "approved":
+        raise HTTPException(409, "Отметить можно только опубликованное объявление")
+    item.reserved = payload.on
+    db.commit()
+    db.refresh(item)
+    return catalog.with_promo(db, [item], owner=True)[0]
+
+
 @router.post("/api/listings/{listing_id}/submit", response_model=ListingOut)
 def submit_draft(listing_id: int, user_id: str = Depends(writer), db: Session = Depends(get_db)):
     """Send a draft to moderation (housing and goods need a photo)."""

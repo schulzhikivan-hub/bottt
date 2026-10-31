@@ -169,7 +169,7 @@ async function loadFields() {
 const labelOf = (list, value) => (fieldDefs?.[list] || []).find((i) => i.value === value)?.label || value;
 
 // ---------- карточки ----------
-const promoBadge = (x) => (x.promo ? `<span class="promo ${x.promo}">${PROMO[x.promo] || ""}</span>` : "");
+const promoBadge = (x) => (x.promo ? `<span class="promo ${x.promo}">${PROMO[x.promo] || ""}</span>` : "") + (x.reserved ? '<span class="reserved-tag">Зарезервировано</span>' : "");
 function priceText(x) {
   if (x.price_amount == null) return x.price || "Цена договорная";
   let text = fmtKRW(x.price_amount);
@@ -247,9 +247,9 @@ function listingCard(x) {
 const DEFAULT_FILTERS = {q: "", category: "", region_code: "", district_id: "", price_min: "", price_max: "", sort: "new",
                          housing_provided: false, meals_provided: false, condition: "", rooms_min: "",
                          visa: "", schedule: "", employment: "", housing_type: "", deposit_max: "", area_min: "",
-                         pets_allowed: false, furnished: false, goods_category: ""};
+                         pets_allowed: false, furnished: false, goods_category: "", year_min: "", year_max: "", mileage_max: ""};
 const SECTION_FILTERS = ["housing_provided", "meals_provided", "condition", "rooms_min", "visa", "schedule", "employment",
-                         "housing_type", "deposit_max", "area_min", "pets_allowed", "furnished", "goods_category"];
+                         "housing_type", "deposit_max", "area_min", "pets_allowed", "furnished", "goods_category", "year_min", "year_max", "mileage_max"];
 let filters = {...DEFAULT_FILTERS};
 const page = {offset: 0, loading: false};
 
@@ -366,10 +366,43 @@ async function loadCatalog(append = false) {
 function reloadCatalog() { homeLoaded = false; updateFilterUi(); loadCatalog(); $("#scroll").scrollTop = 0; }
 
 let searchTimer = null;
+const HISTORY_KEY = "khSearchHistory";
+const loadHistory = () => { try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]"); } catch (e) { return []; } };
+function rememberSearch(q) {
+  if (!q || q.length < 2) return;
+  localStorage.setItem(HISTORY_KEY, JSON.stringify([q, ...loadHistory().filter((x) => x !== q)].slice(0, 8)));
+}
+const hideSuggest = () => { $("#suggestBox").hidden = true; };
+function runSearch(q) {
+  $("#search").value = q;
+  filters.q = q.trim();
+  rememberSearch(filters.q);
+  hideSuggest();
+  reloadCatalog();
+}
+let suggestTimer = null;
+async function showSuggest() {
+  const q = $("#search").value.trim();
+  const box = $("#suggestBox");
+  let rows = [];
+  if (!q) rows = loadHistory().map((t) => ({type: "history", text: t}));
+  else { try { rows = await api("/api/suggest?q=" + encodeURIComponent(q), {quiet: true}); } catch (e) { rows = []; } }
+  if (!rows.length) { hideSuggest(); return; }
+  box.innerHTML = rows.map((r) => `<button type="button" data-suggest="${esc(r.text)}">${r.type === "place" ? "📍" : r.type === "history" ? "🕘" : "🔎"} ${esc(r.text)}<small>${{place: "место", history: "недавно", title: ""}[r.type] || ""}</small></button>`).join("");
+  box.hidden = false;
+}
 $("#search").addEventListener("input", () => {
   clearTimeout(searchTimer);
-  searchTimer = setTimeout(() => { filters.q = $("#search").value.trim(); reloadCatalog(); }, 350);
+  clearTimeout(suggestTimer);
+  suggestTimer = setTimeout(showSuggest, 200);
+  searchTimer = setTimeout(() => { filters.q = $("#search").value.trim(); rememberSearch(filters.q); reloadCatalog(); }, 600);
 });
+$("#search").addEventListener("focus", showSuggest);
+$("#suggestBox").addEventListener("pointerdown", (e) => {
+  const b = e.target.closest("[data-suggest]");
+  if (b) { e.preventDefault(); clearTimeout(searchTimer); runSearch(b.dataset.suggest); }
+});
+document.addEventListener("pointerdown", (e) => { if (!e.target.closest(".searchbar")) hideSuggest(); });
 $("#search").addEventListener("keydown", (e) => {
   if (e.key === "Enter") { clearTimeout(searchTimer); filters.q = $("#search").value.trim(); reloadCatalog(); e.target.blur(); }
 });
@@ -416,6 +449,11 @@ async function setGeo(container, regionCode, districtId, anyRegion, anyDistrict)
 function showBlocks(formSelector, category) {
   document.querySelectorAll(`${formSelector} [data-for]`).forEach((el) => { el.hidden = el.dataset.for !== category; });
 }
+function syncCarFilters() {
+  const f = $("#filterForm");
+  $("#carFilters").hidden = f.goods_category.value !== "auto";
+}
+document.addEventListener("change", (e) => { if (e.target.matches('#filterForm [name="goods_category"]')) syncCarFilters(); });
 async function openFilters() {
   const f = $("#filterForm");
   await loadFields();
@@ -427,6 +465,7 @@ async function openFilters() {
     if (el.type === "checkbox") el.checked = Boolean(filters[k]); else el.value = filters[k] || "";
   }
   showBlocks("#filterForm", filters.category);
+  syncCarFilters();
   $("#filterHint").hidden = Boolean(filters.category);
   $("#filters").classList.remove("hidden");
 }
@@ -438,7 +477,7 @@ function applyFormToFilters(f) {
   for (const k of SECTION_FILTERS) {
     const el = f.elements[k];
     // Скрытые поля других разделов не учитываются
-    const visible = el && !el.closest("[data-for]")?.hidden;
+    const visible = el && !el.closest("[data-for]")?.hidden && !el.closest("#carFilters")?.hidden;
     filters[k] = visible ? (el.type === "checkbox" ? el.checked : el.value) : DEFAULT_FILTERS[k];
   }
 }
@@ -480,7 +519,7 @@ function authorBlock(x) {
   const parts = [];
   if (a.verified) parts.push(`<b class="badge-ok">✔ Проверенный работодатель${a.company ? ": " + esc(a.company) : ""}</b>`);
   else if (a.since) parts.push("<b>Автор</b>");
-  if (a.active) parts.push(`Активных объявлений: ${a.active}`);
+  if (a.active) parts.push(`<button class="alink" data-author="${x.id}">Все объявления автора: ${a.active}</button>`);
   if (a.since) parts.push(`На сайте с ${a.since}`);
   return parts.length ? `<p class="author">${parts.join(" · ")}</p>` : "";
 }
@@ -676,6 +715,7 @@ function ownCard(x) {
   if (x.category === "job" && x.applications?.total) acts.push(`<button data-own="applicants">📨 Отклики (${x.applications.total}${x.applications.new ? ", новых " + x.applications.new : ""})</button>`);
   if (["approved", "expired"].includes(x.status)) acts.push('<button data-own="renew">🔄 Продлить</button>');
   if (x.status === "approved") {
+    if (x.category === "marketplace") acts.push(`<button data-own="reserve" class="secondary">${x.reserved ? "Снять резерв" : "Зарезервировано"}</button>`);
     acts.push('<button data-own="close" class="secondary">Закрыть</button>');
     if (x.category === "marketplace") acts.push('<button data-own="sold" class="secondary">Продано</button>');
     acts.push('<button data-own="promo">🚀 Продвинуть</button>');
@@ -761,7 +801,7 @@ function renderPayments(rows) {
     <p class="muted">${fmtDate(p.paid_at || p.created_at)}</p></article>`).join("")
     : '<div class="empty">Платежей пока нет</div>';
 }
-const SUB_TITLES = {applications: "Мои отклики", searches: "Мои поиски", settings: "Настройки", employer: "Статус работодателя",
+const SUB_TITLES = {author: "Объявления автора", applications: "Мои отклики", searches: "Мои поиски", settings: "Настройки", employer: "Статус работодателя",
                     payments: "История платежей", blocks: "Заблокированные", help: "Помощь и правила"};
 let currentSubKey = "";
 // Раздел кабинета открывается отдельной страницей со стрелкой «назад», а не под длинным списком
@@ -1141,17 +1181,30 @@ $("#closeAdd").onclick = () => $("#addSheet").classList.add("hidden");
 document.querySelectorAll("[data-add]").forEach((b) => b.onclick = () => openAdd(b.dataset.add));
 
 // ---------- сообщество и гид ----------
-async function loadGroups() {
-  try {
-    const items = await api("/api/groups");
-    $("#groups").innerHTML = items.map((g) => {
-      const inner = `<span class="gflag">${esc(g.flag)}</span><span class="gtext"><b>${esc(g.name)}</b><small>${esc(g.description)}</small></span><span class="chev">›</span>`;
-      return g.telegram_link
-        ? `<a class="grow" data-tglink href="${esc(g.telegram_link)}" target="_blank" rel="noopener">${inner}</a>`
-        : `<div class="grow off">${inner}</div>`;
-    }).join("");
-  } catch (e) { $("#groups").innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+let groupKind = "nation";
+let groupItems = [];
+function renderGroups() {
+  const items = groupItems.filter((g) => (g.kind || "nation") === groupKind);
+  $("#groups").innerHTML = items.length ? items.map((g) => {
+    const members = g.members_count ? `<span class="members">${new Intl.NumberFormat("ru-RU").format(g.members_count)} участников</span>` : "";
+    const inner = `<span class="gflag">${esc(g.flag)}</span><span class="gtext"><b>${esc(g.name)}</b><small>${esc(g.description)}</small>${members ? "<br>" + members : ""}</span><span class="chev">›</span>`;
+    return g.telegram_link
+      ? `<a class="grow" data-tglink href="${esc(g.telegram_link)}" target="_blank" rel="noopener">${inner}</a>`
+      : `<div class="grow off">${inner}</div>`;
+  }).join("") : '<div class="empty">Групп пока нет. Скоро добавим.</div>';
 }
+document.querySelectorAll("#groupTabs .chip").forEach((chip) => chip.addEventListener("click", () => {
+  groupKind = chip.dataset.kind;
+  document.querySelectorAll("#groupTabs .chip").forEach((c) => c.classList.toggle("active", c === chip));
+  renderGroups();
+}));
+async function loadGroups() {
+  try { groupItems = await api("/api/groups"); renderGroups(); }
+  catch (e) { $("#groups").innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+let guideTimer = null;
+const articleRow = (a) => `<article class="listing convo" data-article="${a.id}"><h3>${esc(a.title)}</h3>
+  <p class="muted">${esc(SECTIONS[a.section] || "")}${a.saved ? " · ★ в закладках" : ""}</p></article>`;
 async function loadGuide() {
   try {
     const items = await api("/api/articles");
@@ -1160,8 +1213,24 @@ async function loadGuide() {
       return `<article class="listing convo" data-section="${key}"><h3>${esc(title)}</h3>
         <p>${count ? count + " статей" : "Материалы готовятся: статьи появятся после проверки по официальным источникам"}</p></article>`;
     }).join("");
+    let marks = [];
+    try { marks = await api("/api/me/bookmarks", {quiet: true}); } catch (e) { /* без входа закладок нет */ }
+    $("#guideMarks").innerHTML = marks.length ? `<h4 class="grp">Мои закладки</h4><div class="listings">${marks.map(articleRow).join("")}</div>` : "";
   } catch (e) { $("#guideSections").innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
 }
+$("#guideSearch").addEventListener("input", () => {
+  clearTimeout(guideTimer);
+  guideTimer = setTimeout(async () => {
+    const q = $("#guideSearch").value.trim();
+    const box = $("#guideFound");
+    if (!q) { box.innerHTML = ""; $("#guideSections").hidden = false; return; }
+    $("#guideSections").hidden = true;
+    try {
+      const rows = await api("/api/articles?q=" + encodeURIComponent(q), {quiet: true});
+      box.innerHTML = rows.length ? rows.map(articleRow).join("") : '<div class="empty">Ничего не найдено в проверенных статьях</div>';
+    } catch (e) { box.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+  }, 300);
+});
 async function openSection(key) {
   const items = (await api("/api/articles")).filter((a) => a.section === key);
   $("#articleTitle").textContent = SECTIONS[key] || "Раздел";
@@ -1171,9 +1240,17 @@ async function openSection(key) {
     : '<div class="empty">Статьи в этом разделе пока готовятся.</div>';
   showView("article", {push: true});
 }
+let currentArticle = null;
 async function openArticle(id) {
   const a = await api(`/api/articles/${id}`);
-  $("#articleTitle").textContent = a.title;
+  currentArticle = a.id;
+  let saved = false;
+  try { saved = (await api("/api/me/bookmarks", {quiet: true})).some((x) => x.id === a.id); } catch (e) { /* без входа закладок нет */ }
+  $("#articleTitle").innerHTML = `${esc(a.title)} <button class="mark" id="markBtn" aria-label="В закладки">${saved ? "★" : "☆"}</button>`;
+  $("#markBtn").onclick = async () => {
+    try { const r = await api(`/api/articles/${currentArticle}/bookmark`, {method: "POST"}); $("#markBtn").textContent = r.saved ? "★" : "☆"; toast(r.saved ? "Добавлено в закладки" : "Убрано из закладок"); }
+    catch (err) { toast(err.message); }
+  };
   $("#articleBody").innerHTML = `<article class="listing"><p class="muted">Источник: <a href="${esc(a.source_url)}" target="_blank" rel="noopener">${esc(a.source_url)}</a></p>
     <p>${esc(a.body).replace(/\n/g, "<br>")}</p><p class="muted">Дата проверки: ${esc((a.checked_at || "").slice(0, 10))}</p></article>`;
   $("#scroll").scrollTop = 0;
@@ -1337,6 +1414,17 @@ document.addEventListener("click", async (e) => {
     catch (err) { toast(err.message); }
     return;
   }
+  const au = e.target.closest("[data-author]");
+  if (au) {
+    try {
+      const r = await api(`/api/authors/${au.dataset.author}`);
+      openSub("author");
+      const c = r.card;
+      $("#subBody").innerHTML = `<p class="author">${c.verified ? `<b class="badge-ok">✔ Проверенный работодатель${c.company ? ": " + esc(c.company) : ""}</b> · ` : ""}На сайте с ${c.since || "—"} · Активных: ${c.active}</p>` +
+        r.items.map(listingCard).join("");
+    } catch (err) { toast(err.message); }
+    return;
+  }
   const wd = e.target.closest("[data-withdraw]");
   if (wd) {
     if (!(await confirmDialog("Отозвать отклик? Работодатель его больше не увидит."))) return;
@@ -1367,6 +1455,7 @@ document.addEventListener("click", async (e) => {
       const act = own.dataset.own;
       if (act === "employer-apply") { $("#employerModal").classList.remove("hidden"); return; }
       if (act === "edit") { openEdit(item); return; }
+      if (act === "reserve") { await api(`/api/listings/${id}/reserve`, {method: "POST", body: JSON.stringify({on: !item.reserved})}); toast(item.reserved ? "Резерв снят" : "Отмечено: зарезервировано"); homeLoaded = false; loadProfile(); return; }
       if (act === "applicants") { await showApplicants(id); return; }
       if (act === "promo") { await openServices(id, item.category); return; }
       if (act === "archive" && !(await confirmDialog("Удалить объявление? Его не будет видно другим."))) return;

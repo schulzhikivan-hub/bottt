@@ -9,7 +9,7 @@ from app import applications, fields, payments, photos
 from app.payments import now
 from app import guard
 from app.database import get_db
-from app.models import Listing, Placement
+from app.models import District, Listing, Placement
 from app.schemas import CATEGORIES, ListingOut
 
 router = APIRouter()
@@ -64,6 +64,7 @@ def search(db: Session, *, q: str = "", category: str | None = None, city: str |
            housing_type: str | None = None, deposit_max: int | None = None, area_min: int | None = None,
            pets_allowed: bool | None = None, furnished: bool | None = None,
            goods_category: str | None = None,
+           year_min: int | None = None, year_max: int | None = None, mileage_max: int | None = None,
            limit: int = 20, offset: int = 0) -> tuple[list[Listing], int]:
     """Published listings matching every condition. Paid placements come first on every page."""
     conditions = [Listing.status == "approved", or_(Listing.expires_at.is_(None), Listing.expires_at > now())]
@@ -108,6 +109,12 @@ def search(db: Session, *, q: str = "", category: str | None = None, city: str |
         conditions.append(Listing.furnished.is_(True))
     if goods_category:
         conditions.append(Listing.goods_category == goods_category)
+    if year_min is not None:
+        conditions.append(Listing.year >= year_min)
+    if year_max is not None:
+        conditions.append(Listing.year <= year_max)
+    if mileage_max is not None:
+        conditions.append(Listing.mileage_km <= mileage_max)
 
     total = db.scalar(select(func.count()).select_from(Listing).where(*conditions)) or 0
     if sort == "price_asc":
@@ -154,6 +161,8 @@ def catalog(q: str = Query(default="", max_length=100), category: str | None = N
             deposit_max: int | None = Query(default=None, ge=0), area_min: int | None = Query(default=None, ge=0),
             pets_allowed: bool | None = None, furnished: bool | None = None,
             goods_category: fields.GoodsCategory | None = None,
+            year_min: int | None = Query(default=None, ge=1950, le=2100), year_max: int | None = Query(default=None, ge=1950, le=2100),
+            mileage_max: int | None = Query(default=None, ge=0, le=3_000_000),
             limit: int = Query(default=20, ge=1, le=50), offset: int = Query(default=0, ge=0, le=10000),
             db: Session = Depends(get_db)):
     if category and category not in CATEGORIES:
@@ -164,7 +173,8 @@ def catalog(q: str = Query(default="", max_length=100), category: str | None = N
                          condition=condition, rooms_min=rooms_min, visa=visa, employment=employment,
                          schedule=schedule, housing_type=housing_type, deposit_max=deposit_max,
                          area_min=area_min, pets_allowed=pets_allowed, furnished=furnished,
-                         goods_category=goods_category, limit=limit, offset=offset)
+                         goods_category=goods_category, year_min=year_min, year_max=year_max,
+                         mileage_max=mileage_max, limit=limit, offset=offset)
     return {"items": with_promo(db, rows), "total": total, "has_more": offset + len(rows) < total}
 
 
@@ -188,6 +198,32 @@ def listing_detail(listing_id: int, request: Request, db: Session = Depends(get_
         db.commit()
     out = with_promo(db, [item])[0]
     return out.model_copy(update={"author": applications.author_card(db, item)})
+
+
+@router.get("/api/authors/{listing_id}")
+def author_page(listing_id: int, db: Session = Depends(get_db)):
+    """Everything one author offers right now. Found through one of their listings, so no Telegram ID is exposed."""
+    item = db.get(Listing, listing_id)
+    if item is None or item.status != "approved":
+        raise HTTPException(404, "Объявление не найдено или снято с публикации")
+    rows = db.scalars(select(Listing).where(
+        Listing.author_telegram_id == item.author_telegram_id, Listing.status == "approved",
+        or_(Listing.expires_at.is_(None), Listing.expires_at > now())).order_by(Listing.id.desc()).limit(30)).all()
+    return {"card": applications.author_card(db, item), "items": with_promo(db, list(rows))}
+
+
+@router.get("/api/suggest")
+def suggest(q: str = Query(min_length=1, max_length=40), db: Session = Depends(get_db)):
+    """Hints while typing: titles of published listings and Korean places that contain the word."""
+    word = q.strip().lower()
+    if not word:
+        return []
+    titles = db.execute(select(Listing.title).where(
+        Listing.status == "approved", Listing.search_text.like(_like(word), escape="\\"))
+        .group_by(Listing.title).order_by(func.count().desc(), Listing.title).limit(5)).scalars().all()
+    places = [d.label for d in db.scalars(select(District).order_by(District.sort)).all()
+              if word in d.name_ru.lower() or word in d.label.lower()][:4]
+    return ([{"type": "title", "text": t} for t in titles] + [{"type": "place", "text": p} for p in places])[:8]
 
 
 def backfill_search_fields(db: Session) -> None:

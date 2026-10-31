@@ -38,6 +38,9 @@ class SearchIn(BaseModel):
     pets_allowed: bool | None = None
     furnished: bool | None = None
     goods_category: fields.GoodsCategory | None = None
+    year_min: int | None = Field(default=None, ge=1950, le=2100)
+    year_max: int | None = Field(default=None, ge=1950, le=2100)
+    mileage_max: int | None = Field(default=None, ge=0, le=3_000_000)
 
 
 def _params(payload: SearchIn) -> dict:

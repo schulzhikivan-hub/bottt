@@ -75,6 +75,7 @@ class ListingOut(BaseModel):
     photos: list[dict] = []  # {id, url, thumb, status}; the first one is the cover
     cover: str | None = None
     views: int = 0
+    reserved: bool = False
     has_edit: bool = False  # owner only: changes wait for a moderator
     published_at: datetime | None = None
     expires_at: datetime | None = None  # owner only

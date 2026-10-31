@@ -73,3 +73,13 @@ def current_user_id(x_telegram_init_data: str | None = Header(default=None),
             return row.tg_id
         raise HTTPException(401, "Сессия истекла. Войдите через Telegram")
     raise HTTPException(401, "Войдите через Telegram")
+
+
+def optional_user_id(x_telegram_init_data: str | None = Header(default=None),
+                     x_web_session: str | None = Header(default=None),
+                     db: Session = Depends(get_db)) -> str | None:
+    """Like current_user_id, but a visitor without a valid sign-in is simply anonymous (None)."""
+    try:
+        return current_user_id(x_telegram_init_data, x_web_session, db)
+    except HTTPException:
+        return None

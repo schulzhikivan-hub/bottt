@@ -11,12 +11,12 @@ from sqlalchemy import select, func, desc, or_
 from sqlalchemy.orm import Session
 
 from app import payments
-from app.auth import current_user_id
+from app.auth import optional_user_id, current_user_id
 from app.config import settings
 from app.database import Base, engine, get_db, SessionLocal, migrate
 from app.models import (
     Listing, Favorite, Conversation, Message, User, Block, Report,
-    Pricing, Placement, Payment, Group, Article, ListingPhoto,
+    Pricing, Placement, Payment, Group, Article, ListingPhoto, ArticleBookmark,
 )
 from app.schemas import (
     ListingCreate, ListingOut, MessageIn, MessageOut, ConversationOut,
@@ -549,18 +549,47 @@ def my_payments(user_id: str = Depends(current_user_id), db: Session = Depends(g
 @app.get("/api/groups")
 def list_groups(db: Session = Depends(get_db)):
     return [{"id": g.id, "name": g.name, "flag": g.flag, "description": g.description,
-             "telegram_link": g.telegram_link, "members_count": g.members_count}
+             "telegram_link": g.telegram_link, "members_count": g.members_count, "kind": g.kind or "nation"}
             for g in db.scalars(select(Group).order_by(Group.id)).all()]
 
 
 @app.get("/api/articles")
-def list_articles(section: str | None = None, db: Session = Depends(get_db)):
+def list_articles(section: str | None = None, q: str = Query(default="", max_length=60),
+                  user_id: str | None = Depends(optional_user_id), db: Session = Depends(get_db)):
     stmt = select(Article).where(Article.published == True)  # noqa: E712
     if section:
         stmt = stmt.where(Article.section == section)
-    return [{"id": a.id, "section": a.section, "title": a.title,
-             "checked_at": str(a.checked_at) if a.checked_at else None}
-            for a in db.scalars(stmt.order_by(Article.id)).all()]
+    words = [w for w in q.lower().split()[:5]]
+    saved = set(db.scalars(select(ArticleBookmark.article_id).where(ArticleBookmark.user_tg_id == user_id)).all()) if user_id else set()
+    out = []
+    for a in db.scalars(stmt.order_by(Article.id)).all():
+        hay = f"{a.title} {a.body}".lower()
+        if all(w in hay for w in words):
+            out.append({"id": a.id, "section": a.section, "title": a.title, "saved": a.id in saved,
+                        "checked_at": str(a.checked_at) if a.checked_at else None})
+    return out
+
+
+@app.get("/api/me/bookmarks")
+def my_bookmarks(user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
+    rows = db.scalars(select(Article).join(ArticleBookmark, ArticleBookmark.article_id == Article.id)
+                      .where(ArticleBookmark.user_tg_id == user_id, Article.published == True)  # noqa: E712
+                      .order_by(ArticleBookmark.id.desc())).all()
+    return [{"id": a.id, "section": a.section, "title": a.title, "saved": True} for a in rows]
+
+
+@app.post("/api/articles/{article_id}/bookmark")
+def toggle_bookmark(article_id: int, user_id: str = Depends(writer), db: Session = Depends(get_db)):
+    article = db.get(Article, article_id)
+    if article is None or not article.published:
+        raise HTTPException(404, "Статья не найдена")
+    row = db.scalar(select(ArticleBookmark).where(ArticleBookmark.user_tg_id == user_id, ArticleBookmark.article_id == article_id))
+    if row:
+        db.delete(row)
+    else:
+        db.add(ArticleBookmark(user_tg_id=user_id, article_id=article_id))
+    db.commit()
+    return {"saved": row is None}
 
 
 @app.get("/api/articles/{article_id}")
@@ -665,7 +694,7 @@ def admin_stats(actor: str = Depends(staff(*ADM)), db: Session = Depends(get_db)
 
 
 @app.put("/api/admin/groups/{group_id}")
-def admin_group(group_id: int, telegram_link: str = "", members_count: int = 0,
+def admin_group(group_id: int, telegram_link: str = "", members_count: int = 0, kind: str = "",
                 actor: str = Depends(staff(*ADM)), db: Session = Depends(get_db)):
     g = db.get(Group, group_id)
     if g is None:
@@ -675,6 +704,10 @@ def admin_group(group_id: int, telegram_link: str = "", members_count: int = 0,
             raise HTTPException(400, "Ссылка должна начинаться с https://t.me/")
         g.telegram_link = telegram_link
     g.members_count = max(0, members_count)
+    if kind:
+        if kind not in ("nation", "city"):
+            raise HTTPException(400, "Тип группы: nation или city")
+        g.kind = kind
     log_action(db, actor, "group.update", "group", group_id, telegram_link)
     db.commit()
     return {"id": g.id, "telegram_link": g.telegram_link}
