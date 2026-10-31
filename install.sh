@@ -60,13 +60,47 @@ install_packages() {
   docker compose version >/dev/null 2>&1 || die "Не найден плагин docker compose."
 }
 
+TOKEN_FILE="${TOKEN_FILE:-/root/.config/korea-hub/github_token}"
+GIT_CFG=()
+
+# Токен нужен только для приватного репозитория (права Contents: Read-only).
+# Токен передаётся git через заголовок, поэтому не попадает в URL и .git/config.
+ask_github_token() {
+  if [ -z "${GITHUB_TOKEN:-}" ] && [ -r /dev/tty ]; then
+    # Скрытый ввод: токен не отображается на экране
+    read -r -s -p "Токен GitHub для приватного репозитория (ввод скрыт, Enter, если репозиторий публичный): " GITHUB_TOKEN </dev/tty || GITHUB_TOKEN=""
+    echo
+  fi
+  if [ -n "${GITHUB_TOKEN:-}" ]; then
+    mkdir -p "$(dirname "$TOKEN_FILE")"
+    umask 077
+    printf '%s' "$GITHUB_TOKEN" >"$TOKEN_FILE"
+    chmod 600 "$TOKEN_FILE"
+    log "Токен сохранён в $TOKEN_FILE (доступ только root)"
+  fi
+}
+
+load_github_token() {
+  local token="${GITHUB_TOKEN:-}"
+  if [ -z "$token" ] && [ -f "$TOKEN_FILE" ]; then
+    token="$(cat "$TOKEN_FILE")"
+  fi
+  if [ -n "$token" ]; then
+    local basic
+    basic="$(printf 'x-access-token:%s' "$token" | base64 | tr -d '\n')"
+    GIT_CFG=(-c "http.extraheader=Authorization: Basic $basic")
+  fi
+}
+
 sync_repo() {
   if [ ! -d "$APP_DIR/.git" ]; then
     log "Клонирую $REPO_URL (ветка $BRANCH) в $APP_DIR"
-    git clone --branch "$BRANCH" "$REPO_URL" "$APP_DIR"
+    if ! git "${GIT_CFG[@]}" clone --branch "$BRANCH" "$REPO_URL" "$APP_DIR"; then
+      die "Не удалось клонировать репозиторий. Если он приватный, укажите токен GitHub (см. docs/INSTALL.md, раздел 3)."
+    fi
   else
     log "Обновляю код до origin/$BRANCH"
-    git -C "$APP_DIR" fetch --quiet origin "$BRANCH"
+    git "${GIT_CFG[@]}" -C "$APP_DIR" fetch --quiet origin "$BRANCH"
     # Файлы на сервере не редактируем. Локальные изменения кода будут сброшены.
     git -C "$APP_DIR" reset --hard "origin/$BRANCH"
   fi
@@ -173,6 +207,8 @@ cmd_install() {
   require_root install
   require_supported_os
   install_packages
+  ask_github_token
+  load_github_token
   sync_repo
   write_env
   deploy
@@ -183,6 +219,7 @@ cmd_update() {
   require_root update
   require_supported_os
   [ -d "$APP_DIR/.git" ] || die "$APP_DIR не найден. Сначала выполните: sudo bash install.sh install"
+  load_github_token
   backup_db
   sync_repo
   deploy

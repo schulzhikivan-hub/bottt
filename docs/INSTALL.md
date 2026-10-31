@@ -53,16 +53,39 @@ curl -fsSL https://raw.githubusercontent.com/schulzhikivan-hub/bottt/korea-hub/i
 sudo bash install.sh install
 ```
 
-Если репозиторий приватный, скачайте `install.sh` из файла, который вам прислали, и загрузите на сервер (например, через SFTP в `/root/`). Затем:
+Репозиторий приватный, поэтому сначала создайте токен GitHub (раздел 3.1), а скачивание сделайте с токеном:
 
 ```bash
-sudo bash /root/install.sh install
+curl -fsSL -H "Authorization: Bearer ТОКЕН" \
+  https://raw.githubusercontent.com/schulzhikivan-hub/bottt/korea-hub/install.sh -o install.sh
+sudo bash install.sh install
 ```
 
 Установщик задаст вопросы:
 1. **Домен** — например, `app.example.com`.
-2. **Токен бота** — из шага 1.
-3. **ID администраторов** — через запятую.
+2. **Токен GitHub** — из раздела 3.1. Ввод скрыт, на экране не появляется.
+3. **Токен бота** — из шага 1.
+4. **ID администраторов** — через запятую.
+
+### 3.1. Токен GitHub для приватного репозитория
+
+1. Откройте https://github.com/settings/personal-access-tokens/new (вход в аккаунт владельца).
+2. **Token name:** `korea-hub-vps`.
+3. **Expiration:** 90 дней (потом создайте новый и повторите установку или обновите файл токена).
+4. **Resource owner:** `schulzhikivan-hub`.
+5. **Repository access:** *Only select repositories* → выберите только `bottt`.
+6. **Permissions → Repository permissions → Contents:** *Read-only*. Остальные права не нужны.
+7. Нажмите **Generate token** и скопируйте его сразу: GitHub показывает токен один раз.
+
+Токен никому не передавайте и не вставляйте в чаты и документы. Он сохраняется на сервере в `/root/.config/korea-hub/github_token` с правами только для root. Для обновлений установщик использует этот файл.
+
+Если токен истёк или отозван, `update` выдаст ошибку доступа: создайте новый токен и запишите его в файл:
+
+```bash
+sudo bash -c 'read -rs -p "Новый токен: " T; echo; printf "%s" "$T" > /root/.config/korea-hub/github_token && chmod 600 /root/.config/korea-hub/github_token'
+```
+
+Отзыв токена: тот же раздел GitHub, кнопка **Delete**.
 
 Пароли базы и админ-ключ генерируются автоматически и сохраняются в `/opt/korea-hub/.env` (доступ только root).
 
