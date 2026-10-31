@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#102a43"><title>KOREA HUB</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script><link rel="stylesheet" href="/static/style.css"></head>
+<body><div class="app">
+<header><div class="brand"><div class="logo">🇰🇷</div><div><b>KOREA HUB</b><small>Всё для жизни в Корее</small></div></div><button class="ghost" id="lang">RU ▾</button></header>
+<div class="welcome"><span class="eyebrow">СООБЩЕСТВО ИНОСТРАНЦЕВ</span><h1>Твоя жизнь<br>в Южной Корее</h1><p>Работа, жильё, покупки и полезные знакомства — в одном месте.</p></div>
+<div class="search"><input id="search" placeholder="Поиск вакансий и объявлений"><button id="searchBtn">⌕</button></div>
+<section class="tiles">
+<button data-cat="job" class="tile blue"><span>💼</span><b>Работа</b><small>Вакансии и подработка</small></button>
+<button data-cat="housing" class="tile green"><span>🏠</span><b>Жильё</b><small>Квартиры и комнаты</small></button>
+<button data-cat="marketplace" class="tile orange"><span>🛍️</span><b>Барахолка</b><small>Купить и продать</small></button>
+<button class="tile pink" data-static="dating"><span>💗</span><b>Знакомства</b><small>Скоро появится</small></button>
+<button class="tile violet" data-static="community"><span>👥</span><b>Сообщество</b><small>Люди и города</small></button>
+<button class="tile teal" data-static="services"><span>🛠️</span><b>Услуги</b><small>Помощь рядом</small></button>
+</section>
+<div class="section-head"><div><span class="eyebrow">СВЕЖИЕ ПУБЛИКАЦИИ</span><h2 id="listTitle">Последние объявления</h2></div><button class="link" id="allBtn">Все →</button></div>
+<div id="listings" class="listings"><div class="empty">Загружаем объявления…</div></div>
+<nav class="bottom"><button class="active" data-nav="home">⌂<small>Главная</small></button><button data-nav="saved">♡<small>Избранное</small></button><button class="add" id="addBtn">＋<small>Добавить</small></button><button data-nav="messages">☰<small>Сообщения</small></button><button data-nav="profile">♙<small>Профиль</small></button></nav>
+</div>
+<div id="modal" class="modal hidden"><div class="sheet"><div class="sheet-top"><b>Новое объявление</b><button id="closeModal">✕</button></div>
+<form id="listingForm"><label>Категория<select name="category"><option value="job">Работа</option><option value="housing">Жильё</option><option value="marketplace">Барахолка</option></select></label>
+<label>Заголовок<input name="title" required minlength="3" placeholder="Например: Работа на заводе"></label><label>Город<input name="city" required placeholder="Например: Асан"></label>
+<label>Цена / зарплата<input name="price" placeholder="Например: 2 800 000 ₩/мес"></label><label>Описание<textarea name="description" rows="3" placeholder="Подробности объявления"></textarea></label><label>Контакт<input name="contact" placeholder="Telegram или телефон"></label>
+<button class="submit" type="submit">Отправить на проверку</button></form></div></div>
+<div id="toast" class="toast"></div><script src="/static/app.js"></script></body></html>

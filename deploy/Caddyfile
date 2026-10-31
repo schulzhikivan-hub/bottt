@@ -1,0 +1,7 @@
+# HTTPS for the Mini App and API. Caddy obtains the certificate automatically.
+# DOMAIN is taken from .env. The domain's A record must point to this server,
+# and ports 80 and 443 must be open.
+{$DOMAIN} {
+	encode gzip
+	reverse_proxy api:8000
+}
