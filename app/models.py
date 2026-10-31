@@ -395,3 +395,38 @@ class ArticleBookmark(Base):
     user_tg_id: Mapped[str] = mapped_column(String(40), index=True)
     article_id: Mapped[int] = mapped_column(ForeignKey("articles.id", ondelete="CASCADE"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class Broadcast(Base):
+    """A message to many users. Created as a draft, confirmed by an administrator, then sent slowly by the bot."""
+    __tablename__ = "broadcasts"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    created_by: Mapped[str] = mapped_column(String(40))
+    text: Mapped[str] = mapped_column(String(1000))
+    region_code: Mapped[str | None] = mapped_column(String(20), nullable=True)  # only people from this region
+    status: Mapped[str] = mapped_column(String(12), default="draft", index=True)  # draft, sending, done, cancelled
+    total: Mapped[int] = mapped_column(Integer, default=0)
+    sent: Mapped[int] = mapped_column(Integer, default=0)
+    failed: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class BroadcastTarget(Base):
+    __tablename__ = "broadcast_targets"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    broadcast_id: Mapped[int] = mapped_column(ForeignKey("broadcasts.id", ondelete="CASCADE"), index=True)
+    tg_id: Mapped[str] = mapped_column(String(40))
+    status: Mapped[str] = mapped_column(String(8), default="pending", index=True)  # pending, sent, failed
+
+
+class Banner(Base):
+    """A strip on the home screen (news, promotion). Shown while active and inside its dates."""
+    __tablename__ = "banners"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    text: Mapped[str] = mapped_column(String(160))
+    link: Mapped[str] = mapped_column(String(255), default="")
+    starts_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

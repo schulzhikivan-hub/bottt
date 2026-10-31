@@ -7,7 +7,7 @@ from sqlalchemy import select, or_
 from sqlalchemy.orm import Session
 
 from app.audit import log_action
-from app.admin_auth import staff, MOD, ADM, SUP
+from app.admin_auth import staff, SUPPORT, MOD, ADM, SUP
 from app.guard import check_text
 from app import applications, catalog, lifecycle
 from app.catalog import drop_irrelevant
@@ -239,7 +239,7 @@ class ReasonIn(BaseModel):
 
 
 @router.get("/api/admin/users")
-def admin_users(q: str = Query(default="", max_length=40), actor: str = Depends(staff(*MOD)),
+def admin_users(q: str = Query(default="", max_length=40), actor: str = Depends(staff(*SUPPORT)),
                 db: Session = Depends(get_db)):
     stmt = select(User).order_by(User.created_at.desc()).limit(100)
     if q.strip():
@@ -251,13 +251,13 @@ def admin_users(q: str = Query(default="", max_length=40), actor: str = Depends(
 
 
 @router.post("/api/admin/users/{tg_id}/block")
-def admin_block(tg_id: str, payload: ReasonIn, actor: str = Depends(staff(*MOD)), db: Session = Depends(get_db)):
+def admin_block(tg_id: str, payload: ReasonIn, actor: str = Depends(staff(*SUPPORT)), db: Session = Depends(get_db)):
     _run(ops.block_user, db, actor, tg_id, payload.reason)
     return {"tg_id": tg_id, "blocked": True}
 
 
 @router.post("/api/admin/users/{tg_id}/unblock")
-def admin_unblock(tg_id: str, payload: ReasonIn, actor: str = Depends(staff(*MOD)), db: Session = Depends(get_db)):
+def admin_unblock(tg_id: str, payload: ReasonIn, actor: str = Depends(staff(*SUPPORT)), db: Session = Depends(get_db)):
     _run(ops.unblock_user, db, actor, tg_id, payload.reason)
     return {"tg_id": tg_id, "blocked": False}
 

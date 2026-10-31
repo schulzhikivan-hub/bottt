@@ -23,7 +23,8 @@ from app.models import Admin, AdminCode, AdminSession
 from app.payments import now, aware
 
 router = APIRouter()
-ROLES = ("moderator", "admin", "super_admin")
+ROLES = ("support", "moderator", "admin", "super_admin")
+SUPPORT = ("support", "moderator", "admin", "super_admin")  # reports, users and blocks
 MOD = ("moderator", "admin", "super_admin")
 ADM = ("admin", "super_admin")
 SUP = ("super_admin",)

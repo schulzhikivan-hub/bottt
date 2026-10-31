@@ -328,6 +328,22 @@ async def expiry_loop(bot: Bot) -> None:
         await asyncio.sleep(EXPIRY_CHECK_SECONDS)
 
 
+async def broadcast_loop(bot: Bot) -> None:
+    """Send running broadcasts slowly: one batch every few seconds, so Telegram limits are never hit."""
+    from app import adminx
+    while True:
+        try:
+            tried = await asyncio.to_thread(_broadcast_once, adminx)
+        except Exception:
+            tried = 0
+        await asyncio.sleep(2 if tried else 10)
+
+
+def _broadcast_once(adminx) -> int:
+    with SessionLocal() as db:
+        return adminx.broadcast_tick(db, guard.send_telegram)
+
+
 async def main():
     if not settings.bot_token:
         print("BOT_TOKEN is empty; bot process is idle. Set BOT_TOKEN to enable Telegram bot.")
@@ -343,6 +359,7 @@ async def main():
     dp = Dispatcher()
     register(dp, bot)
     asyncio.create_task(expiry_loop(bot))
+    asyncio.create_task(broadcast_loop(bot))
     await dp.start_polling(bot, allowed_updates=["message", "pre_checkout_query", "callback_query"])
 
 

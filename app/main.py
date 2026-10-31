@@ -26,12 +26,12 @@ from app.seed import seed_reference
 from app.admin_auth import router as admin_auth_router, bootstrap_admins
 from app.webauth import router as webauth_router
 from app.audit import log_action
-from app.admin_auth import staff, MOD, ADM, SUP
+from app.admin_auth import staff, SUPPORT, MOD, ADM, SUP
 from app.manage import router as manage_router
 from app.guard import rate_limit, check_text, duplicate_note, notify_user
 from app import admin_ops as ops
 from app import catalog
-from app import photos, applications, searches, inbox, promos
+from app import photos, applications, searches, inbox, promos, adminx
 from app import geo
 from app import fields as listing_fields
 from app.users import get_or_create_user, writer, is_blocked_pair
@@ -58,6 +58,7 @@ app.include_router(applications.router)
 app.include_router(searches.router)
 app.include_router(inbox.router)
 app.include_router(promos.router)
+app.include_router(adminx.router)
 app.include_router(geo.router)
 app.include_router(listing_fields.router)
 STATIC = Path(__file__).parent / "static"
@@ -688,7 +689,7 @@ def moderate_listing(listing_id: int, decision: str, reason: str = Query(default
 
 
 @app.get("/api/admin/reports")
-def admin_reports(status: str = "new", actor: str = Depends(staff(*MOD)),
+def admin_reports(status: str = "new", actor: str = Depends(staff(*SUPPORT)),
                   db: Session = Depends(get_db)):
     rows = db.scalars(select(Report).where(Report.status == status).order_by(Report.id).limit(200)).all()
     return [{"id": r.id, "target_type": r.target_type, "target_id": r.target_id, "reason": r.reason,
@@ -696,7 +697,7 @@ def admin_reports(status: str = "new", actor: str = Depends(staff(*MOD)),
 
 
 @app.post("/api/admin/reports/{report_id}/{decision}")
-def decide_report(report_id: int, decision: str, actor: str = Depends(staff(*MOD)),
+def decide_report(report_id: int, decision: str, actor: str = Depends(staff(*SUPPORT)),
                   db: Session = Depends(get_db)):
     report = _run(ops.decide_report, db, actor, report_id, decision)
     return {"id": report.id, "status": report.status}
