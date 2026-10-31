@@ -8,14 +8,15 @@
 <div class="shell">
 
 <header class="topbar">
-  <div class="brand"><div class="logo">🇰🇷</div><b>KOREA HUB</b></div>
+  <div class="brand"><div class="logo">🇰🇷</div><div><b>KOREA HUB</b><small>Всё для жизни в Корее</small></div></div>
   <button class="link" id="loginTop" hidden>Войти</button>
 </header>
 
 <main class="content" id="scroll">
 
 <!-- Главная: поиск, фильтры, все объявления -->
-<section id="view-home" class="view">
+<section id="view-home" class="view landing">
+  <div class="hero"><div class="hero-text"><span>한국에서 나은 삶</span><b>KOREA HUB</b><small>Работа, жильё, знакомства и полезная информация</small></div><div class="hero-flag">🇰🇷</div></div>
   <div class="sticky">
     <div class="searchbar">
       <input id="search" type="search" placeholder="Поиск объявлений" enterkeyhint="search" autocomplete="off">
@@ -31,13 +32,16 @@
       <button class="chip" data-cat="marketplace">🛍️ Барахолка</button>
     </div>
   </div>
-  <div class="quick">
-    <button class="q1" data-view="community"><span>👥</span>Сообщество</button>
-    <button class="q2" data-view="guide"><span>📘</span>Гид</button>
-    <button class="q3" data-view="dating"><span>💗</span>Знакомства</button>
+  <div class="tiles">
+    <button class="t-job" data-tile="job"><i>💼</i>Работа</button>
+    <button class="t-housing" data-tile="housing"><i>🏠</i>Жильё</button>
+    <button class="t-market" data-tile="marketplace"><i>🛍️</i>Барахолка</button>
+    <button class="t-dating" data-view="dating"><i>💗</i>Знакомства</button>
+    <button class="t-comm" data-view="community"><i>👥</i>Сообщество</button>
+    <button class="t-guide" data-view="guide"><i>📘</i>Гид по Корее</button>
   </div>
   <div class="results-head">
-    <span id="resultCount">Загружаем…</span>
+    <span id="resultCount" class="rc">Загружаем…</span>
     <select id="sortSelect" aria-label="Сортировка">
       <option value="new">Сначала новые</option>
       <option value="price_asc">Сначала дешёвые</option>
@@ -152,7 +156,7 @@
   <button class="add" id="addBtn" aria-label="Добавить">
     <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
   <button data-view="chats">
-    <svg viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.600 7.100L4 20.500l1.100-4.600A8 8 0 1 1 21 12z"/></svg>Сообщения</button>
+    <svg viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.600 7.100L4 20.500l1.100-4.600A8 8 0 1 1 21 12z"/></svg>Чаты</button>
   <button data-view="profile">
     <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>Профиль</button>
 </nav>

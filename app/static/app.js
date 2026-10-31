@@ -220,15 +220,18 @@ function specs(x) {
     .map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("");
   return html ? `<dl class="specs">${html}</dl>` : "";
 }
+const CAT_ICON = {job: "💼", housing: "🏠", marketplace: "🛍️"};
 function listingCard(x) {
   const fav = favIds.has(x.id);
-  return `<article class="listing ${x.promo === "highlight" ? "hl" : ""}" data-id="${x.id}" data-cat="${x.category}" data-open="${x.id}">
-    ${x.cover ? `<img class="cover" src="${esc(x.cover)}" alt="" loading="lazy">` : ""}
-    ${promoBadge(x)}
-    <h3>${esc(x.title)}</h3>
-    <div class="meta">📍 ${esc(x.city)} · ${esc(CAT[x.category] || x.category)}</div>
-    <div class="price">${esc(priceText(x))}</div>
-    <div class="pills">${pills(x)}</div>
+  return `<article class="listing hcard ${x.promo === "highlight" ? "hl" : ""}" data-id="${x.id}" data-cat="${x.category}" data-open="${x.id}">
+    <div class="thumb">${x.cover ? `<img src="${esc(x.cover)}" alt="" loading="lazy">` : CAT_ICON[x.category] || "📄"}</div>
+    <div class="body">
+      ${promoBadge(x)}
+      <h3>${esc(x.title)}</h3>
+      <div class="price">${esc(priceText(x))}</div>
+      <div class="meta">📍 ${esc(x.city)} · ${esc(CAT[x.category] || x.category)}</div>
+      <div class="pills">${pills(x)}</div>
+    </div>
     <button class="fav ${fav ? "on" : ""}" data-act="fav" aria-label="В избранное">${fav ? "♥" : "♡"}</button>
   </article>`;
 }
@@ -260,6 +263,8 @@ function updateFilterUi() {
   $("#filterBadge").textContent = n;
   document.querySelectorAll("#chips .chip").forEach((c) => c.classList.toggle("active", c.dataset.cat === filters.category));
   $("#sortSelect").value = filters.sort;
+  // Без поиска и фильтров показываем «витрину»: баннер и плитки разделов
+  $("#view-home").classList.toggle("landing", !filters.q && !filters.category && n === 0);
 }
 
 async function loadCatalog(append = false) {
@@ -278,7 +283,8 @@ async function loadCatalog(append = false) {
     else box.innerHTML = html || `<div class="empty">${activeFilterCount() || filters.q || filters.category
       ? "Ничего не нашли. Измените запрос или сбросьте фильтры." : "Пока нет объявлений. Добавьте первое кнопкой «+»."}</div>`;
     page.offset += r.items.length;
-    $("#resultCount").textContent = r.total ? `Найдено: ${r.total}` : "Ничего не найдено";
+    $("#resultCount").textContent = !r.total ? "Ничего не найдено"
+      : $("#view-home").classList.contains("landing") ? "Популярные объявления" : `Найдено: ${r.total}`;
     $("#moreBtn").hidden = !r.has_more;
     homeLoaded = true;
   } catch (e) {
@@ -299,6 +305,11 @@ $("#search").addEventListener("keydown", (e) => {
 document.querySelectorAll("#chips .chip").forEach((chip) => chip.addEventListener("click", () => {
   filters.category = chip.dataset.cat;
   // Особые фильтры подходят только одному разделу
+  for (const k of SECTION_FILTERS) filters[k] = DEFAULT_FILTERS[k];
+  reloadCatalog();
+}));
+document.querySelectorAll("[data-tile]").forEach((t) => t.addEventListener("click", () => {
+  filters.category = t.dataset.tile;
   for (const k of SECTION_FILTERS) filters[k] = DEFAULT_FILTERS[k];
   reloadCatalog();
 }));
@@ -1071,7 +1082,7 @@ document.addEventListener("click", async (e) => {
   if (open) { openDetail(open.dataset.open); return; }
 });
 
-document.querySelectorAll(".bottom [data-view], .quick [data-view]").forEach((b) => b.onclick = () => showView(b.dataset.view));
+document.querySelectorAll(".bottom [data-view], .tiles [data-view]").forEach((b) => b.onclick = () => showView(b.dataset.view));
 
 // ---------- согласие, город, работодатель ----------
 $("#consentOk").onclick = async () => {
@@ -1112,19 +1123,8 @@ $("#employerForm").onsubmit = async (e) => {
 
 // ---------- тема Telegram ----------
 function applyTelegramTheme() {
-  const t = tg?.themeParams || {};
-  const st = document.documentElement.style;
-  const set = (name, value) => { if (value) st.setProperty(name, value); };
-  // Тема Telegram: тёмная схема даёт тёмный фон, даже если цвета не переданы
-  document.documentElement.dataset.scheme = tg?.colorScheme === "dark" ? "dark" : (tg?.colorScheme === "light" ? "light" : "");
-  try { tg?.setBackgroundColor?.(t.secondary_bg_color || t.bg_color || (tg?.colorScheme === "dark" ? "#0e1621" : "#f3f6fa")); } catch (e) { /* старая версия */ }
-  set("--bg", t.secondary_bg_color || t.bg_color);
-  set("--card", t.section_bg_color || t.bg_color);
-  set("--text", t.text_color);
-  set("--hint", t.hint_color);
-  set("--accent", t.button_color);
-  set("--accent-text", t.button_text_color);
-  set("--border", t.section_separator_color);
+  // Фирменные цвета приложения не меняются под тему Telegram (дизайн по макету); подстраиваем только окно Telegram
+  try { tg?.setBackgroundColor?.("#f3f6fb"); tg?.setHeaderColor?.("#ffffff"); tg?.setBottomBarColor?.("#ffffff"); } catch (e) { /* старая версия */ }
 }
 applyTelegramTheme();
 tg?.onEvent?.("themeChanged", applyTelegramTheme);
