@@ -1,6 +1,9 @@
+from datetime import datetime
 from pydantic import BaseModel, Field, ConfigDict
 
 CATEGORIES = {"job", "housing", "marketplace"}
+MAX_ACTIVE_PER_CATEGORY = 5
+
 
 class ListingCreate(BaseModel):
     category: str
@@ -9,7 +12,7 @@ class ListingCreate(BaseModel):
     price: str = Field(default="", max_length=80)
     description: str = Field(default="", max_length=4000)
     contact: str = Field(default="", max_length=160)
-    author_telegram_id: str = Field(default="", max_length=40)
+
 
 class ListingOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -21,3 +24,22 @@ class ListingOut(BaseModel):
     description: str
     contact: str
     status: str
+
+
+class MessageIn(BaseModel):
+    text: str = Field(min_length=1, max_length=2000)
+
+
+class MessageOut(BaseModel):
+    id: int
+    mine: bool
+    text: str
+    created_at: datetime
+
+
+class ConversationOut(BaseModel):
+    id: int
+    listing_id: int
+    listing_title: str
+    last_text: str
+    last_at: datetime | None

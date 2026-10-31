@@ -5,6 +5,7 @@ from app.config import settings
 from app.database import Base, engine
 from app.main import app
 from app import bot as bot_module
+from tests.tg import as_user
 
 
 @pytest.fixture()
@@ -20,8 +21,7 @@ def create(client, title="Работа на заводе"):
     r = client.post("/api/listings", json={
         "category": "job", "title": title, "city": "Асан",
         "price": "2 800 000 ₩", "description": "Смена 8-17", "contact": "@test",
-        "author_telegram_id": "42",
-    })
+    }, headers=as_user(42))
     assert r.status_code == 201
     return r.json()["id"]
 
@@ -46,9 +46,7 @@ def test_approve_publishes_listing(client):
     r = client.post(f"/api/admin/listings/{listing_id}/approve", headers=headers)
     assert r.status_code == 200
     assert r.json()["status"] == "approved"
-
-    public = client.get("/api/listings").json()
-    assert any(x["id"] == listing_id for x in public)
+    assert any(x["id"] == listing_id for x in client.get("/api/listings").json())
 
 
 def test_reject_hides_listing(client):
