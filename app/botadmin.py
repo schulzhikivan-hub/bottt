@@ -17,16 +17,16 @@ from app.photos import photo_root
 from app.admin_auth import MOD, ADM, SUP, ROLES
 from app.audit import log_action
 from app.dating import age_of, upload_root
-from app.models import (Admin, AuditLog, DatingProfile, Listing, ListingPhoto, Payment, Pricing, Report, User)
+from app.models import (PromoCode, Admin, AuditLog, DatingProfile, Listing, ListingPhoto, Payment, Pricing, Report, User)
 
 CATEGORY = {"job": "Работа", "housing": "Жильё", "marketplace": "Барахолка"}
 BACK = [("⬅️ В меню", "a:menu")]
 # What each section needs. The menu is open to every staff member.
-LEVEL = {"L": MOD, "D": MOD, "R": MOD, "E": MOD, "U": MOD, "S": ADM, "P": ADM, "C": ADM, "J": ADM, "T": SUP}
+LEVEL = {"L": MOD, "D": MOD, "R": MOD, "E": MOD, "U": MOD, "S": ADM, "P": ADM, "C": ADM, "K": ADM, "J": ADM, "T": SUP}
 # A text answer the bot is waiting for from an administrator: {admin_id: {"kind": ..., ...}}
 PENDING_INPUT: dict[int, dict] = {}
 INPUT_LEVEL = {"listing_hide": MOD, "find_listing": MOD, "listing_fix": MOD, "listing_no": MOD, "find_user": MOD, "block": MOD, "unblock": MOD,
-               "price": ADM, "add_staff": SUP}
+               "price": ADM, "promo_new": ADM, "add_staff": SUP}
 
 
 @dataclass
@@ -64,7 +64,7 @@ def menu(db: Session, role: str) -> Reply:
         [("👥 Пользователи", "a:U"), ("🔎 Найти объявление", "a:L:find")],
     ]
     if role in ADM:
-        rows += [[("📊 Статистика", "a:S"), ("💳 Платежи", "a:P")], [("💰 Цены", "a:C"), ("📜 Журнал", "a:J")]]
+        rows += [[("📊 Статистика", "a:S"), ("💳 Платежи", "a:P")], [("💰 Цены", "a:C"), ("🎟 Промокоды", "a:K")], [("📜 Журнал", "a:J")]]
     if role in SUP:
         rows.append([("🧑‍💼 Сотрудники", "a:T")])
     return Reply("🛠 Админ-панель KOREA HUB\nВаша роль: " + role + "\nВыберите раздел:", rows)
@@ -251,6 +251,18 @@ def payments_view(db: Session) -> Reply:
     return Reply("💳 Последние платежи:\n" + "\n".join(lines), buttons + [BACK])
 
 
+def promos_view(db: Session, header: str = "") -> Reply:
+    rows = db.scalars(select(PromoCode).order_by(PromoCode.id.desc()).limit(10)).all()
+    lines = []
+    for p in rows:
+        off = f"−{p.percent}%" if p.percent else f"−{p.fixed_stars} ⭐"
+        lines.append(f"{'🟢' if p.is_active else '⚪️'} {p.code}: {off} · использовано {p.used_count}"
+                     + (f"/{p.max_uses}" if p.max_uses else "") + (f" · до {p.valid_until:%d.%m.%Y}" if p.valid_until else ""))
+    buttons = [[(("⏸ " if p.is_active else "▶️ ") + p.code, f"a:K:t:{p.id}")] for p in rows]
+    return Reply(header + "🎟 Промокоды\n" + ("\n".join(lines) if lines else "Пока нет промокодов."),
+                 [[("➕ Создать", "a:K:new")]] + buttons + [BACK])
+
+
 def prices_view(db: Session) -> Reply:
     payments.ensure_pricing(db)
     rows = db.scalars(select(Pricing).order_by(Pricing.code)).all()
@@ -369,6 +381,19 @@ def _handle(db: Session, admin_id: int, role: str, parts: list[str]) -> Reply:
                 db.commit()
                 return prices_view(db)
             return prices_view(db)
+        if section == "K":
+            if action == "new":
+                return Reply("Напишите промокод одной строкой:\nКОД 20% [лимит] [дней]  — скидка в процентах\n"
+                             "КОД 30⭐ [лимит] [дней]  — скидка в звёздах\nНапример: SPRING 20% 50 30\nИли /cancel:",
+                             state={"kind": "promo_new"})
+            if action == "t":
+                promo = db.get(PromoCode, int(arg))
+                if promo is None:
+                    return Reply("", alert="Промокод не найден")
+                promo.is_active = not promo.is_active
+                log_action(db, actor, "promo.toggle", "promo", promo.code, f"active={promo.is_active}")
+                db.commit()
+            return promos_view(db)
         if section == "J":
             return audit_view(db)
         if section == "T":
@@ -409,6 +434,26 @@ def _handle_text(db: Session, admin_id: int, role: str, text: str) -> Reply | No
             reply.notify.append((item.author_telegram_id,
                                  f"Объявление «{_short(item.title, 60)}»: {word}.\nКомментарий: {item.note}"))
             return reply
+        if kind == "promo_new":
+            from app import promos
+            from fastapi import HTTPException
+            parts = text.replace("⭐", "").split()
+            try:
+                if len(parts) < 2:
+                    raise ValueError
+                value = parts[1]
+                percent = int(value[:-1]) if value.endswith("%") else None
+                stars = None if percent is not None else int(value)
+                payload = promos.PromoIn(code=parts[0], percent=percent, fixed_stars=stars,
+                                         max_uses=int(parts[2]) if len(parts) > 2 else None,
+                                         days=int(parts[3]) if len(parts) > 3 else None)
+                promo = promos.create_promo(db, actor, payload)
+            except HTTPException as e:
+                return Reply(f"{e.detail}. Исправьте и отправьте ещё раз или /cancel.", state=state)
+            except ValueError:
+                return Reply("Не разобрал. Формат: КОД 20% [лимит] [дней] или КОД 30⭐ [лимит] [дней]. Ещё раз или /cancel.", state=state)
+            PENDING_INPUT.pop(admin_id, None)
+            return promos_view(db, f"✅ Создан промокод {promo.code}\n\n")
         if kind == "find_listing":
             if not text.isdigit():
                 return Reply("Номер — это число. Отправьте ещё раз или /cancel.", state=state)

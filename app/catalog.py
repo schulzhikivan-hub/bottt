@@ -134,6 +134,11 @@ def with_promo(db: Session, rows: list[Listing], owner: bool = False) -> list[Li
     placed = payments.active_placements(db, ids)
     shots = photos.photos_map(db, ids, owner=owner)
     applied = applications.counts(db, ids) if owner else {}
+    running: dict[int, list[dict]] = {}
+    if owner and ids:
+        for pl in db.scalars(select(Placement).where(Placement.listing_id.in_(ids), Placement.status == "active")).all():
+            if payments.aware(pl.ends_at) > payments.now():
+                running.setdefault(pl.listing_id, []).append({"kind": pl.kind, "ends_at": str(pl.ends_at)})
     out = []
     for x in rows:
         pics = shots.get(x.id, [])
@@ -141,8 +146,10 @@ def with_promo(db: Session, rows: list[Listing], owner: bool = False) -> list[Li
                   "cover": next((p["thumb"] for p in pics if p["status"] != "pending"), None)}
         if not owner:
             update.update(note="", has_edit=False, expires_at=None)
-        elif x.category == "job":
-            update["applications"] = applied.get(x.id, {"total": 0, "new": 0})
+        else:
+            update["placements"] = running.get(x.id, [])
+            if x.category == "job":
+                update["applications"] = applied.get(x.id, {"total": 0, "new": 0})
         out.append(ListingOut.model_validate(x).model_copy(update=update))
     return out
 

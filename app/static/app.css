@@ -475,3 +475,17 @@ button.pchip{color:var(--accent);font-weight:600}
 .dfilters{display:flex;gap:8px;margin:10px 0 0}
 .dfilters select{flex:1;min-width:0;border:1px solid var(--border);background:var(--card);border-radius:10px;padding:9px;font-size:13px;color:var(--text)}
 .dcard .dinfo b{font-size:16px}
+
+/* ===== витрина продвижения, квитанция ===== */
+.promo-row{display:flex;gap:8px;margin:6px 0}
+.promo-row input{flex:1;min-width:0;border:1px solid var(--border);background:var(--soft);border-radius:10px;padding:10px;text-transform:uppercase}
+.promo-row button{border:0;border-radius:10px;padding:10px 14px;background:var(--accent);color:#fff;font-weight:700}
+.svc{display:grid;gap:6px}
+.svc-head{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.svc-price{font-weight:800;color:var(--accent);white-space:nowrap}
+.svc-price s{color:var(--hint);font-weight:400;margin-right:6px}
+.svc .sample{display:flex;align-items:center;gap:8px;padding:8px;border-radius:10px;background:var(--soft);font-size:12px}
+.svc .sample.hl{outline:2px solid var(--warn)}
+.svc .why{color:var(--hint);font-size:12px}
+.receipt dl{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;margin:8px 0}
+.receipt dt{color:var(--hint)}.receipt dd{margin:0;font-weight:600;word-break:break-word}

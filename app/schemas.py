@@ -76,6 +76,7 @@ class ListingOut(BaseModel):
     cover: str | None = None
     views: int = 0
     reserved: bool = False
+    placements: list[dict] = []  # owner only: active paid services {kind, ends_at}
     has_edit: bool = False  # owner only: changes wait for a moderator
     published_at: datetime | None = None
     expires_at: datetime | None = None  # owner only

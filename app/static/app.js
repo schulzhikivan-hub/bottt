@@ -728,7 +728,8 @@ function ownCard(x) {
   const note = x.note ? `<p class="note">Комментарий модератора: ${esc(x.note)}</p>` : "";
   const edit = x.has_edit ? '<p class="muted">Правка на проверке — пока видна прежняя версия</p>' : "";
   const until = x.status === "approved" && x.expires_at ? ` · до ${esc(fmtDate(x.expires_at).split(",")[0])}` : "";
-  const meta = x.status === "approved" ? `<p class="meta-line">👁 ${x.views || 0}${until}</p>` : "";
+  const runs = (x.placements || []).map((p) => `${(PROMO[p.kind] || p.kind)} до ${fmtDate(p.ends_at).split(",")[0]}`).join(" · ");
+  const meta = x.status === "approved" ? `<p class="meta-line">👁 ${x.views || 0}${until}</p>${runs ? `<p class="meta-line">🚀 ${esc(runs)}</p>` : ""}` : "";
   return `<article class="listing" data-id="${x.id}" data-cat="${x.category}">
     ${x.cover ? `<img class="cover" src="${esc(x.cover)}" alt="" loading="lazy">` : ""}
     <div class="listing-top"><div><h3>${esc(x.title)}</h3><div class="meta">📍 ${esc(x.city)}</div></div>${STATUS_BADGE(x)}</div>
@@ -800,9 +801,25 @@ async function loadProfile() {
 function renderPayments(rows) {
   return rows.length ? rows.map((p) => `
     <article class="listing"><h3>${esc(p.service)}</h3>
-    <p>${p.stars} ⭐ · ${esc({pending: "ожидает оплаты", paid: "оплачено", refunded: "возврат выполнен", failed: "ошибка"}[p.status] || p.status)} · объявление #${p.listing_id}</p>
-    <p class="muted">${fmtDate(p.paid_at || p.created_at)}</p></article>`).join("")
-    : '<div class="empty">Платежей пока нет</div>';
+    <p>${p.stars} ⭐${p.promo ? " (промокод " + esc(p.promo) + ")" : ""} · ${esc({pending: "ожидает оплаты", paid: "оплачено", refunded: "возврат выполнен", failed: "ошибка"}[p.status] || p.status)} · объявление #${p.listing_id}</p>
+    <p class="muted">${esc(p.number)} · ${fmtDate(p.paid_at || p.created_at)}</p>
+    ${p.status === "paid" || p.status === "refunded" ? `<div class="actions"><button class="secondary" data-receipt="${p.id}">Квитанция</button></div>` : ""}</article>`).join("")
+    : '<div class="empty">Платежей пока нет.<br>Продвижение объявления покупается в «Мои объявления» → «Продвинуть».</div>';
+}
+async function showReceipt(id) {
+  const r = await api(`/api/me/payments/${id}/receipt`);
+  SUB_TITLES.receipt = "Квитанция " + r.number;
+  openSub("receipt");
+  const rows = [["Номер", r.number], ["Дата", fmtDate(r.date)], ["Услуга", r.service + (r.days > 1 ? ` (${r.days} дн.)` : "")],
+    ["Объявление", `#${r.listing_id} ${r.listing_title}`], ["Цена", r.list_stars + " ⭐"],
+    ...(r.discount ? [["Скидка", `−${r.discount} ⭐ (промокод ${r.promo})`]] : []), ["Оплачено", r.stars + " ⭐"],
+    ["Статус", {paid: "оплачено", refunded: "возврат выполнен", pending: "ожидает оплаты", failed: "ошибка"}[r.status] || r.status],
+    ["Платёж Telegram", r.charge_id || "—"]];
+  $("#subBody").innerHTML = `<article class="listing receipt"><dl>${rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(String(v))}</dd>`).join("")}</dl>
+    <div class="actions"><button id="copyReceipt">Скопировать</button></div></article>`;
+  $("#copyReceipt").onclick = async () => {
+    try { await navigator.clipboard.writeText(rows.map(([k, v]) => `${k}: ${v}`).join("\n")); toast("Квитанция скопирована"); } catch (e) { toast("Не удалось скопировать"); }
+  };
 }
 const SUB_TITLES = {author: "Объявления автора", applications: "Мои отклики", searches: "Мои поиски", settings: "Настройки", employer: "Статус работодателя",
                     payments: "История платежей", blocks: "Заблокированные", help: "Помощь и правила"};
@@ -1262,17 +1279,48 @@ $("#articleBack").onclick = goBack;
 $("#detailBack").onclick = goBack;
 
 // ---------- продвижение (ТЗ № 2): оплата Telegram Stars ----------
+let servicesFor = null;     // объявление, для которого открыта витрина
+let promoCode = "";        // применённый промокод
+let promoPrices = {};      // service code -> цена со скидкой
+const SAMPLE = {bump: ["⬆ Поднято", ""], vip: ["VIP", ""], pin: ["📌 Закреплено", ""], highlight: ["★ Выделено", "hl"]};
+function renderServices(data) {
+  $("#serviceFor").textContent = "Для объявления: " + data.title;
+  $("#serviceList").innerHTML = data.options.map((o) => {
+    const price = promoPrices[o.code] != null && promoPrices[o.code] !== o.stars
+      ? `<s>${o.stars}</s>${promoPrices[o.code]} ⭐` : `${o.stars} ⭐`;
+    const [badge, cls] = SAMPLE[o.kind] || ["", ""];
+    const until = o.active_until ? ` до ${fmtDate(o.active_until).split(",")[0]}` : "";
+    return `<article class="listing svc"><div class="svc-head"><h3>${esc(o.title)}</h3><span class="svc-price">${price}</span></div>
+      <p>${esc(o.what)}${o.days > 1 ? " · " + o.days + " дн." : ""}</p>
+      <div class="sample ${cls}"><span class="promo ${o.kind}" style="margin:0">${badge}</span> так выглядит в ленте</div>
+      ${o.available ? `<div class="actions"><button data-buy="${esc(o.code)}" data-listing="${servicesFor}">Оплатить ${promoPrices[o.code] ?? o.stars} ⭐</button></div>`
+        : `<p class="why">${esc(o.reason)}${until}</p>`}</article>`;
+  }).join("") || '<div class="empty">Для этого раздела услуг пока нет</div>';
+}
+let servicesData = null;
 async function openServices(listingId, category) {
-  const items = await api("/api/services?category=" + encodeURIComponent(category));
-  $("#serviceList").innerHTML = items.map((s) => `
-    <article class="listing"><h3>${esc(s.title)}</h3>
-    <p>${s.stars} ⭐${s.duration_days > 1 ? " · " + s.duration_days + " дней" : " · поднимает на 24 часа"}</p>
-    <div class="actions"><button data-buy="${esc(s.code)}" data-listing="${listingId}">Оплатить ${s.stars} ⭐</button></div></article>`).join("")
-    || '<div class="empty">Для этого раздела услуг пока нет</div>';
+  servicesFor = listingId;
+  promoCode = ""; promoPrices = {};
+  $("#promoInput").value = ""; $("#promoNote").textContent = "";
+  servicesData = await api(`/api/listings/${listingId}/services`);
+  renderServices(servicesData);
   $("#services").classList.remove("hidden");
 }
+$("#promoApply").onclick = async () => {
+  const code = $("#promoInput").value.trim();
+  if (!code || !servicesData) return;
+  promoPrices = {};
+  let applied = "";
+  for (const o of servicesData.options.filter((x) => x.available)) {
+    try { const r = await api(`/api/promo/check?code=${encodeURIComponent(code)}&service_code=${encodeURIComponent(o.code)}`, {quiet: true}); promoPrices[o.code] = r.stars; applied = r.code; }
+    catch (e) { $("#promoNote").textContent = e.message; promoCode = ""; renderServices(servicesData); return; }
+  }
+  promoCode = applied;
+  $("#promoNote").textContent = applied ? `✔ Промокод ${applied} применён: цены ниже уже со скидкой` : "";
+  renderServices(servicesData);
+};
 async function buy(listingId, code) {
-  const r = await api("/api/payments/invoice", {method: "POST", body: JSON.stringify({listing_id: Number(listingId), service_code: code})});
+  const r = await api("/api/payments/invoice", {method: "POST", body: JSON.stringify({listing_id: Number(listingId), service_code: code, promo_code: promoCode})});
   if (!tg?.openInvoice) { toast("Оплата открывается только внутри Telegram"); return; }
   tg.openInvoice(r.invoice_url, (status) => {
     $("#services").classList.add("hidden");
@@ -1433,6 +1481,8 @@ document.addEventListener("click", async (e) => {
     catch (err) { toast(err.message); }
     return;
   }
+  const rc = e.target.closest("[data-receipt]");
+  if (rc) { try { await showReceipt(rc.dataset.receipt); } catch (err) { toast(err.message); } return; }
   const au = e.target.closest("[data-author]");
   if (au) {
     try {

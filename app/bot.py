@@ -299,6 +299,12 @@ def _expire_once() -> list[tuple[str, str]]:
             messages.append((listing.author_telegram_id,
                              f"Срок услуги «{placement.kind}» для #{listing.id} {listing.title} закончился. "
                              "Продлить можно в приложении: Профиль → Мои объявления.", "payments"))
+        for placement in payments.placements_ending_soon(db):
+            listing = db.get(Listing, placement.listing_id)
+            if listing is not None and listing.author_telegram_id.isdigit():
+                messages.append((listing.author_telegram_id,
+                                 f"Завтра закончится «{placement.kind}» для «{listing.title}». Продлить можно после окончания: "
+                                 "Профиль → Мои объявления → Продвинуть.", "payments"))
         messages.extend((tg, text, "searches") for tg, text in searches.new_matches(db))
         # every notice goes to the in-app feed; Telegram only gets what the user allows
         out = []

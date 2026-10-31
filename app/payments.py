@@ -17,7 +17,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.models import Listing, Payment, Placement, Pricing
+from app.models import Listing, Payment, Placement, Pricing, PromoCode
 
 CURRENCY = "XTR"
 INVOICE_TTL = dt.timedelta(hours=1)
@@ -86,7 +86,62 @@ def active_placements(db: Session, listing_ids: list[int]) -> dict[int, str]:
     return result
 
 
-def create_invoice(db: Session, user_id: str, listing_id: int, service_code: str) -> tuple[Payment, str]:
+KIND_TEXT = {
+    "bump": "Объявление поднимается на первое место в ленте на 24 часа",
+    "vip": "Метка VIP и показ выше обычных объявлений",
+    "pin": "Закрепление: объявление всегда вверху списка",
+    "highlight": "Цветная рамка: объявление заметнее в ленте",
+}
+
+
+def normalize_code(code: str) -> str:
+    return "".join(code.split()).upper()[:24]
+
+
+def check_promo(db: Session, user_id: str, code: str, price: int) -> tuple[PromoCode, int]:
+    """Validate a promo code for this person and return (code, price after discount). A star price never drops below 1."""
+    promo = db.scalar(select(PromoCode).where(PromoCode.code == normalize_code(code)))
+    if promo is None or not promo.is_active:
+        raise PaymentError("Промокод не найден или отключён")
+    if promo.valid_until is not None and aware(promo.valid_until) < now():
+        raise PaymentError("Срок действия промокода закончился")
+    if promo.max_uses is not None and promo.used_count >= promo.max_uses:
+        raise PaymentError("Промокод уже использован максимальное число раз")
+    if db.scalar(select(Payment.id).where(Payment.user_tg_id == user_id, Payment.promo_code == promo.code,
+                                          Payment.status == "paid")) is not None:
+        raise PaymentError("Вы уже использовали этот промокод")
+    off = price * promo.percent // 100 if promo.percent else (promo.fixed_stars or 0)
+    return promo, max(1, price - off)
+
+
+def service_options(db: Session, listing: Listing) -> list[dict]:
+    """The services for this listing with what can be bought right now and why not (shown on the showcase)."""
+    ensure_pricing(db)
+    current = now()
+    out = []
+    for p in db.scalars(select(Pricing).where(Pricing.category == listing.category, Pricing.is_active == True)  # noqa: E712
+                        .order_by(Pricing.stars)).all():
+        reason, until = "", None
+        if listing.status != "approved":
+            reason = "Услуги доступны для опубликованных объявлений"
+        elif p.kind == "bump":
+            last = db.scalar(select(Placement).where(Placement.listing_id == listing.id, Placement.kind == "bump")
+                             .order_by(Placement.starts_at.desc()).limit(1))
+            if last and aware(last.starts_at) > current - BUMP_COOLDOWN:
+                left = aware(last.starts_at) + BUMP_COOLDOWN - current
+                reason = f"Поднять можно через {max(1, int(left.total_seconds() // 3600) + 1)} ч"
+        else:
+            busy = db.scalar(select(Placement).where(Placement.listing_id == listing.id, Placement.kind == p.kind,
+                                                     Placement.status == "active", Placement.ends_at > current))
+            if busy is not None:
+                until, reason = busy.ends_at, "Уже действует"
+        out.append({"code": p.code, "kind": p.kind, "title": p.title, "stars": p.stars, "days": p.duration_days,
+                    "what": KIND_TEXT.get(p.kind, ""), "available": not reason, "reason": reason, "active_until": until})
+    return out
+
+
+def create_invoice(db: Session, user_id: str, listing_id: int, service_code: str,
+                   promo_code: str = "") -> tuple[Payment, str]:
     """Create a pending payment and a Telegram invoice link. Returns (payment, url)."""
     pricing = db.get(Pricing, service_code)
     if pricing is None or not pricing.is_active:
@@ -113,9 +168,13 @@ def create_invoice(db: Session, user_id: str, listing_id: int, service_code: str
         if busy is not None:
             raise PaymentError("Эта услуга уже активна. Дождитесь окончания")
 
+    stars, used_code = pricing.stars, ""
+    if promo_code.strip():
+        promo, stars = check_promo(db, user_id, promo_code, pricing.stars)
+        used_code = promo.code
     payment = Payment(user_tg_id=user_id, listing_id=listing_id, service_code=service_code,
-                      stars=pricing.stars, payload=secrets.token_urlsafe(24), status="pending",
-                      created_at=current)
+                      stars=stars, payload=secrets.token_urlsafe(24), status="pending",
+                      created_at=current, promo_code=used_code, list_stars=pricing.stars)
     db.add(payment)
     db.commit()
     db.refresh(payment)
@@ -126,7 +185,7 @@ def create_invoice(db: Session, user_id: str, listing_id: int, service_code: str
         "payload": payment.payload,
         "provider_token": "",
         "currency": CURRENCY,
-        "prices": [{"label": pricing.title[:32], "amount": pricing.stars}],
+        "prices": [{"label": pricing.title[:32], "amount": stars}],
     })
     return payment, result
 
@@ -177,6 +236,10 @@ def process_successful_payment(db: Session, user_id: str, payload: str,
     payment.status = "paid"
     payment.telegram_payment_charge_id = charge_id
     payment.paid_at = current
+    if payment.promo_code:
+        used = db.scalar(select(PromoCode).where(PromoCode.code == payment.promo_code))
+        if used is not None:
+            used.used_count += 1
     placement = Placement(listing_id=payment.listing_id, kind=pricing.kind, starts_at=current,
                           ends_at=current + dt.timedelta(days=pricing.duration_days),
                           status="active", payment_id=payment.id)
@@ -205,6 +268,17 @@ def expire_placements(db: Session, at: dt.datetime | None = None) -> list[Placem
             ended.append(placement)
     db.commit()
     return ended
+
+
+def placements_ending_soon(db: Session, hours: int = 24, at: dt.datetime | None = None) -> list[Placement]:
+    """Active services that end within `hours` and whose owner has not been reminded yet (marks them as reminded)."""
+    moment = at or now()
+    soon = [p for p in db.scalars(select(Placement).where(Placement.status == "active", Placement.reminded.is_(False))).all()
+            if moment < aware(p.ends_at) <= moment + dt.timedelta(hours=hours) and p.kind != "bump"]
+    for p in soon:
+        p.reminded = True
+    db.commit()
+    return soon
 
 
 def refund(db: Session, payment_id: int) -> Payment:

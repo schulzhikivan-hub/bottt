@@ -31,7 +31,7 @@ from app.manage import router as manage_router
 from app.guard import rate_limit, check_text, duplicate_note, notify_user
 from app import admin_ops as ops
 from app import catalog
-from app import photos, applications, searches, inbox
+from app import photos, applications, searches, inbox, promos
 from app import geo
 from app import fields as listing_fields
 from app.users import get_or_create_user, writer, is_blocked_pair
@@ -57,6 +57,7 @@ app.include_router(photos.router)
 app.include_router(applications.router)
 app.include_router(searches.router)
 app.include_router(inbox.router)
+app.include_router(promos.router)
 app.include_router(geo.router)
 app.include_router(listing_fields.router)
 STATIC = Path(__file__).parent / "static"
@@ -541,15 +542,52 @@ def list_services(category: str | None = None, db: Session = Depends(get_db)):
 class InvoiceIn(BaseModel):
     listing_id: int
     service_code: str = Field(min_length=3, max_length=40)
+    promo_code: str = Field(default="", max_length=24)
 
 
 @app.post("/api/payments/invoice")
 def create_invoice(payload: InvoiceIn, user_id: str = Depends(writer), db: Session = Depends(get_db)):
     try:
-        payment, url = payments.create_invoice(db, user_id, payload.listing_id, payload.service_code)
+        payment, url = payments.create_invoice(db, user_id, payload.listing_id, payload.service_code, payload.promo_code)
     except PaymentError as exc:
         raise HTTPException(400, str(exc))
     return {"payment_id": payment.id, "invoice_url": url, "stars": payment.stars}
+
+
+@app.get("/api/listings/{listing_id}/services")
+def listing_services(listing_id: int, user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
+    """The showcase for one own listing: every service with its price, what it does and whether it can be bought now."""
+    item = db.get(Listing, listing_id)
+    if item is None or item.author_telegram_id != user_id:
+        raise HTTPException(404, "Объявление не найдено")
+    return {"title": item.title, "category": item.category, "options": payments.service_options(db, item)}
+
+
+@app.get("/api/promo/check")
+def promo_check(code: str = Query(max_length=24), service_code: str = Query(max_length=40),
+                user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
+    pricing = db.get(Pricing, service_code)
+    if pricing is None:
+        raise HTTPException(404, "Услуга не найдена")
+    try:
+        promo, stars = payments.check_promo(db, user_id, code, pricing.stars)
+    except PaymentError as exc:
+        raise HTTPException(400, str(exc))
+    return {"code": promo.code, "stars": stars, "was": pricing.stars}
+
+
+@app.get("/api/me/payments/{payment_id}/receipt")
+def payment_receipt(payment_id: int, user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
+    p = db.get(Payment, payment_id)
+    if p is None or p.user_tg_id != user_id:
+        raise HTTPException(404, "Платёж не найден")
+    pricing = db.get(Pricing, p.service_code)
+    listing = db.get(Listing, p.listing_id)
+    return {"number": f"KH-{p.id:06d}", "date": str(p.paid_at or p.created_at), "status": p.status,
+            "service": pricing.title if pricing else p.service_code, "days": pricing.duration_days if pricing else None,
+            "listing_id": p.listing_id, "listing_title": listing.title if listing else "",
+            "stars": p.stars, "list_stars": p.list_stars or p.stars, "promo": p.promo_code,
+            "discount": max(0, (p.list_stars or p.stars) - p.stars), "charge_id": p.telegram_payment_charge_id}
 
 
 @app.get("/api/me/payments")
@@ -559,6 +597,7 @@ def my_payments(user_id: str = Depends(current_user_id), db: Session = Depends(g
     titles = {p.code: p.title for p in db.scalars(select(Pricing)).all()}
     return [{"id": p.id, "service": titles.get(p.service_code, p.service_code), "stars": p.stars,
              "status": p.status, "listing_id": p.listing_id, "charge_id": p.telegram_payment_charge_id,
+             "promo": p.promo_code, "number": f"KH-{p.id:06d}",
              "created_at": str(p.created_at), "paid_at": str(p.paid_at) if p.paid_at else None}
             for p in rows]
 

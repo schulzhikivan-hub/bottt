@@ -213,6 +213,7 @@ class Placement(Base):
     status: Mapped[str] = mapped_column(String(16), default="active", index=True)  # active, ended, refunded
     payment_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     notified_end: Mapped[bool] = mapped_column(Boolean, default=False)
+    reminded: Mapped[bool] = mapped_column(Boolean, default=False)  # "ends tomorrow" notice sent
 
 
 class Payment(Base):
@@ -228,6 +229,22 @@ class Payment(Base):
     status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    promo_code: Mapped[str] = mapped_column(String(24), default="")
+    list_stars: Mapped[int | None] = mapped_column(Integer, nullable=True)  # price before the discount
+
+
+class PromoCode(Base):
+    """A discount code for paid services: a percent or a fixed number of stars off."""
+    __tablename__ = "promo_codes"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    code: Mapped[str] = mapped_column(String(24), unique=True)
+    percent: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    fixed_stars: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    max_uses: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    used_count: Mapped[int] = mapped_column(Integer, default=0)
+    valid_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
 class Group(Base):
