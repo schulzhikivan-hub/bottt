@@ -28,6 +28,7 @@ from app.admin_auth import staff, MOD, ADM, SUP
 from app.manage import router as manage_router
 from app.guard import rate_limit, check_text, duplicate_note, notify_user
 from app import admin_ops as ops
+from app import catalog
 from app.users import get_or_create_user, writer, is_blocked_pair
 from app.models import DatingProfile
 from app.dating import router as dating_router
@@ -38,12 +39,14 @@ migrate()
 with SessionLocal() as _db:
     seed_reference(_db)
     bootstrap_admins(_db)
+    catalog.backfill_search_fields(_db)
 
 app = FastAPI(title="KOREA HUB API", version="0.4.0")
 app.include_router(dating_router)
 app.include_router(manage_router)
 app.include_router(admin_auth_router)
 app.include_router(webauth_router)
+app.include_router(catalog.router)
 STATIC = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
@@ -248,7 +251,8 @@ def create_listing(payload: ListingCreate, user_id: str = Depends(writer), db: S
     )
     if active >= MAX_ACTIVE_PER_CATEGORY:
         raise HTTPException(409, f"Лимит: не больше {MAX_ACTIVE_PER_CATEGORY} активных объявлений в разделе")
-    item = Listing(**payload.model_dump(), author_telegram_id=user_id, status="pending")
+    item = Listing(**catalog.clean_extras(payload.category, payload.model_dump()),
+                   author_telegram_id=user_id, status="pending")
     db.add(item)
     db.commit()
     db.refresh(item)
@@ -378,6 +382,30 @@ def send_message(conv_id: int, payload: MessageIn, user_id: str = Depends(writer
     db.refresh(msg)
     notify_user(db, other, f"Новое сообщение в KOREA HUB:\n{text[:200]}")
     return MessageOut(id=msg.id, mine=True, text=msg.text, created_at=msg.created_at)
+
+
+def _other_party(conv: Conversation, user_id: str) -> str:
+    return conv.seller_tg_id if conv.buyer_tg_id == user_id else conv.buyer_tg_id
+
+
+@app.post("/api/conversations/{conv_id}/block")
+def block_from_chat(conv_id: int, user_id: str = Depends(writer), db: Session = Depends(get_db)):
+    """Block the other person without the client ever learning their Telegram ID."""
+    conv = _get_conversation_for(db, conv_id, user_id)
+    return block_user(_other_party(conv, user_id), user_id, db)
+
+
+class ChatReportIn(BaseModel):
+    reason: str
+    comment: str = Field(default="", max_length=500)
+
+
+@app.post("/api/conversations/{conv_id}/report", status_code=201)
+def report_from_chat(conv_id: int, payload: ChatReportIn, user_id: str = Depends(writer),
+                     db: Session = Depends(get_db)):
+    conv = _get_conversation_for(db, conv_id, user_id)
+    return create_report(ReportIn(target_type="user", target_id=_other_party(conv, user_id),
+                                  reason=payload.reason, comment=payload.comment), user_id, db)
 
 
 # ---------- Paid services (ТЗ № 2) ----------

@@ -1,0 +1,172 @@
+/* KOREA HUB — Mini App.
+   Каркас: шапка и нижняя панель закреплены, прокручивается только .content.
+   Цвета берутся из темы Telegram (переменные задаёт app.js), без неё — светлая тема. */
+:root{
+  --bg:#f3f6fa;--card:#fff;--text:#142338;--hint:#718096;--border:#e5eaf1;
+  --accent:#1769aa;--accent-text:#fff;--soft:#edf4ff;--ok:#13945c;--warn:#f5a524;--bad:#e5484d;
+  font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;font-synthesis:none;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;margin:0;overflow:hidden;background:var(--bg);color:var(--text);overscroll-behavior:none}
+[hidden]{display:none !important}
+.hidden{display:none !important}
+button{font:inherit;color:inherit;cursor:pointer}
+a{color:var(--accent)}
+
+/* ---- каркас ---- */
+.shell{position:fixed;top:0;left:0;right:0;margin:0 auto;max-width:520px;
+  height:100vh;height:var(--tg-viewport-stable-height,100dvh);
+  display:flex;flex-direction:column;background:var(--bg)}
+.topbar{flex:none;display:flex;align-items:center;justify-content:space-between;
+  padding:max(8px,env(safe-area-inset-top)) 16px 8px;background:var(--card);border-bottom:1px solid var(--border)}
+.brand{display:flex;align-items:center;gap:10px}
+.logo{width:32px;height:32px;border-radius:10px;background:var(--soft);display:grid;place-items:center;font-size:18px}
+.brand b{font-size:16px;letter-spacing:.3px}
+.content{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;
+  -webkit-overflow-scrolling:touch;padding:0 16px 20px}
+.content.fill{overflow:hidden;padding:0;display:flex;flex-direction:column}
+.view{padding-top:12px}
+.bottom{flex:none;display:grid;grid-template-columns:repeat(5,1fr);align-items:center;
+  background:var(--card);border-top:1px solid var(--border);
+  padding:6px 4px calc(6px + env(safe-area-inset-bottom))}
+.bottom button{border:0;background:none;color:var(--hint);display:grid;justify-items:center;gap:2px;
+  padding:4px 0;font-size:10px;position:relative}
+.bottom button.active{color:var(--accent)}
+.bottom svg,.icon-btn svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:1.8;
+  stroke-linecap:round;stroke-linejoin:round}
+.bottom .add{width:46px;height:46px;margin:0 auto;border-radius:16px;background:var(--accent);
+  color:var(--accent-text);box-shadow:0 4px 12px #1769aa44;display:grid;place-items:center;padding:0}
+.bottom .add svg{width:26px;height:26px;stroke-width:2.2}
+
+/* ---- поиск и фильтры (прилипают к верху списка) ---- */
+.sticky{position:sticky;top:0;z-index:3;background:var(--bg);padding:12px 0 6px}
+.searchbar{display:flex;gap:8px}
+.searchbar input{flex:1;min-width:0;border:1px solid var(--border);background:var(--card);color:var(--text);
+  border-radius:12px;padding:11px 14px;font-size:15px;outline:0}
+.icon-btn{position:relative;width:46px;border:1px solid var(--border);background:var(--card);border-radius:12px;
+  display:grid;place-items:center;color:var(--text)}
+.badge{position:absolute;top:-5px;right:-5px;min-width:18px;height:18px;border-radius:9px;background:var(--accent);
+  color:var(--accent-text);font-size:11px;display:grid;place-items:center;padding:0 4px}
+.chips{display:flex;gap:6px;overflow-x:auto;padding:10px 0 2px;scrollbar-width:none}
+.chips::-webkit-scrollbar{display:none}
+.chip{flex:none;border:1px solid var(--border);background:var(--card);border-radius:999px;padding:8px 11px;font-size:13px;white-space:nowrap}
+.chip.active{background:var(--accent);border-color:var(--accent);color:var(--accent-text)}
+.quick{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:10px 0 4px}
+.quick button{border:0;border-radius:14px;padding:10px 4px;display:grid;justify-items:center;gap:2px;font-size:12px;font-weight:600}
+.quick .q1{background:#f0eaff}.quick .q2{background:#e1f7f6}.quick .q3{background:#ffe9f0}
+.quick .q1,.quick .q2,.quick .q3{color:#142338}
+.quick span{font-size:22px}
+.results-head{display:flex;justify-content:space-between;align-items:center;margin:12px 0 8px;font-size:13px;color:var(--hint)}
+select,input,textarea{font:inherit;color:var(--text)}
+.results-head select{border:0;background:none;color:var(--accent);font-size:13px;font-weight:600;appearance:none;padding:4px 0}
+
+/* ---- карточки ---- */
+.listings{display:grid;gap:10px}
+.listing{position:relative;background:var(--card);border:1px solid var(--border);border-radius:14px;padding:12px 12px 12px}
+.listing[data-open]{cursor:pointer}
+.listing h3{font-size:15px;margin:0 36px 4px 0;line-height:1.25}
+.listing p{font-size:13px;color:var(--hint);margin:4px 0;line-height:1.4}
+.listing-top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+.listing-top > div{min-width:0;flex:1}
+.price{font-weight:800;color:var(--ok);font-size:15px;margin:2px 0 4px}
+.price.big{font-size:22px;margin:6px 0}
+.meta{font-size:12px;color:var(--hint)}
+.pills{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 2px}
+.pill{font-size:11px;background:var(--soft);color:var(--accent);padding:4px 8px;border-radius:8px}
+.promo{display:inline-block;font-size:11px;font-weight:700;padding:3px 8px;border-radius:8px;margin-bottom:6px;
+  background:var(--warn);color:#142338}
+.promo.pin{background:#ffd8d8}.promo.vip{background:var(--warn)}.promo.bump{background:#d7efe3}.promo.highlight{background:#fff3b0}
+.listing.hl{border-color:var(--warn);box-shadow:0 0 0 1px var(--warn) inset}
+.fav{position:absolute;top:8px;right:8px;width:34px;height:34px;border:0;border-radius:50%;background:transparent;
+  font-size:20px;color:var(--hint);display:grid;place-items:center}
+.fav.on{color:var(--bad)}
+.tag{font-size:10px;color:var(--accent);background:var(--soft);padding:5px 8px;border-radius:8px;white-space:nowrap}
+.status{flex:none;align-self:flex-start;white-space:nowrap;font-size:11px;font-weight:600;padding:4px 10px;
+  border-radius:999px;color:#fff;background:var(--hint)}
+.status.pending{background:var(--warn);color:#142338}.status.approved{background:var(--ok)}.status.rejected{background:var(--bad)}
+.note{background:#fff4d6;color:#142338;border-radius:8px;padding:8px;font-size:13px;margin:8px 0}
+.empty{padding:24px 16px;text-align:center;color:var(--hint);font-size:14px;background:var(--card);border-radius:14px;border:1px dashed var(--border)}
+.skeleton{height:92px;border-radius:14px;background:linear-gradient(90deg,var(--card) 25%,var(--border) 50%,var(--card) 75%);
+  background-size:200% 100%;animation:shine 1.2s infinite}
+@keyframes shine{to{background-position:-200% 0}}
+.more{width:100%;margin:12px 0 4px;padding:13px;border:1px solid var(--border);background:var(--card);border-radius:12px;
+  color:var(--accent);font-weight:700}
+
+/* ---- кнопки ---- */
+.actions{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+.actions button,.actions .btn,.cta button,.cta .btn{flex:1;min-width:110px;border:0;border-radius:10px;padding:11px;font-size:14px;
+  background:var(--accent);color:var(--accent-text);text-align:center;text-decoration:none}
+.actions button.secondary,.cta .secondary{background:var(--soft);color:var(--accent)}
+.actions button.on{background:#ffe3e3;color:var(--bad)}
+.cta{display:flex;gap:8px;margin:12px 0;flex-wrap:wrap}
+.cta .primary{background:var(--accent);color:var(--accent-text)}
+.linkbtn{border:0;background:none;color:var(--hint);font-size:13px;padding:8px 0}
+.link{border:0;background:none;color:var(--accent);font-weight:700;padding:6px 0}
+.section-head{display:flex;justify-content:space-between;align-items:end;margin:16px 0 10px}
+.eyebrow{font-size:10px;font-weight:800;letter-spacing:1.2px;color:var(--hint)}
+.section-head h2{font-size:19px;margin:4px 0 0}
+.back{padding:0 0 6px;display:block}
+.detail h1{font-size:21px;margin:6px 0;line-height:1.2}
+.detail .desc{font-size:15px;line-height:1.5;white-space:pre-wrap;word-break:break-word;margin:12px 0}
+.muted{color:var(--hint);font-size:13px}
+
+/* ---- профиль ---- */
+.profile-head{display:flex;align-items:center;gap:12px;padding:8px 0 14px}
+.profile-head .avatar{flex:none;width:52px;height:52px;border-radius:50%;background:var(--accent);color:var(--accent-text);
+  display:grid;place-items:center;font-size:20px;font-weight:700;overflow:hidden}
+.profile-head .avatar img{width:100%;height:100%;object-fit:cover}
+.profile-head .who{flex:1;min-width:0}
+.profile-head .who b{display:block;font-size:17px}
+.profile-head .who small{color:var(--hint)}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:6px}
+.stats > div{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:10px;text-align:center}
+.stats b{display:block;font-size:18px}
+.stats small{color:var(--hint);font-size:12px}
+.menu-list{display:flex;flex-direction:column;gap:6px;margin:12px 0}
+.wide{width:100%;border:1px solid var(--border);background:var(--card);border-radius:12px;padding:12px 14px;
+  font-size:15px;text-align:left;display:block}
+.wide.danger{color:var(--bad)}
+
+/* ---- чат: поле ввода всегда внизу экрана ---- */
+.chat-view{flex:1;min-height:0;display:flex;flex-direction:column}
+.chat-head{flex:none;display:flex;align-items:center;gap:8px;padding:10px 16px;background:var(--card);border-bottom:1px solid var(--border)}
+.chat-head b{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chat-head .link{font-size:13px}
+.messages{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding:12px 16px;overscroll-behavior:contain}
+.bubble{max-width:80%;padding:9px 12px;border-radius:16px;background:var(--card);border:1px solid var(--border);
+  align-self:flex-start;white-space:pre-wrap;word-break:break-word;font-size:15px}
+.bubble.mine{background:var(--ok);border-color:var(--ok);color:#fff;align-self:flex-end}
+.bubble small{display:block;opacity:.7;font-size:11px;margin-top:3px}
+.chat-form{flex:none;display:flex;gap:8px;padding:8px 12px;background:var(--card);border-top:1px solid var(--border)}
+.chat-form input{flex:1;min-width:0;border:1px solid var(--border);background:var(--bg);color:var(--text);border-radius:20px;padding:10px 14px;font-size:15px;outline:0}
+.chat-form button{flex:none;width:42px;border:0;border-radius:50%;background:var(--ok);color:#fff;font-size:18px}
+.convo{cursor:pointer}
+.photo{width:100%;max-height:340px;object-fit:cover;border-radius:12px;margin-bottom:8px}
+
+/* ---- окна ---- */
+.modal{position:fixed;inset:0;background:#07182c88;z-index:50;display:flex;align-items:flex-end;justify-content:center}
+.sheet{background:var(--card);color:var(--text);width:min(520px,100%);border-radius:20px 20px 0 0;
+  padding:16px 16px max(18px,env(safe-area-inset-bottom));max-height:88vh;max-height:88dvh;overflow:auto;overscroll-behavior:contain}
+.sheet-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+.sheet-top button{border:0;background:var(--bg);border-radius:9px;padding:7px 10px}
+form label{display:block;font-size:12px;font-weight:700;margin:12px 0;color:var(--hint)}
+form input,form select,form textarea{display:block;width:100%;margin-top:6px;border:1px solid var(--border);border-radius:11px;
+  padding:11px;font-size:15px;background:var(--bg);color:var(--text);outline:0}
+form select{appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--hint) 50%),linear-gradient(135deg,var(--hint) 50%,transparent 50%);
+  background-position:calc(100% - 18px) 50%,calc(100% - 13px) 50%;background-size:5px 5px;background-repeat:no-repeat;padding-right:32px}
+form textarea{resize:vertical}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.check{display:flex !important;gap:10px;align-items:center;font-size:15px !important;font-weight:500 !important;color:var(--text) !important}
+.check input{width:20px;height:20px;margin:0;flex:none}
+.submit{width:100%;border:0;border-radius:12px;background:var(--accent);color:var(--accent-text);padding:14px;font-weight:800;margin-top:12px;font-size:15px}
+.submit.ghost{background:var(--bg);color:var(--text);border:1px solid var(--border)}
+.toast{position:fixed;top:64px;left:50%;transform:translateX(-50%);background:#142338;color:#fff;padding:11px 16px;
+  border-radius:12px;font-size:13px;display:none;z-index:80;max-width:90%;text-align:center}
+.sheet a{color:var(--accent)}
+
+@media(min-width:560px){.shell{border-left:1px solid var(--border);border-right:1px solid var(--border)}}
+
+/* В тёмной теме Telegram мягкий фон считается от акцентного цвета */
+@supports (color: color-mix(in srgb, red, blue)) {
+  :root{--soft:color-mix(in srgb, var(--accent) 14%, var(--card))}
+}

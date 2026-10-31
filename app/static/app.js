@@ -1,4 +1,8 @@
-const tg = window.Telegram?.WebApp; tg?.ready(); tg?.expand();
+const tg = window.Telegram?.WebApp;
+tg?.ready();
+tg?.expand();
+try { tg?.disableVerticalSwipes?.(); } catch (e) { /* старая версия Telegram */ }
+
 const $ = (s) => document.querySelector(s);
 const esc = (s = "") => String(s).replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const CAT = {job: "Работа", housing: "Жильё", marketplace: "Барахолка"};
@@ -12,14 +16,22 @@ const REASONS = {fraud: "Мошенничество", fake: "Поддельно�
 const SECTIONS = {visas: "Визы и документы", registration: "Регистрация и адрес", medicine: "Медицина",
                   banks: "Банки и мобильная связь", housing: "Жильё", work: "Работа и трудовые права",
                   emergency: "Экстренные ситуации"};
-let currentCategory = null;
-let currentChat = null;
-let currentChatUser = null;
-let chatTimer = null;
-let me = null;
+const PROMO = {pin: "📌 Закреплено", vip: "VIP", bump: "⬆ Поднято", highlight: "★ Выделено"};
+const NAV_VIEWS = ["home", "saved", "chats", "profile"];
+const MAIN_VIEWS = [...NAV_VIEWS, "dating", "community", "guide"];
+const ALL_VIEWS = [...MAIN_VIEWS, "detail", "chat", "article"];
 
-// Все запросы подписываются данными Telegram: сервер проверяет подпись.
-// Внутри Telegram вход автоматический (подпись initData). На сайте — сессия после входа через бота.
+let currentChat = null;
+let chatTimer = null;
+let lastMessageKey = "";
+let me = null;
+let favIds = new Set();
+let ownItems = {};
+let datingGender = "";
+let currentEditId = null;
+
+// ---------- запросы ----------
+// Внутри Telegram вход автоматический (подпись initData). На сайте: сессия после входа через бота.
 const inTelegram = Boolean(tg?.initData);
 async function api(path, options = {}) {
   const headers = {};
@@ -34,7 +46,34 @@ async function api(path, options = {}) {
   return data;
 }
 
-// ---- вход на сайте через Telegram (в Mini App не нужен) ----
+function toast(msg) {
+  const t = $("#toast"); t.textContent = msg; t.style.display = "block";
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => (t.style.display = "none"), 3000);
+  tg?.HapticFeedback?.notificationOccurred("success");
+}
+const fmtDate = (s) => (s ? new Date(s.replace(" ", "T")).toLocaleString("ru-RU") : "");
+const fmtKRW = (n) => new Intl.NumberFormat("ru-RU").format(n) + " ₩";
+
+function confirmDialog(message) {
+  if (tg?.showConfirm) return new Promise((resolve) => tg.showConfirm(message, resolve));
+  return Promise.resolve(confirm(message));
+}
+
+// Окно выбора причины жалобы (системное prompt() в Telegram может не открыться)
+function askReason() {
+  return new Promise((resolve) => {
+    $("#reasonList").innerHTML = Object.entries(REASONS)
+      .map(([key, title]) => `<button class="wide" data-reason="${key}">${esc(title)}</button>`).join("");
+    const sheet = $("#reasonSheet");
+    sheet.classList.remove("hidden");
+    const done = (value) => { sheet.classList.add("hidden"); resolve(value); };
+    $("#reasonList").onclick = (e) => { const b = e.target.closest("[data-reason]"); if (b) done(b.dataset.reason); };
+    $("#closeReason").onclick = () => done(null);
+  });
+}
+
+// ---------- вход на сайте через Telegram (в Mini App не нужен) ----------
 let loginPoll = null;
 function showWebLogin() { if (!inTelegram) $("#webLogin").classList.remove("hidden"); }
 async function startWebLogin() {
@@ -63,70 +102,237 @@ $("#webLoginBtn").onclick = startWebLogin;
 $("#closeWebLogin").onclick = () => { clearInterval(loginPoll); $("#webLogin").classList.add("hidden"); };
 $("#loginTop").onclick = showWebLogin;
 
-function toast(msg) {
-  const t = $("#toast"); t.textContent = msg; t.style.display = "block";
-  setTimeout(() => (t.style.display = "none"), 3000);
-  tg?.HapticFeedback?.notificationOccurred("success");
-}
-function fmtDate(s) { return s ? new Date(s.replace(" ", "T")).toLocaleString("ru-RU") : ""; }
-
-function card(x, opts = {}) {
-  const fav = opts.favorite
-    ? '<button data-act="fav" class="on">♥ В избранном</button>'
-    : '<button data-act="fav" class="secondary">♡ В избранное</button>';
-  const chat = opts.chat === false ? "" : '<button data-act="chat">Написать</button>';
-  const promo = opts.promo ? '<button data-act="promo" class="secondary">🚀 Продвинуть</button>' : "";
-  const report = opts.noActions ? "" : '<button data-act="report" class="secondary">⚑ Пожаловаться</button>';
-  const status = opts.showStatus ? `<span class="status ${STATUS[x.status]?.[1] || ""}">${STATUS[x.status]?.[0] || esc(x.status)}</span>` : "";
-  let actions = `<div class="actions">${chat}${fav}${promo}${report}</div>`;
-  if (opts.ownerView) actions = opts.promo ? `<div class="actions">${promo}</div>` : "";
-  return `<article class="listing" data-id="${x.id}" data-cat="${x.category}">
-    <div class="listing-top"><div><h3>${esc(x.title)}</h3><p>📍 ${esc(x.city)}</p></div><span class="tag">${esc(CAT[x.category] || x.category)}</span></div>
-    <div class="price">${esc(x.price || "Цена договорная")}</div>
-    <p>${esc(x.description || "Подробности уточняйте у автора")}</p>
-    ${status}${actions}
-  </article>`;
-}
-
-async function loadMe() {
-  me = await api("/api/me");
-  return me;
-}
-
+async function loadMe() { me = await api("/api/me"); return me; }
 async function requireConsent() {
   try { await loadMe(); } catch (e) { return false; }  // без входа api() сам показал окно входа
-  if (!me.consent) {
-    $("#consent").classList.remove("hidden");
-    return false;
-  }
+  if (!me.consent) { $("#consent").classList.remove("hidden"); return false; }
   return true;
 }
 
-async function loadListings() {
-  const box = $("#listings");
-  box.innerHTML = '<div class="empty">Загружаем…</div>';
-  const params = new URLSearchParams();
-  if (currentCategory) params.set("category", currentCategory);
-  const q = $("#search").value.trim();
-  if (q) params.set("q", q);
-  try {
-    const items = await api("/api/listings?" + params);
-    box.innerHTML = items.length ? items.map((x) => card(x)).join("")
-      : '<div class="empty">Пока нет опубликованных объявлений. Добавьте первое!</div>';
-  } catch (e) {
-    box.innerHTML = `<div class="empty">Не удалось загрузить: ${esc(e.message)}</div>`;
+// ---------- навигация: шапка и нижняя панель не двигаются, прокручивается только #scroll ----------
+let currentView = "home";
+let backStack = [];
+const scrollPos = {};
+let homeLoaded = false;
+
+function showView(name, opts = {}) {
+  const box = $("#scroll");
+  scrollPos[currentView] = box.scrollTop;
+  if (opts.push) backStack.push(currentView);
+  else if (!opts.back && NAV_VIEWS.includes(name)) backStack = [];
+  currentView = name;
+  for (const v of ALL_VIEWS) { const el = $("#view-" + v); if (el) el.hidden = v !== name; }
+  box.classList.toggle("fill", name === "chat");
+  const parent = name === "detail" || name === "article" ? backStack[backStack.length - 1] : name;
+  const navName = name === "chat" ? "chats" : (NAV_VIEWS.includes(parent) ? parent : "");
+  document.querySelectorAll(".bottom [data-view]").forEach((b) => b.classList.toggle("active", b.dataset.view === navName));
+  if (name !== "chat") clearInterval(chatTimer);
+  if (NAV_VIEWS.includes(name) && backStack.length === 0) tg?.BackButton?.hide(); else tg?.BackButton?.show();
+  if (name === "home" && !homeLoaded) loadCatalog();
+  if (name === "saved") loadFavorites();
+  if (name === "chats") loadConversations();
+  if (name === "profile") loadProfile();
+  if (name === "community") loadGroups();
+  if (name === "guide") loadGuide();
+  if (name === "dating") loadDating();
+  box.scrollTop = opts.restore ? (scrollPos[name] || 0) : 0;
+}
+function goBack() {
+  const previous = backStack.pop() || "home";
+  showView(previous, {back: true, restore: true});
+}
+tg?.BackButton?.onClick(goBack);
+
+// ---------- карточки ----------
+const promoBadge = (x) => (x.promo ? `<span class="promo ${x.promo}">${PROMO[x.promo] || ""}</span>` : "");
+function priceText(x) {
+  if (x.price_amount != null) return fmtKRW(x.price_amount) + (x.price ? " " + x.price : "");
+  return x.price || "Цена договорная";
+}
+function pills(x) {
+  const out = [];
+  if (x.category === "job") {
+    if (x.housing_provided) out.push("🏠 Жильё");
+    if (x.meals_provided) out.push("🍱 Питание");
   }
+  if (x.category === "housing" && x.rooms) out.push(`🛏 ${x.rooms} комн.`);
+  if (x.category === "marketplace" && x.condition) out.push(x.condition === "new" ? "Новое" : "Б/у");
+  return out.map((t) => `<span class="pill">${t}</span>`).join("");
+}
+function listingCard(x) {
+  const fav = favIds.has(x.id);
+  return `<article class="listing ${x.promo === "highlight" ? "hl" : ""}" data-id="${x.id}" data-cat="${x.category}" data-open="${x.id}">
+    ${promoBadge(x)}
+    <h3>${esc(x.title)}</h3>
+    <div class="meta">📍 ${esc(x.city)} · ${esc(CAT[x.category] || x.category)}</div>
+    <div class="price">${esc(priceText(x))}</div>
+    <div class="pills">${pills(x)}</div>
+    <button class="fav ${fav ? "on" : ""}" data-act="fav" aria-label="В избранное">${fav ? "♥" : "♡"}</button>
+  </article>`;
 }
 
+// ---------- каталог: поиск, фильтры, страницы ----------
+const DEFAULT_FILTERS = {q: "", category: "", city: "", price_min: "", price_max: "", sort: "new",
+                         housing_provided: false, meals_provided: false, condition: "", rooms_min: ""};
+let filters = {...DEFAULT_FILTERS};
+const page = {offset: 0, loading: false};
+
+function catalogParams(offset) {
+  const p = new URLSearchParams({limit: "20", offset: String(offset)});
+  for (const [key, value] of Object.entries(filters)) {
+    if (value === "" || value === false || value == null) continue;
+    p.set(key, value === true ? "true" : value);
+  }
+  return p;
+}
+function activeFilterCount() {
+  return ["city", "price_min", "price_max", "condition", "rooms_min"].filter((k) => filters[k]).length
+    + (filters.housing_provided ? 1 : 0) + (filters.meals_provided ? 1 : 0);
+}
+function updateFilterUi() {
+  const n = activeFilterCount();
+  $("#filterBadge").hidden = n === 0;
+  $("#filterBadge").textContent = n;
+  document.querySelectorAll("#chips .chip").forEach((c) => c.classList.toggle("active", c.dataset.cat === filters.category));
+  $("#sortSelect").value = filters.sort;
+}
+
+async function loadCatalog(append = false) {
+  if (page.loading) return;
+  page.loading = true;
+  const box = $("#listings");
+  if (!append) {
+    page.offset = 0;
+    $("#moreBtn").hidden = true;
+    box.innerHTML = '<div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div>';
+  }
+  try {
+    const r = await api("/api/catalog?" + catalogParams(page.offset), {quiet: true});
+    const html = r.items.map(listingCard).join("");
+    if (append) box.insertAdjacentHTML("beforeend", html);
+    else box.innerHTML = html || `<div class="empty">${activeFilterCount() || filters.q || filters.category
+      ? "Ничего не нашли. Измените запрос или сбросьте фильтры." : "Пока нет объявлений. Добавьте первое кнопкой «+»."}</div>`;
+    page.offset += r.items.length;
+    $("#resultCount").textContent = r.total ? `Найдено: ${r.total}` : "Ничего не найдено";
+    $("#moreBtn").hidden = !r.has_more;
+    homeLoaded = true;
+  } catch (e) {
+    if (!append) box.innerHTML = `<div class="empty">Не удалось загрузить: ${esc(e.message)}</div>`;
+  }
+  page.loading = false;
+}
+function reloadCatalog() { homeLoaded = false; updateFilterUi(); loadCatalog(); $("#scroll").scrollTop = 0; }
+
+let searchTimer = null;
+$("#search").addEventListener("input", () => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => { filters.q = $("#search").value.trim(); reloadCatalog(); }, 350);
+});
+$("#search").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { clearTimeout(searchTimer); filters.q = $("#search").value.trim(); reloadCatalog(); e.target.blur(); }
+});
+document.querySelectorAll("#chips .chip").forEach((chip) => chip.addEventListener("click", () => {
+  filters.category = chip.dataset.cat;
+  // Особые фильтры подходят только одному разделу
+  filters.housing_provided = false; filters.meals_provided = false; filters.condition = ""; filters.rooms_min = "";
+  reloadCatalog();
+}));
+$("#sortSelect").onchange = () => { filters.sort = $("#sortSelect").value; reloadCatalog(); };
+$("#moreBtn").onclick = () => loadCatalog(true);
+
+async function loadCityHints() {
+  try {
+    const rows = await api("/api/cities", {quiet: true});
+    $("#cityHints").innerHTML = rows.map((c) => `<option value="${esc(c.city)}">`).join("");
+  } catch (e) { /* подсказки не обязательны */ }
+}
+function showBlocks(formSelector, category) {
+  document.querySelectorAll(`${formSelector} [data-for]`).forEach((el) => { el.hidden = el.dataset.for !== category; });
+}
+function openFilters() {
+  const f = $("#filterForm");
+  f.city.value = filters.city; f.price_min.value = filters.price_min; f.price_max.value = filters.price_max;
+  f.housing_provided.checked = filters.housing_provided; f.meals_provided.checked = filters.meals_provided;
+  f.condition.value = filters.condition; f.rooms_min.value = filters.rooms_min;
+  showBlocks("#filterForm", filters.category);
+  $("#filterHint").hidden = Boolean(filters.category);
+  $("#filters").classList.remove("hidden");
+}
+$("#filterBtn").onclick = openFilters;
+$("#closeFilters").onclick = () => $("#filters").classList.add("hidden");
+$("#filterForm").onsubmit = (e) => {
+  e.preventDefault();
+  const f = e.target;
+  filters.city = f.city.value.trim();
+  filters.price_min = f.price_min.value; filters.price_max = f.price_max.value;
+  filters.housing_provided = f.housing_provided.checked; filters.meals_provided = f.meals_provided.checked;
+  filters.condition = f.condition.value; filters.rooms_min = f.rooms_min.value;
+  $("#filters").classList.add("hidden");
+  reloadCatalog();
+};
+$("#resetFilters").onclick = () => {
+  filters = {...DEFAULT_FILTERS, category: filters.category, q: filters.q, sort: filters.sort};
+  $("#filters").classList.add("hidden");
+  reloadCatalog();
+};
+
+// ---------- страница объявления ----------
+function contactLinks(contact) {
+  const c = (contact || "").trim();
+  const digits = c.replace(/\D/g, "");
+  const phone = /^[+\d][\d\s().-]*$/.test(c) && digits.length >= 9 ? (c.startsWith("+") ? "+" : "") + digits : "";
+  const user = /^@?[A-Za-z][A-Za-z0-9_]{3,31}$/.test(c) ? c.replace(/^@/, "") : "";
+  return {phone, user};
+}
+async function openDetail(id, push = true) {
+  try {
+    const x = await api(`/api/listings/${id}`, {quiet: true});
+    const {phone, user} = contactLinks(x.contact);
+    const fav = favIds.has(x.id);
+    $("#detailBody").innerHTML = `<article class="detail" data-id="${x.id}" data-cat="${x.category}">
+      ${promoBadge(x)}
+      <h1>${esc(x.title)}</h1>
+      <div class="meta">📍 ${esc(x.city)} · ${esc(CAT[x.category] || x.category)}</div>
+      <div class="price big">${esc(priceText(x))}</div>
+      <div class="pills">${pills(x)}</div>
+      <p class="desc">${esc(x.description || "Подробности уточняйте у автора")}</p>
+      <p class="muted">Опубликовано: ${esc(fmtDate(x.created_at).split(",")[0] || "")}${x.contact && !phone && !user ? " · Контакт: " + esc(x.contact) : ""}</p>
+      <div class="cta">
+        <button class="primary" data-act="chat">Написать</button>
+        ${phone ? `<a class="btn secondary" href="tel:${esc(phone)}">Позвонить</a>` : ""}
+        ${user ? `<a class="btn secondary" data-tglink href="https://t.me/${esc(user)}" target="_blank" rel="noopener">Telegram автора</a>` : ""}
+      </div>
+      <div class="cta">
+        <button class="secondary" data-act="fav">${fav ? "♥ В избранном" : "♡ В избранное"}</button>
+        <button class="secondary" data-act="share">Поделиться</button>
+      </div>
+      <button class="linkbtn" data-act="report">⚑ Пожаловаться</button>
+    </article>`;
+    showView("detail", {push});
+  } catch (e) { toast(e.message); }
+}
+async function shareListing(id, title) {
+  const url = `${location.origin}/?listing=${id}`;
+  if (tg?.openTelegramLink) tg.openTelegramLink("https://t.me/share/url?url=" + encodeURIComponent(url) + "&text=" + encodeURIComponent(title));
+  else if (navigator.share) navigator.share({title, url}).catch(() => {});
+  else { try { await navigator.clipboard.writeText(url); toast("Ссылка скопирована"); } catch (e) { toast(url); } }
+}
+
+// ---------- избранное ----------
+async function loadFavIds() {
+  try { favIds = new Set((await api("/api/favorites", {quiet: true})).map((x) => x.id)); } catch (e) { favIds = new Set(); }
+}
 async function loadFavorites() {
   const box = $("#favorites");
   try {
     const items = await api("/api/favorites");
-    box.innerHTML = items.length ? items.map((x) => card(x, {favorite: true})).join("")
+    favIds = new Set(items.map((x) => x.id));
+    box.innerHTML = items.length ? items.map(listingCard).join("")
       : '<div class="empty">Здесь будут объявления, которые вы сохранили ♡</div>';
   } catch (e) { box.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
 }
 
+// ---------- чаты ----------
 async function loadConversations() {
   const box = $("#conversations");
   try {
@@ -137,20 +343,22 @@ async function loadConversations() {
       : '<div class="empty">Переписок пока нет. Откройте объявление и нажмите «Написать».</div>';
   } catch (e) { box.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
 }
-
 async function openChat(id, title) {
   currentChat = id;
+  lastMessageKey = "";
   $("#chatTitle").textContent = title || "Чат";
-  showView("chat");
+  showView("chat", {push: true});
   await loadMessages();
   clearInterval(chatTimer);
   chatTimer = setInterval(loadMessages, 5000);
 }
-
 async function loadMessages() {
   if (!currentChat) return;
   try {
     const items = await api(`/api/conversations/${currentChat}/messages`);
+    const key = items.length + ":" + (items[items.length - 1]?.id || 0);
+    if (key === lastMessageKey) return;  // ничего нового: не перерисовываем, экран не дёргается
+    lastMessageKey = key;
     const box = $("#messages");
     box.innerHTML = items.length ? items.map((m) => `
       <div class="bubble ${m.mine ? "mine" : ""}">${esc(m.text)}<small>${new Date(m.created_at).toLocaleTimeString("ru-RU", {hour: "2-digit", minute: "2-digit"})}</small></div>`).join("")
@@ -158,9 +366,36 @@ async function loadMessages() {
     box.scrollTop = box.scrollHeight;
   } catch (e) { toast(e.message); }
 }
+$("#chatBack").onclick = goBack;
+$("#chatBlock").onclick = async () => {
+  if (!currentChat || !(await confirmDialog("Заблокировать собеседника? Он больше не сможет вам писать."))) return;
+  try { await api(`/api/conversations/${currentChat}/block`, {method: "POST"}); toast("Собеседник заблокирован"); goBack(); }
+  catch (err) { toast(err.message); }
+};
+$("#chatReport").onclick = async () => {
+  if (!currentChat) return;
+  const reason = await askReason();
+  if (!reason) return;
+  try {
+    await api(`/api/conversations/${currentChat}/report`, {method: "POST", body: JSON.stringify({reason})});
+    toast("Жалоба отправлена. Спасибо!");
+  } catch (err) { toast(err.message); }
+};
+$("#chatForm").onsubmit = async (e) => {
+  e.preventDefault();
+  const input = $("#chatInput");
+  const text = input.value.trim();
+  if (!text || !currentChat) return;
+  try {
+    await api(`/api/conversations/${currentChat}/messages`, {method: "POST", body: JSON.stringify({text})});
+    input.value = "";
+    lastMessageKey = "";
+    await loadMessages();
+  } catch (err) { toast(err.message); }
+};
 
-let ownItems = {};
-
+// ---------- профиль ----------
+const STATUS_BADGE = (x) => `<span class="status ${STATUS[x.status]?.[1] || ""}">${STATUS[x.status]?.[0] || esc(x.status)}</span>`;
 function ownCard(x) {
   const acts = [];
   if (["pending", "approved", "rejected", "needs_fix"].includes(x.status)) acts.push('<button data-own="edit">✏️ Изменить</button>');
@@ -173,29 +408,32 @@ function ownCard(x) {
   if (x.status !== "archived") acts.push('<button data-own="archive" class="secondary">Удалить</button>');
   const note = x.note ? `<p class="note">Комментарий модератора: ${esc(x.note)}</p>` : "";
   return `<article class="listing" data-id="${x.id}" data-cat="${x.category}">
-    <div class="listing-top"><div><h3>${esc(x.title)}</h3><p>📍 ${esc(x.city)}</p></div>
-    <span class="status ${STATUS[x.status]?.[1] || ""}">${STATUS[x.status]?.[0] || esc(x.status)}</span></div>
-    <div class="price">${esc(x.price || "Цена договорная")}</div>${note}
+    <div class="listing-top"><div><h3>${esc(x.title)}</h3><div class="meta">📍 ${esc(x.city)}</div></div>${STATUS_BADGE(x)}</div>
+    <div class="price">${esc(priceText(x))}</div>${note}
     <div class="actions">${acts.join("")}</div></article>`;
 }
-
+function fillProfileHead() {
+  const u = tg?.initDataUnsafe?.user;
+  if (!u) return;
+  $("#pName").textContent = [u.first_name, u.last_name].filter(Boolean).join(" ") || "Мой профиль";
+  const initials = ((u.first_name || "?")[0] + ((u.last_name || "")[0] || "")).toUpperCase();
+  $("#pAvatar").innerHTML = u.photo_url ? `<img src="${esc(u.photo_url)}" alt="">` : esc(initials);
+}
 async function loadProfile() {
+  fillProfileHead();
   try {
-    const [user, mine, payments] = await Promise.all([api("/api/me"), api("/api/me/listings"), api("/api/me/payments")]);
+    const [user, mine, favs, convs] = await Promise.all([api("/api/me"), api("/api/me/listings"), api("/api/favorites"), api("/api/conversations")]);
     me = user;
+    favIds = new Set(favs.map((x) => x.id));
     $("#pCity").textContent = "Город: " + user.city;
-    const favs = await api("/api/favorites");
-    const convs = await api("/api/conversations");
     $("#sListings").textContent = mine.filter((x) => x.status !== "archived").length;
     $("#sFav").textContent = favs.length;
     $("#sChats").textContent = convs.length;
     ownItems = Object.fromEntries(mine.map((x) => [x.id, x]));
     $("#myListings").innerHTML = mine.length ? mine.filter((x) => x.status !== "archived").map(ownCard).join("")
       : '<div class="empty">Вы ещё не публиковали объявления. Нажмите «+» внизу.</div>';
-    $("#menuBody").dataset.payments = JSON.stringify(payments);
   } catch (e) { $("#myListings").innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
 }
-
 function renderPayments(rows) {
   return rows.length ? rows.map((p) => `
     <article class="listing"><h3>${esc(p.service)}</h3>
@@ -203,14 +441,11 @@ function renderPayments(rows) {
     <p class="muted">${fmtDate(p.paid_at || p.created_at)}</p></article>`).join("")
     : '<div class="empty">Платежей пока нет</div>';
 }
-
 async function openMenu(key) {
   const body = $("#menuBody");
   if (key === "favorites") return showView("saved");
   if (key === "chats") return showView("chats");
-  if (key === "payments") {
-    body.innerHTML = renderPayments(await api("/api/me/payments"));
-  }
+  if (key === "payments") body.innerHTML = renderPayments(await api("/api/me/payments"));
   if (key === "employer") {
     const st = me?.employer_status;
     const text = {none: "Вы ещё не подавали заявку.", pending: "Заявка на проверке модератора.",
@@ -230,7 +465,7 @@ async function openMenu(key) {
       <p>1. Опубликуйте объявление: модератор проверит его обычно в течение 24 часов.</p>
       <p>2. Общение только внутри приложения: телефон в объявлении указывайте по желанию.</p>
       <p>3. Оплата услуг — в звёздах Telegram (⭐). Возврат — через поддержку.</p>
-      <p>4. Жалобы на объявления и людей — кнопка «Пожаловаться» в карточке.</p>
+      <p>4. Жалобы на объявления и людей — кнопка «Пожаловаться».</p>
       <p>Вопросы: команда /help в боте.</p></article>`;
   }
   if (key === "logout") {
@@ -241,274 +476,8 @@ async function openMenu(key) {
   }
   if (key === "export") return exportMyData();
   if (key === "delete") return deleteMyAccount();
+  body.scrollIntoView({block: "nearest"});
 }
-
-function openAdd(category) {
-  if (category === "dating") return openMyDating();
-  currentEditId = null;
-  $("#modalTitle").textContent = "Новое объявление";
-  $("#listingForm").category.value = category;
-  $("#addSheet").classList.add("hidden");
-  $("#modal").classList.remove("hidden");
-}
-
-async function loadGroups() {
-  try {
-    const items = await api("/api/groups");
-    $("#groups").innerHTML = items.map((g) => `
-      <article class="listing"><h3>${esc(g.flag)} ${esc(g.name)}</h3><p>${esc(g.description)}</p>
-      ${g.telegram_link
-        ? `<div class="actions"><a class="btn" href="${esc(g.telegram_link)}" target="_blank" rel="noopener">Перейти в Telegram-группу</a></div>`
-        : '<p class="muted">Ссылка появится после проверки</p>'}
-      </article>`).join("");
-  } catch (e) { $("#groups").innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
-}
-
-async function loadGuide() {
-  try {
-    const items = await api("/api/articles");
-    $("#guideSections").innerHTML = Object.entries(SECTIONS).map(([key, title]) => {
-      const count = items.filter((a) => a.section === key).length;
-      return `<article class="listing convo" data-section="${key}"><h3>${esc(title)}</h3>
-        <p>${count ? count + " статей" : "Материалы готовятся: статьи появятся после проверки по официальным источникам"}</p></article>`;
-    }).join("");
-  } catch (e) { $("#guideSections").innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
-}
-
-async function openSection(key) {
-  const items = (await api("/api/articles")).filter((a) => a.section === key);
-  $("#articleTitle").textContent = SECTIONS[key] || "Раздел";
-  $("#articleBody").innerHTML = items.length ? items.map((a) => `
-    <article class="listing convo" data-article="${a.id}"><h3>${esc(a.title)}</h3>
-    <p class="muted">Проверено: ${esc(a.checked_at ? a.checked_at.slice(0, 10) : "—")}</p></article>`).join("")
-    : '<div class="empty">Статьи в этом разделе пока готовятся.</div>';
-  showView("article");
-}
-
-async function openArticle(id) {
-  const a = await api(`/api/articles/${id}`);
-  $("#articleTitle").textContent = a.title;
-  $("#articleBody").innerHTML = `<article class="listing"><p class="muted">Источник: <a href="${esc(a.source_url)}" target="_blank" rel="noopener">${esc(a.source_url)}</a></p>
-    <p>${esc(a.body).replace(/\n/g, "<br>")}</p><p class="muted">Дата проверки: ${esc((a.checked_at || "").slice(0, 10))}</p></article>`;
-}
-
-// Продвижение (ТЗ № 2): выбор услуги и оплата Telegram Stars
-async function openServices(listingId, category) {
-  const items = await api("/api/services?category=" + encodeURIComponent(category));
-  $("#serviceList").innerHTML = items.map((s) => `
-    <article class="listing"><h3>${esc(s.title)}</h3>
-    <p>${s.stars} ⭐${s.duration_days > 1 ? " · " + s.duration_days + " дней" : " · поднимает на 24 часа"}</p>
-    <div class="actions"><button data-buy="${esc(s.code)}" data-listing="${listingId}">Оплатить ${s.stars} ⭐</button></div></article>`).join("")
-    || '<div class="empty">Для этого раздела услуг пока нет</div>';
-  $("#services").classList.remove("hidden");
-}
-
-async function buy(listingId, code) {
-  const r = await api("/api/payments/invoice", {method: "POST",
-    body: JSON.stringify({listing_id: Number(listingId), service_code: code})});
-  if (!tg?.openInvoice) {
-    toast("Оплата открывается только внутри Telegram");
-    return;
-  }
-  tg.openInvoice(r.invoice_url, (status) => {
-    $("#services").classList.add("hidden");
-    if (status === "paid") toast("Оплата прошла. Услуга активируется");
-    else if (status === "failed") toast("Оплата не прошла");
-    loadProfile();
-  });
-}
-
-async function loadDating() {
-  const box = $("#datingList");
-  box.innerHTML = '<div class="empty">Загружаем анкеты…</div>';
-  const params = new URLSearchParams();
-  if ($("#datingGender").value) params.set("gender", $("#datingGender").value);
-  try {
-    const items = await api("/api/dating?" + params);
-    box.innerHTML = items.length ? items.map((p) => `
-      <article class="listing" data-profile="${p.id}">
-        <img class="photo" src="${esc(p.photo_url)}" alt="" loading="lazy">
-        <h3>${p.age} · ${p.gender === "f" ? "девушка" : "парень"}</h3>
-        <p>📍 ${esc(p.city)}</p><p>${esc(p.bio)}</p>
-        <div class="actions"><button data-act="like">♥ Нравится</button>
-        <button data-act="dreport" class="secondary">⚑ Пожаловаться</button></div>
-      </article>`).join("")
-      : '<div class="empty">Анкет пока нет. Загляните позже.</div>';
-  } catch (e) { box.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
-}
-
-async function openMyDating() {
-  if (!(await requireConsent())) return;
-  const f = $("#datingForm");
-  try {
-    const me = await api("/api/dating/me");
-    if (me) {
-      f.birth_year.value = me.age ? new Date().getFullYear() - me.age : "";
-      f.gender.value = me.gender; f.city.value = me.city;
-      toast("Статус анкеты: " + ({pending: "на проверке", published: "опубликована", rejected: "отклонена"}[me.status] || me.status));
-    }
-  } catch (e) { toast(e.message); }
-  $("#datingModal").classList.remove("hidden");
-}
-
-$("#datingForm").onsubmit = async (e) => {
-  e.preventDefault();
-  const f = e.target;
-  try {
-    await api("/api/dating/profile", {method: "PUT", body: JSON.stringify({
-      birth_year: Number(f.birth_year.value), gender: f.gender.value,
-      city: f.city.value.trim(), bio: f.bio.value.trim()})});
-    if (f.photo.files[0]) {
-      const data = new FormData();
-      data.append("file", f.photo.files[0]);
-      const r = await fetch("/api/dating/photo", {method: "POST", body: data,
-        headers: {"X-Telegram-Init-Data": tg?.initData || ""}});
-      if (!r.ok) throw new Error((await r.json()).detail || "Не удалось загрузить фото");
-    }
-    $("#datingModal").classList.add("hidden");
-    toast("Анкета отправлена на проверку");
-  } catch (err) { toast(err.message); }
-};
-
-function showView(name) {
-  const main = ["home", "saved", "chats", "profile", "dating", "community", "guide"];
-  if (main.includes(name)) tg?.BackButton?.hide(); else tg?.BackButton?.show();
-  for (const v of ["home", "saved", "chats", "chat", "profile", "community", "guide", "article", "dating"]) {
-    const el = $("#view-" + v);
-    if (el) el.hidden = v !== name;
-  }
-  const navName = ["chat", "article"].includes(name) ? "" : name;
-  document.querySelectorAll("[data-view]").forEach((b) => b.classList.toggle("active", b.dataset.view === navName));
-  if (name !== "chat") clearInterval(chatTimer);
-  if (name === "home") loadListings();
-  if (name === "saved") loadFavorites();
-  if (name === "chats") loadConversations();
-  if (name === "profile") loadProfile();
-  if (name === "community") loadGroups();
-  if (name === "guide") loadGuide();
-  if (name === "dating") loadDating();
-  window.scrollTo({top: 0});
-}
-
-// Действия на карточках и списках (делегирование событий)
-document.addEventListener("click", async (e) => {
-  const buyBtn = e.target.closest("[data-buy]");
-  if (buyBtn) {
-    try { await buy(buyBtn.dataset.listing, buyBtn.dataset.buy); }
-    catch (err) { toast(err.message); }
-    return;
-  }
-  const btn = e.target.closest("[data-act]");
-  if (btn) {
-    const article = btn.closest("[data-id]");
-    const id = article.dataset.id;
-    try {
-      if (btn.dataset.act === "fav") {
-        if (!(await requireConsent())) return;
-        const r = await api(`/api/favorites/${id}`, {method: "POST"});
-        btn.textContent = r.favorited ? "♥ В избранном" : "♡ В избранное";
-        btn.classList.toggle("on", r.favorited);
-        btn.classList.toggle("secondary", !r.favorited);
-        toast(r.favorited ? "Добавлено в избранное" : "Убрано из избранного");
-      }
-      if (btn.dataset.act === "chat") {
-        if (!(await requireConsent())) return;
-        const c = await api(`/api/listings/${id}/conversation`, {method: "POST"});
-        openChat(c.id, article.querySelector("h3")?.textContent);
-      }
-      if (btn.dataset.act === "like") {
-        if (!(await requireConsent())) return;
-        const profileId = article.dataset.profile;
-        const r = await api(`/api/dating/${profileId}/like`, {method: "POST"});
-        if (r.match) {
-          toast("Взаимная симпатия! Можно писать");
-          openChat(r.conversation_id, "Знакомство");
-        } else {
-          article.remove();
-          toast("Отправлено");
-        }
-      }
-      if (btn.dataset.act === "dreport") {
-        if (!(await requireConsent())) return;
-        const profileId = article.dataset.profile;
-        const reason = prompt("Причина:\n" + Object.entries(REASONS).map(([k, v]) => k + " — " + v).join("\n"), "profile");
-        if (!reason || !REASONS[reason.trim()]) return;
-        await api("/api/reports", {method: "POST", body: JSON.stringify(
-          {target_type: "dating", target_id: profileId, reason: reason.trim()})});
-        toast("Жалоба отправлена. Спасибо!");
-      }
-      if (btn.dataset.act === "promo") {
-        if (!(await requireConsent())) return;
-        await openServices(id, article.dataset.cat);
-      }
-      if (btn.dataset.act === "report") {
-        if (!(await requireConsent())) return;
-        const reason = prompt("Причина жалобы:\n" + Object.entries(REASONS).map(([k, v]) => k + " — " + v).join("\n"), "spam");
-        if (!reason || !REASONS[reason.trim()]) return;
-        await api("/api/reports", {method: "POST", body: JSON.stringify(
-          {target_type: "listing", target_id: id, reason: reason.trim()})});
-        toast("Жалоба отправлена. Спасибо!");
-      }
-    } catch (err) { toast(err.message); }
-    return;
-  }
-  const convo = e.target.closest("[data-chat]");
-  if (convo) { openChat(convo.dataset.chat, convo.dataset.title); return; }
-  const section = e.target.closest("[data-section]");
-  if (section) { openSection(section.dataset.section); return; }
-  const article = e.target.closest("[data-article]");
-  if (article) { openArticle(article.dataset.article); return; }
-});
-
-document.querySelectorAll("[data-cat]").forEach((b) => b.addEventListener("click", () => {
-  currentCategory = b.dataset.cat;
-  $("#listTitle").textContent = b.querySelector("b").textContent;
-  showView("home");
-  window.scrollTo({top: document.body.scrollHeight, behavior: "smooth"});
-}));
-document.querySelectorAll("[data-soon]").forEach((b) => b.onclick = () => toast(b.dataset.soon + ": раздел в разработке"));
-document.querySelectorAll("[data-view]").forEach((b) => b.onclick = () => showView(b.dataset.view));
-$("#searchBtn").onclick = loadListings;
-$("#search").addEventListener("keydown", (e) => { if (e.key === "Enter") loadListings(); });
-$("#allBtn").onclick = () => { currentCategory = null; $("#listTitle").textContent = "Последние объявления"; loadListings(); };
-$("#addBtn").onclick = async () => { if (await requireConsent()) $("#addSheet").classList.remove("hidden"); };
-$("#closeAdd").onclick = () => $("#addSheet").classList.add("hidden");
-document.querySelectorAll("[data-add]").forEach((b) => b.onclick = () => openAdd(b.dataset.add));
-$("#closeModal").onclick = () => $("#modal").classList.add("hidden");
-$("#closeServices").onclick = () => $("#services").classList.add("hidden");
-$("#chatBack").onclick = () => showView("chats");
-$("#myDatingBtn").onclick = openMyDating;
-$("#closeDating").onclick = () => $("#datingModal").classList.add("hidden");
-$("#datingGender").onchange = loadDating;
-
-// Переход из меню бота: ?section=job|housing|marketplace|dating|community|guide
-function openFromMenu() {
-  const section = new URLSearchParams(location.search).get("section");
-  if (!section) return false;
-  if (["job", "housing", "marketplace"].includes(section)) {
-    currentCategory = section;
-    $("#listTitle").textContent = CAT[section];
-    showView("home");
-    return true;
-  }
-  if (["dating", "community", "guide"].includes(section)) { showView(section); return true; }
-  return false;
-}
-$("#articleBack").onclick = () => showView("guide");
-
-$("#consentOk").onclick = async () => {
-  if (!$("#consentRules").checked || !$("#consentPrivacy").checked) {
-    toast("Отметьте оба пункта, чтобы продолжить");
-    return;
-  }
-  try {
-    await api("/api/me/consent", {method: "POST", body: JSON.stringify({accept: true})});
-    $("#consent").classList.add("hidden");
-    toast("Спасибо! Теперь можно пользоваться приложением");
-    loadListings();
-  } catch (err) { toast(err.message); }
-};
-
 async function exportMyData() {
   try {
     const data = await api("/api/me/export");
@@ -519,21 +488,57 @@ async function exportMyData() {
     URL.revokeObjectURL(url);
   } catch (err) { toast(err.message); }
 }
-
 async function deleteMyAccount() {
-  if (!confirm("Удалить аккаунт? Объявления будут скрыты, избранное удалено. Действие необратимо.")) return;
-  try {
-    await api("/api/me/delete", {method: "POST"});
-    toast("Аккаунт удалён");
-    showView("home");
-  } catch (err) { toast(err.message); }
+  if (!(await confirmDialog("Удалить аккаунт? Объявления будут скрыты, избранное удалено. Действие необратимо."))) return;
+  try { await api("/api/me/delete", {method: "POST"}); toast("Аккаунт удалён"); showView("home"); reloadCatalog(); }
+  catch (err) { toast(err.message); }
 }
 
-let currentEditId = null;
-
+// ---------- создание и редактирование объявления ----------
+function updateFormBlocks() { showBlocks("#listingForm", $("#formCategory").value); }
+$("#formCategory").onchange = updateFormBlocks;
+function openAdd(category) {
+  if (category === "dating") return openMyDating();
+  currentEditId = null;
+  const f = $("#listingForm");
+  f.reset();
+  f.category.value = category;
+  f.city.value = me?.city || "";
+  f.category.disabled = false;
+  $("#modalTitle").textContent = "Новое объявление";
+  updateFormBlocks();
+  $("#addSheet").classList.add("hidden");
+  $("#modal").classList.remove("hidden");
+}
+function openEdit(item) {
+  currentEditId = item.id;
+  const f = $("#listingForm");
+  f.reset();
+  f.category.value = item.category;
+  f.category.disabled = true;  // раздел менять нельзя
+  for (const k of ["title", "city", "price", "description", "contact"]) f[k].value = item[k] || "";
+  f.price_amount.value = item.price_amount ?? "";
+  f.housing_provided.checked = Boolean(item.housing_provided);
+  f.meals_provided.checked = Boolean(item.meals_provided);
+  f.rooms.value = item.rooms ?? "";
+  f.condition.value = item.condition || "";
+  $("#modalTitle").textContent = "Изменить объявление";
+  updateFormBlocks();
+  $("#modal").classList.remove("hidden");
+}
+function listingPayload(f) {
+  const v = (n) => f[n].value.trim();
+  const category = f.category.value;
+  const data = {category, title: v("title"), city: v("city"), price: v("price"), description: v("description"), contact: v("contact")};
+  if (v("price_amount") !== "") data.price_amount = Number(v("price_amount"));
+  if (category === "job") { data.housing_provided = f.housing_provided.checked; data.meals_provided = f.meals_provided.checked; }
+  if (category === "housing" && v("rooms") !== "") data.rooms = Number(v("rooms"));
+  if (category === "marketplace" && f.condition.value) data.condition = f.condition.value;
+  return data;
+}
 $("#listingForm").onsubmit = async (e) => {
   e.preventDefault();
-  const data = Object.fromEntries(new FormData(e.target));
+  const data = listingPayload(e.target);
   try {
     if (currentEditId) {
       delete data.category;
@@ -543,38 +548,239 @@ $("#listingForm").onsubmit = async (e) => {
       await api("/api/listings", {method: "POST", body: JSON.stringify(data)});
       toast("Объявление отправлено на модерацию");
     }
-    e.target.reset();
     currentEditId = null;
     $("#modal").classList.add("hidden");
     showView("profile");
   } catch (err) { toast(err.message); }
 };
+$("#closeModal").onclick = () => $("#modal").classList.add("hidden");
+$("#addBtn").onclick = async () => { if (await requireConsent()) $("#addSheet").classList.remove("hidden"); };
+$("#closeAdd").onclick = () => $("#addSheet").classList.add("hidden");
+document.querySelectorAll("[data-add]").forEach((b) => b.onclick = () => openAdd(b.dataset.add));
 
-$("#chatForm").onsubmit = async (e) => {
-  e.preventDefault();
-  const input = $("#chatInput");
-  const text = input.value.trim();
-  if (!text || !currentChat) return;
+// ---------- сообщество и гид ----------
+async function loadGroups() {
   try {
-    await api(`/api/conversations/${currentChat}/messages`, {method: "POST", body: JSON.stringify({text})});
-    input.value = "";
-    await loadMessages();
+    const items = await api("/api/groups");
+    $("#groups").innerHTML = items.map((g) => `
+      <article class="listing"><h3>${esc(g.flag)} ${esc(g.name)}</h3><p>${esc(g.description)}</p>
+      ${g.telegram_link
+        ? `<div class="actions"><a class="btn" data-tglink href="${esc(g.telegram_link)}" target="_blank" rel="noopener">Перейти в Telegram-группу</a></div>`
+        : '<p class="muted">Ссылка появится после проверки</p>'}
+      </article>`).join("");
+  } catch (e) { $("#groups").innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+async function loadGuide() {
+  try {
+    const items = await api("/api/articles");
+    $("#guideSections").innerHTML = Object.entries(SECTIONS).map(([key, title]) => {
+      const count = items.filter((a) => a.section === key).length;
+      return `<article class="listing convo" data-section="${key}"><h3>${esc(title)}</h3>
+        <p>${count ? count + " статей" : "Материалы готовятся: статьи появятся после проверки по официальным источникам"}</p></article>`;
+    }).join("");
+  } catch (e) { $("#guideSections").innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+async function openSection(key) {
+  const items = (await api("/api/articles")).filter((a) => a.section === key);
+  $("#articleTitle").textContent = SECTIONS[key] || "Раздел";
+  $("#articleBody").innerHTML = items.length ? items.map((a) => `
+    <article class="listing convo" data-article="${a.id}"><h3>${esc(a.title)}</h3>
+    <p class="muted">Проверено: ${esc(a.checked_at ? a.checked_at.slice(0, 10) : "—")}</p></article>`).join("")
+    : '<div class="empty">Статьи в этом разделе пока готовятся.</div>';
+  showView("article", {push: true});
+}
+async function openArticle(id) {
+  const a = await api(`/api/articles/${id}`);
+  $("#articleTitle").textContent = a.title;
+  $("#articleBody").innerHTML = `<article class="listing"><p class="muted">Источник: <a href="${esc(a.source_url)}" target="_blank" rel="noopener">${esc(a.source_url)}</a></p>
+    <p>${esc(a.body).replace(/\n/g, "<br>")}</p><p class="muted">Дата проверки: ${esc((a.checked_at || "").slice(0, 10))}</p></article>`;
+  $("#scroll").scrollTop = 0;
+}
+$("#articleBack").onclick = goBack;
+$("#detailBack").onclick = goBack;
+
+// ---------- продвижение (ТЗ № 2): оплата Telegram Stars ----------
+async function openServices(listingId, category) {
+  const items = await api("/api/services?category=" + encodeURIComponent(category));
+  $("#serviceList").innerHTML = items.map((s) => `
+    <article class="listing"><h3>${esc(s.title)}</h3>
+    <p>${s.stars} ⭐${s.duration_days > 1 ? " · " + s.duration_days + " дней" : " · поднимает на 24 часа"}</p>
+    <div class="actions"><button data-buy="${esc(s.code)}" data-listing="${listingId}">Оплатить ${s.stars} ⭐</button></div></article>`).join("")
+    || '<div class="empty">Для этого раздела услуг пока нет</div>';
+  $("#services").classList.remove("hidden");
+}
+async function buy(listingId, code) {
+  const r = await api("/api/payments/invoice", {method: "POST", body: JSON.stringify({listing_id: Number(listingId), service_code: code})});
+  if (!tg?.openInvoice) { toast("Оплата открывается только внутри Telegram"); return; }
+  tg.openInvoice(r.invoice_url, (status) => {
+    $("#services").classList.add("hidden");
+    if (status === "paid") toast("Оплата прошла. Услуга активируется");
+    else if (status === "failed") toast("Оплата не прошла");
+    loadProfile();
+  });
+}
+$("#closeServices").onclick = () => $("#services").classList.add("hidden");
+
+// ---------- знакомства ----------
+async function loadDating() {
+  const box = $("#datingList");
+  box.innerHTML = '<div class="skeleton"></div>';
+  const params = new URLSearchParams();
+  if (datingGender) params.set("gender", datingGender);
+  try {
+    const items = await api("/api/dating?" + params);
+    box.innerHTML = items.length ? items.map((p) => `
+      <article class="listing" data-profile="${p.id}">
+        <img class="photo" src="${esc(p.photo_url)}" alt="" loading="lazy">
+        <h3>${p.age} · ${p.gender === "f" ? "девушка" : "парень"}</h3>
+        <div class="meta">📍 ${esc(p.city)}</div><p>${esc(p.bio)}</p>
+        <div class="actions"><button data-act="like">♥ Нравится</button>
+        <button data-act="dreport" class="secondary">⚑ Пожаловаться</button></div>
+      </article>`).join("")
+      : '<div class="empty">Анкет пока нет. Загляните позже.</div>';
+  } catch (e) { box.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+document.querySelectorAll("#datingChips .chip").forEach((chip) => chip.addEventListener("click", () => {
+  datingGender = chip.dataset.gender;
+  document.querySelectorAll("#datingChips .chip").forEach((c) => c.classList.toggle("active", c === chip));
+  loadDating();
+}));
+async function openMyDating() {
+  if (!(await requireConsent())) return;
+  const f = $("#datingForm");
+  try {
+    const mine = await api("/api/dating/me");
+    if (mine) {
+      f.birth_year.value = mine.age ? new Date().getFullYear() - mine.age : "";
+      f.gender.value = mine.gender; f.city.value = mine.city;
+      toast("Статус анкеты: " + ({pending: "на проверке", published: "опубликована", rejected: "отклонена"}[mine.status] || mine.status));
+    }
+  } catch (e) { toast(e.message); }
+  $("#addSheet").classList.add("hidden");
+  $("#datingModal").classList.remove("hidden");
+}
+$("#myDatingBtn").onclick = openMyDating;
+$("#closeDating").onclick = () => $("#datingModal").classList.add("hidden");
+$("#datingForm").onsubmit = async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  try {
+    await api("/api/dating/profile", {method: "PUT", body: JSON.stringify({
+      birth_year: Number(f.birth_year.value), gender: f.gender.value, city: f.city.value.trim(), bio: f.bio.value.trim()})});
+    if (f.photo.files[0]) {
+      const data = new FormData();
+      data.append("file", f.photo.files[0]);
+      const headers = inTelegram ? {"X-Telegram-Init-Data": tg.initData}
+        : {"X-Web-Session": localStorage.getItem("webSession") || ""};
+      const r = await fetch("/api/dating/photo", {method: "POST", body: data, headers});
+      if (!r.ok) throw new Error((await r.json()).detail || "Не удалось загрузить фото");
+    }
+    $("#datingModal").classList.add("hidden");
+    toast("Анкета отправлена на проверку");
   } catch (err) { toast(err.message); }
 };
 
-// Тема Telegram: цвета приложения совпадают с цветами чата
-function applyTelegramTheme() {
-  const t = tg?.themeParams || {};
-  const st = document.documentElement.style;
-  if (t.bg_color) st.setProperty("--tg-bg", t.bg_color);
-  if (t.secondary_bg_color) st.setProperty("--tg-card", t.secondary_bg_color);
-  if (t.text_color) st.setProperty("--tg-text", t.text_color);
-  if (t.hint_color) st.setProperty("--tg-hint", t.hint_color);
-  if (t.button_color) st.setProperty("--tg-button", t.button_color);
-}
-applyTelegramTheme();
-tg?.BackButton?.onClick(() => showView("home"));
+// ---------- общий обработчик нажатий ----------
+document.addEventListener("click", async (e) => {
+  const tgLink = e.target.closest("[data-tglink]");
+  if (tgLink && tg?.openTelegramLink) { e.preventDefault(); tg.openTelegramLink(tgLink.href); return; }
 
+  const buyBtn = e.target.closest("[data-buy]");
+  if (buyBtn) { try { await buy(buyBtn.dataset.listing, buyBtn.dataset.buy); } catch (err) { toast(err.message); } return; }
+
+  const btn = e.target.closest("[data-act]");
+  if (btn) {
+    const owner = btn.closest("[data-id],[data-profile]");
+    const id = owner?.dataset.id;
+    try {
+      if (btn.dataset.act === "fav") {
+        if (!(await requireConsent())) return;
+        const r = await api(`/api/favorites/${id}`, {method: "POST"});
+        r.favorited ? favIds.add(Number(id)) : favIds.delete(Number(id));
+        document.querySelectorAll(`[data-id="${id}"] [data-act="fav"]`).forEach((b) => {
+          if (b.classList.contains("fav")) { b.textContent = r.favorited ? "♥" : "♡"; b.classList.toggle("on", r.favorited); }
+          else b.textContent = r.favorited ? "♥ В избранном" : "♡ В избранное";
+        });
+        toast(r.favorited ? "Добавлено в избранное" : "Убрано из избранного");
+      }
+      if (btn.dataset.act === "chat") {
+        if (!(await requireConsent())) return;
+        const c = await api(`/api/listings/${id}/conversation`, {method: "POST"});
+        openChat(c.id, owner.querySelector("h1,h3")?.textContent);
+      }
+      if (btn.dataset.act === "share") shareListing(id, owner.querySelector("h1,h3")?.textContent || "KOREA HUB");
+      if (btn.dataset.act === "like") {
+        if (!(await requireConsent())) return;
+        const r = await api(`/api/dating/${owner.dataset.profile}/like`, {method: "POST"});
+        if (r.match) { toast("Взаимная симпатия! Можно писать"); openChat(r.conversation_id, "Знакомство"); }
+        else { owner.remove(); toast("Отправлено"); }
+      }
+      if (btn.dataset.act === "dreport") {
+        if (!(await requireConsent())) return;
+        const reason = await askReason();
+        if (!reason) return;
+        await api("/api/reports", {method: "POST", body: JSON.stringify({target_type: "dating", target_id: owner.dataset.profile, reason})});
+        toast("Жалоба отправлена. Спасибо!");
+      }
+      if (btn.dataset.act === "report") {
+        if (!(await requireConsent())) return;
+        const reason = await askReason();
+        if (!reason) return;
+        await api("/api/reports", {method: "POST", body: JSON.stringify({target_type: "listing", target_id: id, reason})});
+        toast("Жалоба отправлена. Спасибо!");
+      }
+    } catch (err) { toast(err.message); }
+    return;
+  }
+
+  const menu = e.target.closest("[data-menu]");
+  if (menu) { try { await openMenu(menu.dataset.menu); } catch (err) { toast(err.message); } return; }
+  const unblock = e.target.closest("[data-unblock]");
+  if (unblock) {
+    try { await api(`/api/users/${unblock.dataset.unblock}/block`, {method: "DELETE"}); toast("Пользователь разблокирован"); openMenu("blocks"); }
+    catch (err) { toast(err.message); }
+    return;
+  }
+  const own = e.target.closest("[data-own]");
+  if (own) {
+    const cardEl = own.closest("[data-id]");
+    const id = cardEl?.dataset.id;
+    const item = ownItems[id];
+    try {
+      const act = own.dataset.own;
+      if (act === "employer-apply") { $("#employerModal").classList.remove("hidden"); return; }
+      if (act === "edit") { openEdit(item); return; }
+      if (act === "promo") { await openServices(id, item.category); return; }
+      if (act === "archive" && !(await confirmDialog("Удалить объявление? Его не будет видно другим."))) return;
+      await api(`/api/listings/${id}/${{close: "close", sold: "sold", reopen: "reopen", archive: "archive"}[act]}`, {method: "POST"});
+      toast("Готово");
+      homeLoaded = false;
+      loadProfile();
+    } catch (err) { toast(err.message); }
+    return;
+  }
+
+  const convo = e.target.closest("[data-chat]");
+  if (convo) { openChat(convo.dataset.chat, convo.dataset.title); return; }
+  const section = e.target.closest("[data-section]");
+  if (section) { openSection(section.dataset.section); return; }
+  const article = e.target.closest("[data-article]");
+  if (article) { openArticle(article.dataset.article); return; }
+  const open = e.target.closest("[data-open]");
+  if (open) { openDetail(open.dataset.open); return; }
+});
+
+document.querySelectorAll(".bottom [data-view], .quick [data-view]").forEach((b) => b.onclick = () => showView(b.dataset.view));
+
+// ---------- согласие, город, работодатель ----------
+$("#consentOk").onclick = async () => {
+  if (!$("#consentRules").checked || !$("#consentPrivacy").checked) { toast("Отметьте оба пункта, чтобы продолжить"); return; }
+  try {
+    await api("/api/me/consent", {method: "POST", body: JSON.stringify({accept: true})});
+    $("#consent").classList.add("hidden");
+    toast("Спасибо! Теперь можно пользоваться приложением");
+  } catch (err) { toast(err.message); }
+};
 $("#cityBtn").onclick = () => { $("#cityForm").city.value = me?.city || ""; $("#cityModal").classList.remove("hidden"); };
 $("#closeCity").onclick = () => $("#cityModal").classList.add("hidden");
 $("#cityForm").onsubmit = async (e) => {
@@ -593,50 +799,48 @@ $("#employerForm").onsubmit = async (e) => {
     await api("/api/me/employer", {method: "POST", body: JSON.stringify(Object.fromEntries(new FormData(e.target)))});
     $("#employerModal").classList.add("hidden");
     toast("Заявка отправлена на проверку");
+    me.employer_status = "pending";
     openMenu("employer");
   } catch (err) { toast(err.message); }
 };
 
-document.addEventListener("click", async (e) => {
-  const menu = e.target.closest("[data-menu]");
-  if (menu) { try { await openMenu(menu.dataset.menu); } catch (err) { toast(err.message); } return; }
-  const unblock = e.target.closest("[data-unblock]");
-  if (unblock) {
-    try {
-      await api(`/api/users/${unblock.dataset.unblock}/block`, {method: "DELETE"});
-      toast("Пользователь разблокирован");
-      openMenu("blocks");
-    } catch (err) { toast(err.message); }
-    return;
-  }
-  const own = e.target.closest("[data-own]");
-  if (!own) return;
-  const card = own.closest("[data-id]");
-  const id = card?.dataset.id;
-  const item = ownItems[id];
-  try {
-    const act = own.dataset.own;
-    if (act === "employer-apply") { $("#employerModal").classList.remove("hidden"); return; }
-    if (act === "edit") {
-      currentEditId = id;
-      const f = $("#listingForm");
-      for (const k of ["title", "city", "price", "description", "contact", "category"]) f[k].value = item[k] || "";
-      $("#modalTitle").textContent = "Изменить объявление";
-      $("#modal").classList.remove("hidden");
-      return;
-    }
-    if (act === "promo") { await openServices(id, item.category); return; }
-    if (act === "archive" && !confirm("Удалить объявление? Его не будет видно другим.")) return;
-    const path = {close: "close", sold: "sold", reopen: "reopen", archive: "archive"}[act];
-    await api(`/api/listings/${id}/${path}`, {method: "POST"});
-    toast("Готово");
-    loadProfile();
-  } catch (err) { toast(err.message); }
-});
+// ---------- тема Telegram ----------
+function applyTelegramTheme() {
+  const t = tg?.themeParams || {};
+  const st = document.documentElement.style;
+  const set = (name, value) => { if (value) st.setProperty(name, value); };
+  set("--bg", t.secondary_bg_color || t.bg_color);
+  set("--card", t.section_bg_color || t.bg_color);
+  set("--text", t.text_color);
+  set("--hint", t.hint_color);
+  set("--accent", t.button_color);
+  set("--accent-text", t.button_text_color);
+  set("--border", t.section_separator_color);
+}
+applyTelegramTheme();
+tg?.onEvent?.("themeChanged", applyTelegramTheme);
 
-// Без входа сайт можно смотреть. Когда нужно действие, предложим войти через Telegram.
+// ---------- старт ----------
+function openFromLink() {
+  const params = new URLSearchParams(location.search);
+  const section = params.get("section");
+  if (["job", "housing", "marketplace"].includes(section)) { filters.category = section; return false; }
+  if (["dating", "community", "guide"].includes(section)) { showView(section); return true; }
+  const listing = params.get("listing");
+  if (listing && /^\d+$/.test(listing)) { openDetail(listing, false); return true; }
+  return false;
+}
 if (!inTelegram) $("#logoutItem").hidden = !localStorage.getItem("webSession");
+const openedFromLink = openFromLink();
+updateFilterUi();
+loadCatalog();  // список главной грузится в любом случае, даже если сразу открыта другая страница
+loadCityHints();
+loadFavIds().then(() => {
+  document.querySelectorAll("#listings .fav").forEach((b) => {
+    const id = Number(b.closest("[data-id]")?.dataset.id);
+    if (favIds.has(id)) { b.textContent = "♥"; b.classList.add("on"); }
+  });
+});
 api("/api/me", {quiet: true})
   .then((user) => { me = user; if (!me.consent) $("#consent").classList.remove("hidden"); })
   .catch(() => { if (!inTelegram) $("#loginTop").hidden = false; });
-if (!openFromMenu()) loadListings();

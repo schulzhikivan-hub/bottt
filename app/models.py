@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from sqlalchemy import String, Text, DateTime, Integer, ForeignKey, UniqueConstraint, Boolean
+from sqlalchemy import String, Text, DateTime, Integer, BigInteger, ForeignKey, UniqueConstraint, Boolean, event
 from sqlalchemy.orm import Mapped, mapped_column
 from app.database import Base
 
@@ -74,7 +74,23 @@ class Listing(Base):
     # pending, approved, rejected, needs_fix, hidden, closed, sold, archived
     status: Mapped[str] = mapped_column(String(20), default="pending", index=True)
     note: Mapped[str] = mapped_column(String(300), default="")
+    # Searchable fields (filters and sorting need numbers and flags, not free text)
+    price_amount: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)  # KRW
+    housing_provided: Mapped[bool | None] = mapped_column(Boolean, nullable=True)  # job
+    meals_provided: Mapped[bool | None] = mapped_column(Boolean, nullable=True)    # job
+    rooms: Mapped[int | None] = mapped_column(Integer, nullable=True)              # housing
+    condition: Mapped[str | None] = mapped_column(String(10), nullable=True)       # goods: new or used
+    # Lower-case copies kept by the application, so search ignores case in any database locale
+    search_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    city_key: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+@event.listens_for(Listing, "before_insert")
+@event.listens_for(Listing, "before_update")
+def _refresh_search_fields(mapper, connection, target):
+    target.search_text = " ".join([target.title or "", target.description or "", target.city or ""]).lower()
+    target.city_key = (target.city or "").strip().lower()
 
 
 class Favorite(Base):

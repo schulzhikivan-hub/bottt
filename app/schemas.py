@@ -1,4 +1,6 @@
 from datetime import datetime
+from typing import Literal
+
 from pydantic import BaseModel, Field, ConfigDict
 
 CATEGORIES = {"job", "housing", "marketplace"}
@@ -12,6 +14,12 @@ class ListingCreate(BaseModel):
     price: str = Field(default="", max_length=80)
     description: str = Field(default="", max_length=4000)
     contact: str = Field(default="", max_length=160)
+    # Searchable details; only the ones that fit the category are kept (see catalog.py)
+    price_amount: int | None = Field(default=None, ge=0, le=10_000_000_000)
+    housing_provided: bool | None = None
+    meals_provided: bool | None = None
+    rooms: int | None = Field(default=None, ge=0, le=20)
+    condition: Literal["new", "used"] | None = None
 
 
 class ListingOut(BaseModel):
@@ -24,6 +32,14 @@ class ListingOut(BaseModel):
     description: str
     contact: str
     status: str
+    note: str = ""
+    price_amount: int | None = None
+    housing_provided: bool | None = None
+    meals_provided: bool | None = None
+    rooms: int | None = None
+    condition: str | None = None
+    promo: str | None = None  # active paid placement: pin, vip, bump, highlight
+    created_at: datetime | None = None
 
 
 class MessageIn(BaseModel):

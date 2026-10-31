@@ -1,4 +1,6 @@
 """Own-listing management, employer application, settings, and administrator user tools."""
+from typing import Literal
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import select, or_
@@ -7,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.audit import log_action
 from app.admin_auth import staff, MOD, ADM, SUP
 from app.guard import check_text
+from app.catalog import drop_irrelevant
 from app import admin_ops as ops
 from app.database import get_db
 from app.models import Listing, User, Block, Report
@@ -37,6 +40,11 @@ class ListingEdit(BaseModel):
     price: str | None = Field(default=None, max_length=80)
     description: str | None = Field(default=None, max_length=4000)
     contact: str | None = Field(default=None, max_length=160)
+    price_amount: int | None = Field(default=None, ge=0, le=10_000_000_000)
+    housing_provided: bool | None = None
+    meals_provided: bool | None = None
+    rooms: int | None = Field(default=None, ge=0, le=20)
+    condition: Literal["new", "used"] | None = None
 
 
 @router.put("/api/listings/{listing_id}", response_model=ListingOut)
@@ -45,7 +53,7 @@ def edit_listing(listing_id: int, payload: ListingEdit, user_id: str = Depends(w
     item = _own_listing(db, listing_id, user_id)
     if item.status not in EDITABLE:
         raise HTTPException(409, "Это объявление нельзя изменить. Сначала верните его из закрытых")
-    changes = payload.model_dump(exclude_none=True)
+    changes = drop_irrelevant(item.category, payload.model_dump(exclude_none=True))
     if not changes:
         return item
     check_text(changes.get("title", item.title), changes.get("description", item.description))

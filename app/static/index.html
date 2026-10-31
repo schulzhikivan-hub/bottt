@@ -1,46 +1,89 @@
 <!doctype html>
-<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
 <meta name="theme-color" content="#102a43"><title>KOREA HUB</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
-<link rel="stylesheet" href="/static/style.css"><link rel="stylesheet" href="/static/extra.css"></head>
-<body><div class="app">
-<header><div class="brand"><div class="logo">🇰🇷</div><div><b>KOREA HUB</b><small>Всё для жизни в Корее</small></div></div><button class="link" id="loginTop" hidden>Войти</button></header>
+<link rel="stylesheet" href="/static/app.css"></head>
+<body>
+<div class="shell">
 
-<section id="view-home">
-  <div class="welcome"><span class="eyebrow">СООБЩЕСТВО ИНОСТРАНЦЕВ</span><h1>Твоя жизнь<br>в Южной Корее</h1><p>Работа, жильё, покупки — в одном месте.</p></div>
-  <div class="search"><input id="search" placeholder="Поиск вакансий и объявлений"><button id="searchBtn">⌕</button></div>
-  <section class="tiles">
-    <button data-cat="job" class="tile blue"><span>💼</span><b>Работа</b><small>Вакансии и подработка</small></button>
-    <button data-cat="housing" class="tile green"><span>🏠</span><b>Жильё</b><small>Квартиры и комнаты</small></button>
-    <button data-cat="marketplace" class="tile orange"><span>🛍️</span><b>Барахолка</b><small>Купить и продать</small></button>
-    <button class="tile violet" data-view="community"><span>👥</span><b>Сообщество</b><small>Группы по странам</small></button>
-    <button class="tile teal" data-view="guide"><span>📘</span><b>Гид</b><small>Визы, документы, жильё</small></button>
-    <button class="tile pink" data-view="dating"><span>💗</span><b>Знакомства</b><small>Анкеты 18+</small></button>
-  </section>
-  <div class="section-head"><div><span class="eyebrow">СВЕЖИЕ ПУБЛИКАЦИИ</span><h2 id="listTitle">Последние объявления</h2></div><button class="link" id="allBtn">Все →</button></div>
-  <div id="listings" class="listings"><div class="empty">Загружаем объявления…</div></div>
+<header class="topbar">
+  <div class="brand"><div class="logo">🇰🇷</div><b>KOREA HUB</b></div>
+  <button class="link" id="loginTop" hidden>Войти</button>
+</header>
+
+<main class="content" id="scroll">
+
+<!-- Главная: поиск, фильтры, все объявления -->
+<section id="view-home" class="view">
+  <div class="sticky">
+    <div class="searchbar">
+      <input id="search" type="search" placeholder="Поиск объявлений" enterkeyhint="search" autocomplete="off">
+      <button class="icon-btn" id="filterBtn" aria-label="Фильтры">
+        <svg viewBox="0 0 24 24"><path d="M4 6h9M19 6h1M4 12h3M13 12h7M4 18h11M21 18h-1"/><circle cx="16" cy="6" r="2.2"/><circle cx="10" cy="12" r="2.2"/><circle cx="18" cy="18" r="2.2"/></svg>
+        <span class="badge" id="filterBadge" hidden>0</span>
+      </button>
+    </div>
+    <div class="chips" id="chips">
+      <button class="chip active" data-cat="">Все</button>
+      <button class="chip" data-cat="job">💼 Работа</button>
+      <button class="chip" data-cat="housing">🏠 Жильё</button>
+      <button class="chip" data-cat="marketplace">🛍️ Барахолка</button>
+    </div>
+  </div>
+  <div class="quick">
+    <button class="q1" data-view="community"><span>👥</span>Сообщество</button>
+    <button class="q2" data-view="guide"><span>📘</span>Гид</button>
+    <button class="q3" data-view="dating"><span>💗</span>Знакомства</button>
+  </div>
+  <div class="results-head">
+    <span id="resultCount">Загружаем…</span>
+    <select id="sortSelect" aria-label="Сортировка">
+      <option value="new">Сначала новые</option>
+      <option value="price_asc">Сначала дешёвые</option>
+      <option value="price_desc">Сначала дорогие</option>
+    </select>
+  </div>
+  <div id="listings" class="listings"></div>
+  <button class="more" id="moreBtn" hidden>Показать ещё</button>
 </section>
 
-<section id="view-saved" hidden>
+<!-- Страница объявления -->
+<section id="view-detail" class="view" hidden>
+  <button class="link back" id="detailBack">← Назад</button>
+  <div id="detailBody"></div>
+</section>
+
+<section id="view-saved" class="view" hidden>
   <div class="section-head"><div><span class="eyebrow">СОХРАНЁННОЕ</span><h2>Избранное</h2></div></div>
   <div id="favorites" class="listings"></div>
 </section>
 
-<section id="view-chats" hidden>
+<section id="view-chats" class="view" hidden>
   <div class="section-head"><div><span class="eyebrow">ПЕРЕПИСКА</span><h2>Сообщения</h2></div></div>
   <div id="conversations" class="listings"></div>
 </section>
 
-<section id="view-chat" hidden>
-  <div class="section-head"><div><button class="link" id="chatBack">← Назад</button><h2 id="chatTitle">Чат</h2></div></div>
+<section id="view-chat" class="chat-view" hidden>
+  <div class="chat-head">
+    <button class="link" id="chatBack" aria-label="Назад">←</button>
+    <b id="chatTitle">Чат</b>
+    <button class="link" id="chatBlock">Заблокировать</button>
+    <button class="link" id="chatReport" aria-label="Пожаловаться">⚑</button>
+  </div>
   <div id="messages" class="messages"></div>
-  <form id="chatForm" class="chat-form"><input id="chatInput" maxlength="2000" placeholder="Сообщение" required><button type="submit">➤</button></form>
+  <form id="chatForm" class="chat-form">
+    <input id="chatInput" maxlength="2000" placeholder="Сообщение" required autocomplete="off">
+    <button type="submit" aria-label="Отправить">➤</button>
+  </form>
 </section>
 
-<section id="view-profile" hidden>
-  <div class="profile-head"><div class="avatar">👤</div>
-    <div><b id="pName">Мой профиль</b><small id="pCity"></small></div>
-    <button class="link" id="cityBtn">Город</button></div>
+<section id="view-profile" class="view" hidden>
+  <div class="profile-head">
+    <div class="avatar" id="pAvatar">👤</div>
+    <div class="who"><b id="pName">Мой профиль</b><small id="pCity"></small></div>
+    <button class="link" id="cityBtn">Город</button>
+  </div>
   <div class="stats">
     <div><b id="sListings">0</b><small>объявлений</small></div>
     <div><b id="sFav">0</b><small>в избранном</small></div>
@@ -50,7 +93,7 @@
   <div id="myListings" class="listings"></div>
   <div class="menu-list">
     <button class="wide" data-menu="favorites">♡ Избранное</button>
-    <button class="wide" data-menu="chats">☰ Сообщения</button>
+    <button class="wide" data-menu="chats">💬 Сообщения</button>
     <button class="wide" data-menu="payments">⭐ История платежей</button>
     <button class="wide" data-menu="employer">🏢 Статус работодателя</button>
     <button class="wide" data-menu="blocks">🚫 Заблокированные</button>
@@ -62,51 +105,114 @@
   <div id="menuBody" class="listings"></div>
 </section>
 
-<section id="view-dating" hidden>
+<section id="view-dating" class="view" hidden>
   <div class="section-head"><div><span class="eyebrow">ЗНАКОМСТВА 18+</span><h2>Анкеты</h2></div>
     <button class="link" id="myDatingBtn">Моя анкета</button></div>
-  <div class="search"><select id="datingGender"><option value="">Все</option><option value="f">Девушки</option><option value="m">Парни</option></select></div>
-  <div id="datingList" class="listings"></div>
+  <div class="chips" id="datingChips">
+    <button class="chip active" data-gender="">Все</button>
+    <button class="chip" data-gender="f">Девушки</button>
+    <button class="chip" data-gender="m">Парни</button>
+  </div>
+  <div id="datingList" class="listings" style="margin-top:10px"></div>
 </section>
 
-<section id="view-community" hidden>
+<section id="view-community" class="view" hidden>
   <div class="section-head"><div><span class="eyebrow">СООБЩЕСТВО</span><h2>Группы по странам</h2></div></div>
   <div id="groups" class="listings"></div>
 </section>
 
-<section id="view-guide" hidden>
+<section id="view-guide" class="view" hidden>
   <div class="section-head"><div><span class="eyebrow">ГИД ПО КОРЕЕ</span><h2>Разделы</h2></div></div>
   <div id="guideSections" class="listings"></div>
 </section>
 
-<section id="view-article" hidden>
-  <div class="section-head"><div><button class="link" id="articleBack">← Назад</button><h2 id="articleTitle"></h2></div></div>
+<section id="view-article" class="view" hidden>
+  <button class="link back" id="articleBack">← Назад</button>
+  <div class="section-head"><div><h2 id="articleTitle"></h2></div></div>
   <div id="articleBody" class="listings"></div>
 </section>
 
+</main>
+
 <nav class="bottom">
-  <button class="active" data-view="home">⌂<small>Главная</small></button>
-  <button data-view="saved">♡<small>Избранное</small></button>
-  <button class="add" id="addBtn">＋<small>Добавить</small></button>
-  <button data-view="chats">☰<small>Сообщения</small></button>
-  <button data-view="profile">♙<small>Профиль</small></button>
+  <button class="active" data-view="home">
+    <svg viewBox="0 0 24 24"><path d="M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>Главная</button>
+  <button data-view="saved">
+    <svg viewBox="0 0 24 24"><path d="M12 20.500s-7.500-4.600-9.200-9.400A5.400 5.400 0 0 1 12 6.200a5.400 5.400 0 0 1 9.200 4.900c-1.700 4.800-9.200 9.400-9.200 9.400z"/></svg>Избранное</button>
+  <button class="add" id="addBtn" aria-label="Добавить">
+    <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+  <button data-view="chats">
+    <svg viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.600 7.100L4 20.500l1.100-4.600A8 8 0 1 1 21 12z"/></svg>Сообщения</button>
+  <button data-view="profile">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>Профиль</button>
 </nav>
 </div>
 
+<!-- Окна -->
 <div id="consent" class="modal hidden"><div class="sheet"><div class="sheet-top"><b>Добро пожаловать</b></div>
 <p>Чтобы публиковать объявления, писать и покупать услуги, примите правила:</p>
-<label class="check"><input type="checkbox" id="consentRules"> Я принимаю <a href="#" data-doc="terms">пользовательское соглашение</a></label>
-<label class="check"><input type="checkbox" id="consentPrivacy"> Я согласен на обработку данных по <a href="#" data-doc="privacy">политике конфиденциальности</a></label>
+<label class="check"><input type="checkbox" id="consentRules"> Я принимаю пользовательское соглашение</label>
+<label class="check"><input type="checkbox" id="consentPrivacy"> Я согласен на обработку данных по политике конфиденциальности</label>
 <button class="submit" id="consentOk" type="button">Продолжить</button></div></div>
 
+<div id="addSheet" class="modal hidden"><div class="sheet"><div class="sheet-top"><b>Что добавить?</b><button id="closeAdd">✕</button></div>
+<div class="menu-list">
+<button class="wide" data-add="job">💼 Вакансия</button>
+<button class="wide" data-add="housing">🏠 Жильё</button>
+<button class="wide" data-add="marketplace">🛍️ Товар</button>
+<button class="wide" data-add="dating">💗 Анкета знакомств</button>
+</div></div></div>
+
 <div id="modal" class="modal hidden"><div class="sheet"><div class="sheet-top"><b id="modalTitle">Новое объявление</b><button id="closeModal">✕</button></div>
-<form id="listingForm"><label>Категория<select name="category"><option value="job">Работа</option><option value="housing">Жильё</option><option value="marketplace">Барахолка</option></select></label>
-<label>Заголовок<input name="title" required minlength="3" maxlength="160" placeholder="Например: Работа на заводе"></label><label>Город<input name="city" required maxlength="80" placeholder="Например: Асан"></label>
-<label>Цена / зарплата<input name="price" maxlength="80" placeholder="Например: 2 800 000 ₩/мес"></label><label>Описание<textarea name="description" rows="3" maxlength="4000" placeholder="Подробности объявления"></textarea></label><label>Контакт<input name="contact" maxlength="160" placeholder="Telegram или телефон"></label>
+<form id="listingForm">
+<label>Раздел<select name="category" id="formCategory"><option value="job">Работа</option><option value="housing">Жильё</option><option value="marketplace">Барахолка</option></select></label>
+<label>Заголовок<input name="title" required minlength="3" maxlength="160" placeholder="Например: Работа на заводе"></label>
+<label>Город<input name="city" required maxlength="80" placeholder="Например: Асан" list="cityHints"></label>
+<div class="row2">
+  <label>Сумма, ₩<input name="price_amount" type="number" inputmode="numeric" min="0" placeholder="2800000"></label>
+  <label>Пометка к цене<input name="price" maxlength="80" placeholder="в месяц, торг"></label>
+</div>
+<div data-for="job" hidden>
+  <label class="check"><input type="checkbox" name="housing_provided"> Жильё предоставляется</label>
+  <label class="check"><input type="checkbox" name="meals_provided"> Питание включено</label>
+</div>
+<div data-for="housing" hidden>
+  <label>Комнат<input name="rooms" type="number" inputmode="numeric" min="0" max="20" placeholder="2"></label>
+</div>
+<div data-for="marketplace" hidden>
+  <label>Состояние<select name="condition"><option value="">Не указано</option><option value="new">Новое</option><option value="used">Б/у</option></select></label>
+</div>
+<label>Описание<textarea name="description" rows="3" maxlength="4000" placeholder="Подробности. Телефон и ссылки пишите в поле «Контакт»"></textarea></label>
+<label>Контакт<input name="contact" maxlength="160" placeholder="@username или телефон"></label>
 <button class="submit" type="submit">Отправить на проверку</button></form></div></div>
+<datalist id="cityHints"></datalist>
+
+<div id="filters" class="modal hidden"><div class="sheet"><div class="sheet-top"><b>Фильтры</b><button id="closeFilters">✕</button></div>
+<form id="filterForm">
+<label>Город<input name="city" maxlength="80" placeholder="Любой" list="cityHints"></label>
+<div class="row2">
+  <label>Цена от, ₩<input name="price_min" type="number" inputmode="numeric" min="0"></label>
+  <label>Цена до, ₩<input name="price_max" type="number" inputmode="numeric" min="0"></label>
+</div>
+<div data-for="job" hidden>
+  <label class="check"><input type="checkbox" name="housing_provided"> Жильё предоставляется</label>
+  <label class="check"><input type="checkbox" name="meals_provided"> Питание включено</label>
+</div>
+<div data-for="housing" hidden>
+  <label>Комнат не меньше<select name="rooms_min"><option value="">Любое</option><option>1</option><option>2</option><option>3</option><option>4</option></select></label>
+</div>
+<div data-for="marketplace" hidden>
+  <label>Состояние<select name="condition"><option value="">Любое</option><option value="new">Новое</option><option value="used">Б/у</option></select></label>
+</div>
+<p class="muted" id="filterHint">Выберите раздел «Работа», «Жильё» или «Барахолка», чтобы появились дополнительные фильтры.</p>
+<button class="submit" type="submit">Показать</button>
+<button class="submit ghost" type="button" id="resetFilters">Сбросить</button></form></div></div>
+
+<div id="reasonSheet" class="modal hidden"><div class="sheet"><div class="sheet-top"><b>Причина жалобы</b><button id="closeReason">✕</button></div>
+<div id="reasonList" class="menu-list"></div></div></div>
 
 <div id="services" class="modal hidden"><div class="sheet"><div class="sheet-top"><b>Продвижение</b><button id="closeServices">✕</button></div>
-<div id="serviceList"></div></div></div>
+<div id="serviceList" class="listings"></div></div></div>
 
 <div id="datingModal" class="modal hidden"><div class="sheet"><div class="sheet-top"><b>Моя анкета</b><button id="closeDating">✕</button></div>
 <form id="datingForm"><label>Год рождения<input name="birth_year" type="number" min="1930" max="2100" required></label>
@@ -117,16 +223,8 @@
 <p class="muted">Анкета появится после проверки модератором. Контакты в анкете не нужны: общение только в приложении.</p>
 <button class="submit" type="submit">Сохранить</button></form></div></div>
 
-<div id="addSheet" class="modal hidden"><div class="sheet"><div class="sheet-top"><b>Что добавить?</b><button id="closeAdd">✕</button></div>
-<div class="menu-list">
-<button class="wide" data-add="job">💼 Вакансия</button>
-<button class="wide" data-add="housing">🏠 Жильё</button>
-<button class="wide" data-add="marketplace">🛍️ Товар</button>
-<button class="wide" data-add="dating">💗 Анкета знакомств</button>
-</div></div></div>
-
 <div id="cityModal" class="modal hidden"><div class="sheet"><div class="sheet-top"><b>Мой город</b><button id="closeCity">✕</button></div>
-<form id="cityForm"><label>Город<input name="city" required minlength="2" maxlength="80" placeholder="Например: Пусан"></label>
+<form id="cityForm"><label>Город<input name="city" required minlength="2" maxlength="80" placeholder="Например: Пусан" list="cityHints"></label>
 <button class="submit" type="submit">Сохранить</button></form></div></div>
 
 <div id="employerModal" class="modal hidden"><div class="sheet"><div class="sheet-top"><b>Заявка работодателя</b><button id="closeEmployer">✕</button></div>
