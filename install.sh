@@ -66,7 +66,7 @@ GIT_CFG=()
 # Токен нужен только для приватного репозитория (права Contents: Read-only).
 # Токен передаётся git через заголовок, поэтому не попадает в URL и .git/config.
 ask_github_token() {
-  if [ -z "${GITHUB_TOKEN:-}" ] && [ -r /dev/tty ]; then
+  if [ -z "${GITHUB_TOKEN:-}" ] && [ ! -f "$TOKEN_FILE" ] && [ -r /dev/tty ]; then
     # Скрытый ввод: токен не отображается на экране
     read -r -s -p "Токен GitHub для приватного репозитория (ввод скрыт, Enter, если репозиторий публичный): " GITHUB_TOKEN </dev/tty || GITHUB_TOKEN=""
     echo
@@ -114,8 +114,14 @@ write_env() {
   fi
 
   log "Настройка. Ответьте на вопросы (значения по умолчанию в скобках)"
-  ask DOMAIN "Домен для Mini App, A-запись должна указывать на этот сервер (например app.example.com)" ""
-  [ -n "${DOMAIN:-}" ] || die "Нужен домен. Mini App работает только по HTTPS."
+  if [ -z "${DOMAIN:-}" ] && [ ! -r /dev/tty ]; then
+    die "Нет терминала для ввода. Укажите домен: DOMAIN=app.example.com sudo bash install.sh install"
+  fi
+  # Домен обязателен: переспрашиваем, пока не введут
+  while [ -z "${DOMAIN:-}" ]; do
+    ask DOMAIN "Домен для Mini App, A-запись должна указывать на этот сервер (например app.example.com)" ""
+    [ -n "${DOMAIN:-}" ] || warn "Домен обязателен. Введите его и нажмите Enter."
+  done
   ask BOT_TOKEN "Токен бота от @BotFather (можно пусто, тогда бот не запустится)" ""
   ask ADMIN_IDS "Telegram ID администраторов через запятую (можно пусто)" ""
   [ -n "${ADMIN_IDS:-}" ] || warn "ADMIN_IDS пуст. Модерация через бота будет недоступна, добавьте ID позже в $env_file."
@@ -219,6 +225,7 @@ cmd_update() {
   require_root update
   require_supported_os
   [ -d "$APP_DIR/.git" ] || die "$APP_DIR не найден. Сначала выполните: sudo bash install.sh install"
+  [ -f "$APP_DIR/.env" ] || die "Нет файла $APP_DIR/.env: установка не была завершена. Выполните: sudo bash install.sh install"
   load_github_token
   backup_db
   sync_repo
