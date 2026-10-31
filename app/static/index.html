@@ -1,7 +1,13 @@
 <!doctype html>
 <html lang="ru"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
-<meta name="theme-color" content="#102a43"><title>KOREA HUB</title>
+<meta name="theme-color" content="#1b4b9b"><title>KOREA HUB — работа, жильё и объявления в Корее</title>
+<meta name="description" content="Работа, жильё, барахолка, автомобили, услуги, знакомства и полезная информация для иностранцев в Южной Корее. Telegram Mini App.">
+<link rel="icon" type="image/png" href="/static/favicon.png"><link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta property="og:site_name" content="KOREA HUB"><meta property="og:type" content="website"><meta property="og:title" content="KOREA HUB — всё для жизни в Корее">
+<meta property="og:description" content="Работа, жильё, барахолка, автомобили, услуги, знакомства и гид для иностранцев в Южной Корее.">
+<meta property="og:image" content="/static/og.png"><meta name="twitter:card" content="summary_large_image">
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <link rel="stylesheet" href="/static/app.css"></head>
 <body>
@@ -223,8 +229,8 @@
 <!-- Окна -->
 <div id="consent" class="modal hidden"><div class="sheet"><div class="sheet-top"><b>Добро пожаловать</b></div>
 <p>Чтобы публиковать объявления, писать и покупать услуги, примите правила:</p>
-<label class="check"><input type="checkbox" id="consentRules"> Я принимаю пользовательское соглашение</label>
-<label class="check"><input type="checkbox" id="consentPrivacy"> Я согласен на обработку данных по политике конфиденциальности</label>
+<label class="check"><input type="checkbox" id="consentRules"> Я принимаю <a href="/legal/terms" target="_blank" rel="noopener" data-legal>пользовательское соглашение</a></label>
+<label class="check"><input type="checkbox" id="consentPrivacy"> Я согласен на обработку данных по <a href="/legal/privacy" target="_blank" rel="noopener" data-legal>политике конфиденциальности</a></label>
 <button class="submit" id="consentOk" type="button">Продолжить</button></div></div>
 
 <div id="addSheet" class="modal hidden"><div class="sheet"><div class="sheet-top"><b>Что добавить?</b><button id="closeAdd">✕</button></div>
@@ -407,6 +413,8 @@
 </div>
 <label>О себе<textarea name="bio" rows="3" maxlength="500"></textarea></label>
 <label>Фото (JPEG, PNG или WebP, до 5 МБ)<input name="photo" type="file" accept="image/jpeg,image/png,image/webp"></label>
+<label>Фото-подтверждение, по желанию<input name="selfie" type="file" accept="image/jpeg,image/png,image/webp"></label>
+<p class="muted" id="selfieNote">Селфи с открытой ладонью рядом с лицом. Его видят только модераторы; после проверки в анкете появится отметка ✔ «проверено», доверия больше.</p>
 <p class="muted">Анкета появится после проверки модератором. Контакты в анкете не нужны: общение только в приложении.</p>
 <button class="submit" type="submit">Сохранить</button></form></div></div>
 

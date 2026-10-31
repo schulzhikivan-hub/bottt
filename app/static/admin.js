@@ -313,12 +313,18 @@ async function loadDating() {
     <div class="card" data-pid="${p.id}">
       <b>Анкета #${p.id}${p.name ? " · " + esc(p.name) : ""}</b> · ${p.age} лет · ${p.gender === "f" ? "ж" : "м"} · ${esc(p.city)}
       <p>${esc(p.bio)}</p>
-      <img data-photo="${p.id}" alt="" style="max-width:220px;border-radius:10px" ${p.has_photo ? "" : "hidden"}>
-      <p><button class="act ok" data-dec="approve">Опубликовать</button><button class="act no" data-dec="reject">Отклонить</button></p>
+      <div class="row"><img data-photo="${p.id}" alt="" style="max-width:220px;border-radius:10px" ${p.has_photo ? "" : "hidden"}>
+      ${p.selfie_status === "pending" ? `<div><div class="muted">Фото-подтверждение (видите только вы)</div><img data-selfie="${p.id}" alt="" style="max-width:220px;border-radius:10px"></div>` : ""}</div>
+      <p>${p.status === "pending" ? '<button class="act ok" data-dec="approve">Опубликовать</button><button class="act no" data-dec="reject">Отклонить</button>' : ""}
+      ${p.selfie_status === "pending" ? '<button class="act ok" data-dec="verify">✔ Тот же человек</button><button class="act warn" data-dec="reject_selfie">Селфи не подходит</button>' : ""}${p.selfie_status === "approved" ? '<span class="badge">✔ проверено</span>' : ""}</p>
     </div>`).join("") : '<div class="card muted">Анкет на проверке нет.</div>';
   for (const img of document.querySelectorAll("img[data-photo]")) {
     if (img.hidden) continue;
     const r = await fetch(`/api/admin/dating/${img.dataset.photo}/photo`, {headers: {"X-Admin-Session": session()}});
+    if (r.ok) img.src = URL.createObjectURL(await r.blob());
+  }
+  for (const img of document.querySelectorAll("img[data-selfie]")) {
+    const r = await fetch(`/api/admin/dating/${img.dataset.selfie}/selfie`, {headers: {"X-Admin-Session": session()}});
     if (r.ok) img.src = URL.createObjectURL(await r.blob());
   }
 }
@@ -505,8 +511,12 @@ $("#main").addEventListener("click", async (e) => {
 
 // ---- платежи и промокоды ----
 async function loadPayments() {
-  const [rows, promos] = await Promise.all([api("/api/admin/payments"), api("/api/admin/promos")]);
+  const [rows, promos, an] = await Promise.all([api("/api/admin/payments"), api("/api/admin/promos"), api("/api/admin/analytics?days=30")]);
+  const sold = an.days.filter((d) => d.payments).reverse();
   $("#main").innerHTML = `
+    <div class="card"><h3>Заработано звёзд за 30 дней: ${an.totals.stars} ⭐</h3>
+      ${sold.length ? `<table><tr><th>День</th><th>Продаж</th><th>⭐</th></tr>${sold.map((d) => `<tr><td>${esc(d.date)}</td><td>${d.payments}</td><td>${d.stars}</td></tr>`).join("")}</table>` : '<p class="muted">Продаж не было.</p>'}
+      ${an.stars_by_service.length ? `<h3 style="margin-top:12px">По услугам</h3><table><tr><th>Услуга</th><th>⭐</th></tr>${an.stars_by_service.map((x) => `<tr><td>${esc(x.service)}</td><td>${x.stars}</td></tr>`).join("")}</table>` : ""}</div>
     <div class="card"><h3>Промокоды</h3><div class="row"><input id="pCode" placeholder="КОД" maxlength="24" style="width:130px;text-transform:uppercase">
       <input id="pPercent" type="number" min="1" max="90" placeholder="% скидки" style="width:100px"><input id="pFixed" type="number" min="1" placeholder="или звёзд" style="width:100px">
       <input id="pMax" type="number" min="1" placeholder="лимит" style="width:90px"><input id="pDays" type="number" min="1" placeholder="дней" style="width:80px"><button class="act" id="pAdd">Создать</button></div>

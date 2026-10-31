@@ -1,0 +1,145 @@
+import io
+
+import pytest
+from fastapi.testclient import TestClient
+from PIL import Image
+from sqlalchemy import select
+
+from app import admin_ops as ops
+from app import botadmin as ba
+from app import guard
+from app.config import settings
+from app.database import SessionLocal, engine
+from app.main import app
+from app.models import Admin, DatingProfile, Notification
+from app.payments import now
+from tests.tg import accept_terms, as_user, reset_db
+
+ADMIN = {"X-Admin-Session": "test-session-token"}
+THIS_YEAR = now().year
+
+
+@pytest.fixture()
+def client(tmp_path, monkeypatch):
+    assert engine.url.drivername == "sqlite"
+    monkeypatch.setattr(settings, "upload_dir", str(tmp_path / "uploads"))
+    reset_db()
+    ba.PENDING_INPUT.clear()
+    with TestClient(app) as c:
+        for uid in (1, 2):
+            accept_terms(c, uid)
+        yield c
+
+
+def jpeg():
+    buf = io.BytesIO()
+    Image.new("RGB", (200, 160), "tan").save(buf, "JPEG")
+    return buf.getvalue()
+
+
+def make_profile(client, user=1):
+    body = {"birth_year": THIS_YEAR - 27, "gender": "f", "region_code": "seoul", "bio": "Привет", "first_name": "Аня"}
+    assert client.put("/api/dating/profile", json=body, headers=as_user(user)).status_code == 200
+    r = client.post("/api/dating/photo", files={"file": ("p.jpg", jpeg(), "image/jpeg")}, headers=as_user(user))
+    assert r.status_code == 200
+    return client.get("/api/dating/me", headers=as_user(user)).json()["id"]
+
+
+def selfie(client, user=1, data=None):
+    return client.post("/api/dating/selfie", files={"file": ("s.jpg", data or jpeg(), "image/jpeg")}, headers=as_user(user))
+
+
+def test_selfie_needs_a_profile_and_photo_and_a_real_image(client):
+    assert selfie(client).status_code == 400                         # no profile yet
+    make_profile(client)
+    assert selfie(client, data=b"not a picture").status_code == 400
+    r = selfie(client)
+    assert r.status_code == 201 and r.json()["selfie_status"] == "pending"
+    assert client.get("/api/dating/me", headers=as_user(1)).json()["selfie_status"] == "pending"
+
+
+def test_selfie_is_visible_to_moderators_only_and_logged(client):
+    pid = make_profile(client)
+    selfie(client)
+    assert client.get(f"/api/admin/dating/{pid}/selfie").status_code in (401, 403)         # nobody without a staff session
+    assert client.get(f"/api/admin/dating/{pid}/selfie", headers=as_user(1)).status_code in (401, 403)
+    r = client.get(f"/api/admin/dating/{pid}/selfie", headers=ADMIN)
+    assert r.status_code == 200 and r.headers["cache-control"] == "no-store"
+    assert any(x["action"] == "dating.view_selfie" for x in client.get("/api/admin/audit", headers=ADMIN).json())
+    client.post(f"/api/admin/dating/{pid}/approve", headers=ADMIN)                           # published
+    assert "selfie" not in str(client.get("/api/dating", headers=as_user(2)).json())         # the public feed has no selfie
+
+
+def test_verify_adds_mark_and_notifies_and_reject_removes_file(client, tmp_path):
+    pid = make_profile(client)
+    selfie(client)
+    client.post(f"/api/admin/dating/{pid}/approve", headers=ADMIN)
+    assert client.get("/api/dating", headers=as_user(2)).json()[0]["verified"] is False
+    queue = client.get("/api/admin/dating?status=pending", headers=ADMIN).json()
+    assert queue and queue[0]["has_selfie"] and queue[0]["selfie_status"] == "pending"        # public profile, selfie still waits
+    assert client.post(f"/api/admin/dating/{pid}/verify", headers=ADMIN).status_code == 200
+    assert client.get("/api/dating", headers=as_user(2)).json()[0]["verified"] is True
+    assert client.get("/api/admin/dating?status=pending", headers=ADMIN).json() == []
+    with SessionLocal() as db:
+        assert any("проверено" in n.text for n in db.scalars(select(Notification).where(Notification.user_tg_id == "1")).all())
+    # a new main photo asks for the confirmation again
+    client.post("/api/dating/photo", files={"file": ("p.jpg", jpeg(), "image/jpeg")}, headers=as_user(1))
+    assert client.get("/api/dating/me", headers=as_user(1)).json()["selfie_status"] == "pending"
+    # rejecting deletes the file
+    with SessionLocal() as db:
+        key = db.get(DatingProfile, pid).selfie_key
+    assert (tmp_path / "uploads" / key).exists()
+    client.post(f"/api/admin/dating/{pid}/reject_selfie", headers=ADMIN)
+    assert not (tmp_path / "uploads" / key).exists()
+    with SessionLocal() as db:
+        row = db.get(DatingProfile, pid)
+        assert row.selfie_key is None and row.selfie_status == "rejected"
+    assert client.post(f"/api/admin/dating/{pid}/verify", headers=ADMIN).status_code == 400   # nothing left to verify
+
+
+def test_bot_admin_selfie_flow(client, tmp_path):
+    with SessionLocal() as db:
+        db.add(Admin(tg_id="555", role="moderator", active=True, created_at=now()))
+        db.commit()
+    pid = make_profile(client)
+    selfie(client)
+    with SessionLocal() as db:
+        queue = ba.dating_queue(db)
+        assert "Прислано фото-подтверждение" in queue.text and any(d == f"a:D:vs:{pid}" for r in queue.rows for _, d in r)
+        shown = ba.handle(db, 555, "moderator", ["a", "D", "vs", str(pid)])
+        assert shown.photo is not None and shown.photo.exists()
+        done = ba.handle(db, 555, "moderator", ["a", "D", "vf", str(pid)])
+        assert "Личность подтверждена" in done.text
+        assert db.get(DatingProfile, pid).selfie_status == "approved"
+        assert ba.handle(db, 555, "moderator", ["a", "D", "vs", "9999"]).alert == "Селфи не найдено"
+
+
+def test_bot_browse_shows_verified_mark(client):
+    from app import botbrowse as bb
+    pid = make_profile(client)
+    selfie(client)
+    client.post(f"/api/admin/dating/{pid}/approve", headers=ADMIN)
+    client.post(f"/api/admin/dating/{pid}/verify", headers=ADMIN)
+    with SessionLocal() as db:
+        bb.STATE.clear()
+        assert "Аня, 27 ✔" in bb.act(db, 2, "b:dt").text
+
+
+def test_stars_report_by_day_and_service(client):
+    from app.models import Payment
+    with SessionLocal() as db:
+        db.add(Payment(user_tg_id="1", listing_id=1, service_code="job_vip", stars=100, payload="a", status="paid", paid_at=now()))
+        db.add(Payment(user_tg_id="1", listing_id=1, service_code="job_bump", stars=30, payload="b", status="paid", paid_at=now()))
+        db.commit()
+    data = client.get("/api/admin/analytics?days=30", headers=ADMIN).json()
+    today = data["days"][-1]
+    assert today["payments"] == 2 and today["stars"] == 130
+    assert {s["service"]: s["stars"] for s in data["stars_by_service"]} == {"VIP-вакансия на 7 дней": 100, "Поднять вакансию": 30}
+
+
+def test_banner_photo_and_language_button_are_wired_in_the_page(client):
+    js = client.get("/static/app.js").text
+    assert "/api/banner-photo" in js and 'classList.add("photo")' in js
+    assert client.get("/api/banner-photo").json() == {"exists": False}
+    assert "Сейчас доступен только русский язык" in js and "появятся позже" not in js        # no false promise about other languages
+    assert ".hero.photo" in client.get("/static/app.css").text

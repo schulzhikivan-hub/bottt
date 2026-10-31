@@ -31,7 +31,7 @@ from app.manage import router as manage_router
 from app.guard import rate_limit, check_text, duplicate_note, notify_user
 from app import admin_ops as ops
 from app import catalog
-from app import photos, applications, searches, inbox, promos, adminx, observe
+from app import photos, applications, searches, inbox, promos, adminx, observe, site
 from app import geo
 from app import fields as listing_fields
 from app.users import get_or_create_user, writer, is_blocked_pair
@@ -61,6 +61,7 @@ app.include_router(searches.router)
 app.include_router(inbox.router)
 app.include_router(promos.router)
 app.include_router(adminx.router)
+app.include_router(site.router)
 app.include_router(geo.router)
 app.include_router(listing_fields.router)
 STATIC = Path(__file__).parent / "static"
@@ -142,6 +143,7 @@ def give_consent(payload: ConsentIn, user_id: str = Depends(current_user_id), db
     if user.deleted_at is not None:
         raise HTTPException(403, "Аккаунт удалён")
     user.consent_at = now()
+    user.consent_version = site.LEGAL_VERSION   # which texts the person agreed to
     place = geo.resolve_place(db, payload.district_id, payload.region_code, payload.city)
     if place:
         user.city, user.region_code, user.district_id = place.label, place.region_code, place.district_id

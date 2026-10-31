@@ -209,6 +209,13 @@ def banner_view(b: Banner) -> dict:
             "ends_at": str(b.ends_at) if b.ends_at else None}
 
 
+@router.get("/api/banner-photo")
+def banner_photo():
+    """Is there a photo for the home banner (app/static/banner.jpg)? The page asks this instead of probing the file."""
+    from pathlib import Path
+    return {"exists": (Path(__file__).parent / "static" / "banner.jpg").is_file()}
+
+
 @router.get("/api/banners")
 def public_banners(db: Session = Depends(get_db)):
     """What the home screen shows: active banners inside their dates, newest first (at most three)."""

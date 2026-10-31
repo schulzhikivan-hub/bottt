@@ -494,3 +494,6 @@ button.pchip{color:var(--accent);font-weight:600}
 .landing .banners:not([hidden]){display:flex}
 .banners a,.banners div{display:block;background:linear-gradient(100deg,#fff4d6,#ffe9b0);color:#4a3600;border-radius:12px;padding:10px 12px;font-size:13.5px;
   font-weight:600;text-decoration:none;box-shadow:0 1px 4px #1b25400f}
+
+.hero.photo{background:linear-gradient(180deg,#0b2d73cc 0%,#1b4b9b66 60%,#0b2d7399 100%),url(/static/banner.jpg) center/cover}
+.hero.photo .skyline{display:none}

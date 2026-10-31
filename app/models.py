@@ -29,6 +29,7 @@ class User(Base):
     display_name: Mapped[str] = mapped_column(String(40), default="")
     avatar_key: Mapped[str | None] = mapped_column(String(40), nullable=True)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    consent_version: Mapped[str] = mapped_column(String(40), default="")
     visa: Mapped[str] = mapped_column(String(8), default="")  # private; used for job filters and applications
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
@@ -166,6 +167,9 @@ class DatingProfile(Base):
     first_name: Mapped[str] = mapped_column(String(40), default="")  # shown on the card; moderated with the profile
     bio: Mapped[str] = mapped_column(Text, default="")
     photo_key: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    # a second photo ("selfie with a gesture") that only moderators see; approved = the "verified" mark
+    selfie_key: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    selfie_status: Mapped[str] = mapped_column(String(10), default="")  # "", pending, approved, rejected
     # pending, published, rejected
     status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

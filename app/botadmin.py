@@ -7,7 +7,7 @@ Permissions follow the roles (moderator, admin, super_admin) and every action is
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from sqlalchemy import select, func, desc
+from sqlalchemy import select, func, desc, or_
 from sqlalchemy.orm import Session
 
 from app import admin_ops as ops
@@ -62,7 +62,7 @@ def menu(db: Session, role: str) -> Reply:
         return Reply("🛠 Поддержка KOREA HUB\nВам доступны жалобы, пользователи и блокировки.", rows)
     rows = [
         [(f"📋 Объявления ({_count(db, Listing, ops.queue_condition())})", "a:L"),
-         (f"💗 Анкеты ({_count(db, DatingProfile, DatingProfile.status == 'pending')})", "a:D")],
+         (f"💗 Анкеты ({_count(db, DatingProfile, _dating_waiting())})", "a:D")],
         [(f"🚩 Жалобы ({_count(db, Report, Report.status == 'new')})", "a:R"),
          (f"🏢 Работодатели ({_count(db, User, User.employer_status == 'pending')})", "a:E")],
         [("👥 Пользователи", "a:U"), ("🔎 Найти объявление", "a:L:find")],
@@ -192,19 +192,32 @@ def listing_queue(db: Session, header: str = "") -> Reply:
                  photo=_listing_photo(item, db))
 
 
+def _dating_waiting():
+    """Profiles to look at: new or changed ones, and public ones whose selfie waits for a decision."""
+    return or_(DatingProfile.status == "pending", DatingProfile.selfie_status == "pending")
+
+
 def dating_queue(db: Session, header: str = "") -> Reply:
-    profile = db.scalar(select(DatingProfile).where(DatingProfile.status == "pending")
-                        .order_by(DatingProfile.id).limit(1))
+    profile = db.scalar(select(DatingProfile).where(_dating_waiting()).order_by(DatingProfile.id).limit(1))
     if profile is None:
         return Reply(header + "Анкет на проверке нет ✅", [BACK])
     photo = upload_root() / profile.photo_key if profile.photo_key else None
+    selfie = profile.selfie_status
     text = (f"{header}💗 Анкета #{profile.id}" + (f" · {profile.first_name}" if profile.first_name else "") + f"\n{age_of(profile.birth_year)} лет · "
             f"{'девушка' if profile.gender == 'f' else 'парень'} · {profile.city}\n\n{_short(profile.bio, 500)}"
-            + ("" if photo else "\n\n⚠️ Фото не загружено: опубликовать нельзя"))
-    buttons = [("❌ Отклонить", f"a:D:no:{profile.id}")]
-    if photo:
-        buttons.insert(0, ("✅ Опубликовать", f"a:D:ok:{profile.id}"))
-    return Reply(text, [buttons, BACK], photo=photo if photo and photo.exists() else None)
+            + ("" if photo else "\n\n⚠️ Фото не загружено: опубликовать нельзя")
+            + {"pending": "\n\n🤳 Прислано фото-подтверждение: сравните с основным фото (кнопка «Показать селфи»)",
+               "approved": "\n\n✔ Личность подтверждена", "rejected": "\n\nСелфи было отклонено"}.get(selfie, ""))
+    rows = []
+    if profile.status == "pending":
+        buttons = [("❌ Отклонить", f"a:D:no:{profile.id}")]
+        if photo:
+            buttons.insert(0, ("✅ Опубликовать", f"a:D:ok:{profile.id}"))
+        rows.append(buttons)
+    if selfie == "pending" and profile.selfie_key:
+        rows.append([("🤳 Показать селфи", f"a:D:vs:{profile.id}")])
+        rows.append([("✔ Это тот же человек", f"a:D:vf:{profile.id}"), ("🚫 Не подходит", f"a:D:vn:{profile.id}")])
+    return Reply(text, rows + [BACK], photo=photo if photo and photo.exists() else None)
 
 
 def report_queue(db: Session, header: str = "") -> Reply:
@@ -410,6 +423,19 @@ def _handle(db: Session, admin_id: int, role: str, parts: list[str]) -> Reply:
                 return reply
             return listing_queue(db)
         if section == "D":
+            if action == "vs":
+                profile = db.get(DatingProfile, int(arg))
+                path = upload_root() / profile.selfie_key if profile and profile.selfie_key else None
+                if path is None or not path.exists():
+                    return Reply("", alert="Селфи не найдено")
+                log_action(db, actor, "dating.view_selfie", "dating", profile.id, "")
+                db.commit()
+                return Reply(f"🤳 Селфи к анкете #{profile.id}. Его видят только модераторы.",
+                             [[("✔ Это тот же человек", f"a:D:vf:{profile.id}"), ("🚫 Не подходит", f"a:D:vn:{profile.id}")], [("↩ К очереди", "a:D")]],
+                             photo=path)
+            if action in ("vf", "vn"):
+                profile = ops.decide_dating(db, actor, int(arg), "verify" if action == "vf" else "reject_selfie")
+                return dating_queue(db, f"{'✔ Личность подтверждена' if action == 'vf' else '🚫 Селфи отклонено'}: анкета #{profile.id}\n\n")
             if action in ("ok", "no"):
                 profile = ops.decide_dating(db, actor, int(arg), "approve" if action == "ok" else "reject")
                 reply = dating_queue(db, f"{'✅ Опубликована' if action == 'ok' else '❌ Отклонена'} анкета #{profile.id}\n\n")

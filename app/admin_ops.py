@@ -181,11 +181,28 @@ def decide_employer(db: Session, actor: str, tg_id: str, decision: str) -> User:
 
 
 def decide_dating(db: Session, actor: str, profile_id: int, decision: str) -> DatingProfile:
-    if decision not in {"approve", "reject"}:
-        raise OpError(400, "Решение: approve или reject")
+    if decision not in {"approve", "reject", "verify", "reject_selfie"}:
+        raise OpError(400, "Решение: approve, reject, verify или reject_selfie")
     profile = db.get(DatingProfile, profile_id)
     if profile is None:
         raise OpError(404, "Анкета не найдена")
+    if decision in ("verify", "reject_selfie"):
+        if not profile.selfie_key:
+            raise OpError(400, "Фото-подтверждения нет")
+        if decision == "verify":
+            profile.selfie_status = "approved"
+        else:
+            from app.dating import upload_root
+            path = upload_root() / profile.selfie_key
+            if path.exists():
+                path.unlink()
+            profile.selfie_key, profile.selfie_status = None, "rejected"
+        log_action(db, actor, f"dating.{decision}", "dating", profile_id, profile.selfie_status)
+        db.commit()
+        guard.notify_user(db, profile.owner_tg_id, "Фото-подтверждение принято: в вашей анкете появилась отметка «проверено»."
+                          if decision == "verify" else "Фото-подтверждение не подошло. Пришлите новое: на нём должно быть видно ваше лицо и открытую ладонь.",
+                          "moderation")
+        return profile
     if decision == "approve" and profile.photo_key is None:
         raise OpError(400, "Нельзя опубликовать анкету без фото")
     profile.status = "published" if decision == "approve" else "rejected"

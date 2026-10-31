@@ -11,8 +11,8 @@ def test_new_database_is_stamped_and_nothing_is_rebuilt(tmp_path):
     Base.metadata.create_all(engine)              # a database made before Alembic (create_all, as in production)
     with engine.begin() as conn:
         conn.execute(text("insert into users (tg_id, language, city, blocked, employer_status, company_name, registration_no, "
-                          "contact_person, block_reason, notify_messages, visa, display_name, created_at) values "
-                          "('1','ru','Сеул',0,'none','','','','',1,'','Иван', '2026-01-01')"))
+                          "contact_person, block_reason, notify_messages, visa, display_name, consent_version, created_at) values "
+                          "('1','ru','Сеул',0,'none','','','','',1,'','Иван','', '2026-01-01')"))
     assert database.upgrade_schema(url) == "stamped"
     with engine.begin() as conn:
         assert conn.execute(text("select version_num from alembic_version")).scalar() == "0001"

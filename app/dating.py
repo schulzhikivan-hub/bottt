@@ -5,7 +5,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, File, Header, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import select, or_
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -52,7 +52,8 @@ def age_of(birth_year: int) -> int:
 
 def _public(profile: DatingProfile) -> dict:
     return {"id": profile.id, "name": profile.first_name or "", "age": age_of(profile.birth_year), "gender": profile.gender,
-            "city": profile.city, "bio": profile.bio, "photo_url": f"/api/dating/{profile.id}/photo"}
+            "city": profile.city, "bio": profile.bio, "photo_url": f"/api/dating/{profile.id}/photo",
+            "verified": profile.selfie_status == "approved"}
 
 
 class DatingIn(BaseModel):
@@ -71,6 +72,7 @@ def my_profile(user_id: str = Depends(writer), db: Session = Depends(get_db)):
     if profile is None:
         return None
     return {**_public(profile), "status": profile.status, "has_photo": profile.photo_key is not None,
+            "selfie_status": profile.selfie_status,
             "region_code": profile.region_code, "district_id": profile.district_id}
 
 
@@ -121,8 +123,32 @@ async def upload_photo(file: UploadFile = File(...), user_id: str = Depends(writ
             old.unlink()
     profile.photo_key = name
     profile.status = "pending"
+    if profile.selfie_key:                      # a new photo must be matched with the selfie again
+        profile.selfie_status = "pending"
     db.commit()
     return {"status": profile.status}
+
+
+@router.post("/api/dating/selfie", status_code=201)
+async def upload_selfie(file: UploadFile = File(...), user_id: str = Depends(writer), db: Session = Depends(get_db)):
+    """A photo to confirm it is really you (for example with an open palm next to the face). Only moderators see it;
+    after approval the profile gets the "verified" mark."""
+    data = await file.read(MAX_PHOTO_BYTES + 1)
+    if len(data) > MAX_PHOTO_BYTES:
+        raise HTTPException(413, "Фото больше 5 МБ")
+    kind = detect_image(data)
+    if kind is None:
+        raise HTTPException(400, "Нужна фотография в формате JPEG, PNG или WebP")
+    profile = db.scalar(select(DatingProfile).where(DatingProfile.owner_tg_id == user_id))
+    if profile is None or profile.photo_key is None:
+        raise HTTPException(400, "Сначала заполните анкету и загрузите основное фото")
+    name = f"selfie-{uuid.uuid4().hex}.{kind}"
+    (upload_root() / name).write_bytes(data)
+    if profile.selfie_key and (upload_root() / profile.selfie_key).exists():
+        (upload_root() / profile.selfie_key).unlink()
+    profile.selfie_key, profile.selfie_status = name, "pending"
+    db.commit()
+    return {"selfie_status": profile.selfie_status}
 
 
 @router.get("/api/dating/{profile_id}/photo")
@@ -216,11 +242,24 @@ def _require_admin(key: str | None):
 @router.get("/api/admin/dating")
 def admin_dating(status: str = "pending", actor: str = Depends(staff(*MOD)),
                  db: Session = Depends(get_db)):
-    rows = db.scalars(select(DatingProfile).where(DatingProfile.status == status)
-                      .order_by(DatingProfile.id).limit(100)).all()
+    cond = DatingProfile.status == status
+    if status == "pending":      # a profile that is already public may still wait for its verification
+        cond = or_(cond, DatingProfile.selfie_status == "pending")
+    rows = db.scalars(select(DatingProfile).where(cond).order_by(DatingProfile.id).limit(100)).all()
     return [{"id": p.id, "owner": p.owner_tg_id, "name": p.first_name or "", "age": age_of(p.birth_year), "gender": p.gender,
-             "city": p.city, "bio": p.bio, "has_photo": p.photo_key is not None, "status": p.status}
+             "city": p.city, "bio": p.bio, "has_photo": p.photo_key is not None, "status": p.status,
+             "has_selfie": p.selfie_key is not None, "selfie_status": p.selfie_status}
             for p in rows]
+
+
+@router.get("/api/admin/dating/{profile_id}/selfie")
+def admin_selfie(profile_id: int, actor: str = Depends(staff(*MOD)), db: Session = Depends(get_db)):
+    profile = db.get(DatingProfile, profile_id)
+    if profile is None or not profile.selfie_key:
+        raise HTTPException(404, "Фото-подтверждения нет")
+    log_action(db, actor, "dating.view_selfie", "dating", profile_id, "")
+    db.commit()
+    return FileResponse(upload_root() / profile.selfie_key, headers={"Cache-Control": "no-store"})
 
 
 @router.get("/api/admin/dating/{profile_id}/photo")

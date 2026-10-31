@@ -337,7 +337,16 @@ document.addEventListener("click", (e) => {
   else if (tg?.openLink) tg.openLink(link);
   else window.open(link, "_blank", "noopener");
 });
+let bannerChecked = false;
+async function useBannerPhoto() {
+  if (bannerChecked) return;
+  bannerChecked = true;
+  try {   // если в app/static лежит banner.jpg, он ложится на баннер под текст
+    if ((await api("/api/banner-photo", {quiet: true})).exists) $(".hero").classList.add("photo");
+  } catch (e) { /* остаётся рисунок */ }
+}
 async function loadLanding() {
+  useBannerPhoto();
   loadBanners();
   const jobs = $("#freshJobs"), ads = $("#freshAds");
   jobs.innerHTML = '<div class="skeleton" style="width:236px;height:230px"></div><div class="skeleton" style="width:236px;height:230px"></div>';
@@ -905,7 +914,7 @@ async function openMenu(key) {
       ${prefs.kinds.map((k) => `<div class="set-row" style="padding-left:14px"><div>${esc(k.label)}</div>
         <label class="check" style="margin:0"><input type="checkbox" data-kind="${k.key}" ${k.on ? "checked" : ""}></label></div>`).join("")}
       <p class="muted">Все уведомления всегда видны в приложении (колокольчик), даже если в Telegram они выключены.</p>
-      <div class="set-row"><div><b>Язык</b><small>Сейчас доступен русский</small></div><span class="muted">RU</span></div></article>`;
+      <div class="set-row"><div><b>Язык</b><small>Сейчас доступен только русский</small></div><span class="muted">RU</span></div></article>`;
     $("#myVisa").value = me?.visa || "";
     $("#setNotify").checked = Boolean(prefs.master);
     $("#setCity").onclick = openCity;
@@ -1354,6 +1363,7 @@ $("#closeServices").onclick = () => $("#services").classList.add("hidden");
 
 // ---------- знакомства ----------
 let datingMode = "feed";
+let pendingSelfie = null;
 async function loadDating() {
   const box = $("#datingList");
   box.innerHTML = '<div class="skeleton"></div>';
@@ -1375,7 +1385,7 @@ async function loadDating() {
         <img src="${esc(p.photo_url)}" alt="" loading="lazy">
         <button class="dh" data-act="like" aria-label="Нравится">♡</button>
         <button class="dr" data-act="dreport" aria-label="Пожаловаться">⚑</button>
-        <div class="dinfo"><b>${p.name ? esc(p.name) + ", " : ""}${p.age}${p.name ? "" : " лет"}</b><span>📍 ${esc(p.city)}</span></div>
+        <div class="dinfo"><b>${p.name ? esc(p.name) + ", " : ""}${p.age}${p.name ? "" : " лет"}${p.verified ? " ✔" : ""}</b><span>📍 ${esc(p.city)}</span></div>
       </article>`).join("")
       : `<div class="empty">${datingMode === "likes" ? "Пока никто не лайкнул. Загляните позже." : "Анкет по этим условиям нет. Измените возраст или регион."}</div>`;
   } catch (e) { box.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
@@ -1416,6 +1426,7 @@ $("#datingForm").onsubmit = async (e) => {
       birth_year: Number(f.birth_year.value), gender: f.gender.value, region_code: f.region_code.value,
       district_id: f.district_id.value ? Number(f.district_id.value) : null, bio: f.bio.value.trim(),
       first_name: f.first_name.value.trim()})});
+    if (f.selfie.files[0]) pendingSelfie = f.selfie.files[0];
     if (f.photo.files[0]) {
       const data = new FormData();
       data.append("file", f.photo.files[0]);
@@ -1423,6 +1434,14 @@ $("#datingForm").onsubmit = async (e) => {
         : {"X-Web-Session": localStorage.getItem("webSession") || ""};
       const r = await fetch("/api/dating/photo", {method: "POST", body: data, headers});
       if (!r.ok) throw new Error((await r.json()).detail || "Не удалось загрузить фото");
+    }
+    if (pendingSelfie) {
+      const data = new FormData();
+      data.append("file", pendingSelfie);
+      const headers = inTelegram ? {"X-Telegram-Init-Data": tg.initData} : {"X-Web-Session": localStorage.getItem("webSession") || ""};
+      const r = await fetch("/api/dating/selfie", {method: "POST", body: data, headers});
+      pendingSelfie = null;
+      if (!r.ok) throw new Error((await r.json()).detail || "Не удалось загрузить фото-подтверждение");
     }
     $("#datingModal").classList.add("hidden");
     toast("Анкета отправлена на проверку");
@@ -1580,7 +1599,7 @@ $("#consentOk").onclick = async () => {
 };
 function showCityChip() { $("#cityChipText").textContent = (me?.city || "Город").split(",")[0]; }
 $("#cityChip").onclick = () => openCity();
-$("#langBtn").onclick = () => toast("Сейчас приложение на русском. Другие языки появятся позже");
+$("#langBtn").onclick = () => toast("Сейчас доступен только русский язык");
 function showBell(n) { $("#bellBadge").textContent = n > 99 ? "99+" : n; $("#bellBadge").hidden = !n; }
 $("#bellBtn").onclick = async () => { if (await requireConsent()) showView("notifs", {push: true}); };
 async function loadNotifs() {
@@ -1706,3 +1725,12 @@ document.addEventListener("click", (e) => {
   if (e.target.classList?.contains("modal") && !e.target.classList.contains("page") && e.target.id !== "consent") closeModal(e.target);
 });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") { const m = modalOpen(); if (m) closeModal(m); } });
+
+// Ссылки на правила открываются во внешнем браузере/окне Telegram, а не заменяют приложение
+document.addEventListener("click", (e) => {
+  const a = e.target.closest("[data-legal]");
+  if (!a) return;
+  e.preventDefault();
+  const url = location.origin + a.getAttribute("href");
+  if (tg?.openLink) tg.openLink(url); else window.open(url, "_blank", "noopener");
+});

@@ -204,7 +204,7 @@ def dating_view(db: Session, user_id: int, st: dict) -> View:
     p = items[st["idx"]]
     profile = db.get(DatingProfile, p["id"])
     path = Path(settings.upload_dir) / profile.photo_key if profile and profile.photo_key else None
-    who = f"{p['name']}, {p['age']}" if p.get("name") else f"{p['age']} лет"
+    who = (f"{p['name']}, {p['age']}" if p.get("name") else f"{p['age']} лет") + (" ✔" if p.get("verified") else "")
     text = f"💗 {who} · {'девушка' if p['gender'] == 'f' else 'парень'}\n📍 {p['city']}\n\n{p['bio']}"
     if st.get("mode") == "likes":
         text = "💌 Вас лайкнули. Нажмите «Нравится», чтобы ответить взаимностью.\n\n" + text
