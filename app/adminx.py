@@ -66,6 +66,28 @@ def bulk(payload: BulkIn, actor: str = Depends(staff(*MOD)), db: Session = Depen
     return {"done": done, "failed": failed}
 
 
+# ---------- listings by section (not only the queue) ----------
+
+@router.get("/api/admin/listing-list")
+def listing_list(category: str | None = None, status: str | None = None, q: str = Query(default="", max_length=60),
+                 limit: int = Query(default=30, ge=1, le=100), offset: int = Query(default=0, ge=0, le=10000),
+                 actor: str = Depends(staff(*MOD)), db: Session = Depends(get_db)):
+    """Any listings of one section with a status, for looking things up and hiding or restoring them."""
+    from app import catalog
+    stmt = select(Listing)
+    if category:
+        stmt = stmt.where(Listing.category == category)
+    if status:
+        stmt = stmt.where(Listing.status == status)
+    for word in q.lower().split()[:4]:
+        stmt = stmt.where(Listing.search_text.like(catalog._like(word), escape="\\"))
+    total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+    rows = list(db.scalars(stmt.order_by(Listing.id.desc()).limit(limit).offset(offset)).all())
+    shown = catalog.with_promo(db, rows, owner=True)
+    return {"total": total, "items": [{**o.model_dump(mode="json"), "pending_changes": x.pending_changes,
+                                       "author_id": x.author_telegram_id} for o, x in zip(shown, rows)]}
+
+
 # ---------- content: articles and groups ----------
 
 class ArticleNew(BaseModel):
@@ -187,8 +209,7 @@ def admin_banners(actor: str = Depends(staff(*ADM)), db: Session = Depends(get_d
     return [banner_view(b) for b in db.scalars(select(Banner).order_by(Banner.id.desc()).limit(50)).all()]
 
 
-@router.post("/api/admin/banners", status_code=201)
-def add_banner(payload: BannerIn, actor: str = Depends(staff(*ADM)), db: Session = Depends(get_db)):
+def create_banner(db: Session, actor: str, payload: BannerIn) -> dict:
     if payload.link and not (payload.link.startswith("https://") or payload.link.startswith("/?")):
         raise HTTPException(400, "Ссылка должна начинаться с https:// или /?")
     b = Banner(text=payload.text.strip(), link=payload.link.strip(), starts_at=now(),
@@ -197,6 +218,11 @@ def add_banner(payload: BannerIn, actor: str = Depends(staff(*ADM)), db: Session
     log_action(db, actor, "banner.create", "banner", payload.text[:40], payload.link)
     db.commit()
     return banner_view(b)
+
+
+@router.post("/api/admin/banners", status_code=201)
+def add_banner(payload: BannerIn, actor: str = Depends(staff(*ADM)), db: Session = Depends(get_db)):
+    return create_banner(db, actor, payload)
 
 
 @router.put("/api/admin/banners/{banner_id}/toggle")

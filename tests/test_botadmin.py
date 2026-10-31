@@ -104,7 +104,7 @@ def test_approving_moves_to_next_listing(db):
 
 def test_reject_needs_reason_then_notifies_author_with_it(db):
     item = listing(db)
-    ask = press(db, MODERATOR, "L", "no", str(item.id))
+    ask = press(db, MODERATOR, "L", "nox", str(item.id))
     assert ask.state == {"kind": "listing_no", "id": item.id}
     assert ba.PENDING_INPUT[MODERATOR]["kind"] == "listing_no"
     too_short = ba.handle_text(db, MODERATOR, "moderator", "no")
@@ -119,7 +119,7 @@ def test_reject_needs_reason_then_notifies_author_with_it(db):
 
 def test_return_for_fix_sets_status_and_comment(db):
     item = listing(db)
-    press(db, MODERATOR, "L", "fix", str(item.id))
+    press(db, MODERATOR, "L", "fixx", str(item.id))
     ba.handle_text(db, MODERATOR, "moderator", "Добавьте цену")
     db.refresh(item)
     assert item.status == "needs_fix" and item.note == "Добавьте цену"
@@ -131,7 +131,7 @@ def test_text_without_question_is_ignored(db):
 
 def test_cancel_clears_waiting(db):
     item = listing(db)
-    press(db, MODERATOR, "L", "no", str(item.id))
+    press(db, MODERATOR, "L", "nox", str(item.id))
     ba.PENDING_INPUT.pop(MODERATOR)
     assert ba.handle_text(db, MODERATOR, "moderator", "причина") is None
     db.refresh(item)
@@ -332,7 +332,7 @@ def test_rejecting_an_edit_keeps_the_published_listing(db):
     item = listing(db, status="approved", title="Диван")
     lifecycle.edit(db, item, {"title": "Подозрительное"})
     db.commit()
-    press(db, MODERATOR, "L", "no", str(item.id))
+    press(db, MODERATOR, "L", "nox", str(item.id))
     done = ba.handle_text(db, MODERATOR, "moderator", "Лишнее слово")
     db.refresh(item)
     assert item.status == "approved" and item.title == "Диван" and item.note == "Лишнее слово"

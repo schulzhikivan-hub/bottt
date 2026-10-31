@@ -261,3 +261,16 @@ def test_report_context_shows_only_the_reported_conversation(client):
     assert ctx["messages"][0]["from"] == "reporter"
     assert "Чужая" not in str(ctx)                                               # a third person's chat is not exposed
     assert any(x["action"] == "report.view_context" for x in client.get("/api/admin/audit", headers=SUPER).json())
+
+
+def test_listing_list_by_section_status_and_search(client):
+    mod = staff_headers("802", "moderator")
+    a = post_listing(client, title="Диван красный")
+    b = post_listing(client, title="Работа повар", category="job")
+    client.post(f"/api/admin/listings/{a}/approve", headers=SUPER)
+    r = client.get("/api/admin/listing-list", params={"category": "marketplace"}, headers=mod).json()
+    assert r["total"] == 1 and r["items"][0]["id"] == a and r["items"][0]["author_id"] == "1"
+    assert client.get("/api/admin/listing-list", params={"status": "pending"}, headers=mod).json()["items"][0]["id"] == b
+    assert client.get("/api/admin/listing-list", params={"q": "диван"}, headers=mod).json()["total"] == 1
+    assert client.get("/api/admin/listing-list", params={"q": "нет такого"}, headers=mod).json()["total"] == 0
+    assert client.get("/api/admin/listing-list", headers=staff_headers("801", "support")).status_code == 403

@@ -11,21 +11,22 @@ from sqlalchemy import select, func, desc
 from sqlalchemy.orm import Session
 
 from app import admin_ops as ops
-from app import lifecycle, payments
+from app import adminx, lifecycle, payments
 from app.fields import LABELS
 from app.photos import photo_root
-from app.admin_auth import MOD, ADM, SUP, ROLES
+from app.admin_auth import MOD, ADM, SUP, SUPPORT, ROLES
 from app.audit import log_action
 from app.dating import age_of, upload_root
-from app.models import (PromoCode, Admin, AuditLog, DatingProfile, Listing, ListingPhoto, Payment, Pricing, Report, User)
+from app.models import (Region, Article, Banner, Broadcast, Group, PromoCode, Admin, AuditLog, DatingProfile, Listing, ListingPhoto, Payment, Pricing, Report, User)
 
 CATEGORY = {"job": "Работа", "housing": "Жильё", "marketplace": "Барахолка"}
 BACK = [("⬅️ В меню", "a:menu")]
 # What each section needs. The menu is open to every staff member.
-LEVEL = {"L": MOD, "D": MOD, "R": MOD, "E": MOD, "U": MOD, "S": ADM, "P": ADM, "C": ADM, "K": ADM, "J": ADM, "T": SUP}
+LEVEL = {"L": MOD, "D": MOD, "R": SUPPORT, "E": MOD, "U": SUPPORT, "N": ADM, "B": ADM, "G": ADM, "W": ADM, "S": ADM, "P": ADM, "C": ADM, "K": ADM, "J": ADM, "T": SUP}
 # A text answer the bot is waiting for from an administrator: {admin_id: {"kind": ..., ...}}
 PENDING_INPUT: dict[int, dict] = {}
-INPUT_LEVEL = {"listing_hide": MOD, "find_listing": MOD, "listing_fix": MOD, "listing_no": MOD, "find_user": MOD, "block": MOD, "unblock": MOD,
+INPUT_LEVEL = {"listing_hide": MOD, "find_listing": MOD, "listing_fix": MOD, "listing_no": MOD, "find_user": SUPPORT, "block": SUPPORT, "unblock": SUPPORT,
+               "bc_text": ADM, "banner_new": ADM, "group_link": ADM, "group_members": ADM, "article_src": ADM,
                "price": ADM, "promo_new": ADM, "add_staff": SUP}
 
 
@@ -56,6 +57,9 @@ def _short(text: str, limit: int) -> str:
 # ---------- views ----------
 
 def menu(db: Session, role: str) -> Reply:
+    if role == "support":
+        rows = [[(f"🚩 Жалобы ({_count(db, Report, Report.status == 'new')})", "a:R"), ("👥 Пользователи", "a:U")]]
+        return Reply("🛠 Поддержка KOREA HUB\nВам доступны жалобы, пользователи и блокировки.", rows)
     rows = [
         [(f"📋 Объявления ({_count(db, Listing, ops.queue_condition())})", "a:L"),
          (f"💗 Анкеты ({_count(db, DatingProfile, DatingProfile.status == 'pending')})", "a:D")],
@@ -64,7 +68,9 @@ def menu(db: Session, role: str) -> Reply:
         [("👥 Пользователи", "a:U"), ("🔎 Найти объявление", "a:L:find")],
     ]
     if role in ADM:
-        rows += [[("📊 Статистика", "a:S"), ("💳 Платежи", "a:P")], [("💰 Цены", "a:C"), ("🎟 Промокоды", "a:K")], [("📜 Журнал", "a:J")]]
+        rows += [[("📊 Статистика", "a:S"), ("📈 За 30 дней", "a:N")], [("💳 Платежи", "a:P"), ("💰 Цены", "a:C")],
+                 [("🎟 Промокоды", "a:K"), ("📣 Рассылка", "a:B")], [("🖼 Баннеры", "a:W"), ("📚 Группы и гид", "a:G")],
+                 [("📜 Журнал", "a:J")]]
     if role in SUP:
         rows.append([("🧑‍💼 Сотрудники", "a:T")])
     return Reply("🛠 Админ-панель KOREA HUB\nВаша роль: " + role + "\nВыберите раздел:", rows)
@@ -154,6 +160,18 @@ def listing_card(db: Session, listing_id: int, header: str = "") -> Reply:
     return Reply(text, rows, photo=_listing_photo(item, db))
 
 
+def _listing_decision(db: Session, actor: str, listing_id: int, decision: str, reason: str) -> Reply:
+    """Return for fixes or reject (an edit of a published listing only drops the edit), tell the author, show the next one."""
+    before = db.get(Listing, listing_id)
+    was_edit = bool(before and before.status == "approved" and before.has_edit)
+    item = ops.moderate_listing(db, actor, listing_id, decision, reason)
+    word = ("правка отклонена, объявление осталось опубликованным" if was_edit
+            else "нужно исправить" if decision == "needs_fix" else "отклонено")
+    reply = listing_queue(db, f"{'✏️ Возвращено на доработку' if decision == 'needs_fix' else '❌ Отклонено'}: #{item.id}\n\n")
+    reply.notify.append((item.author_telegram_id, f"Объявление «{_short(item.title, 60)}»: {word}.\nКомментарий: {item.note}"))
+    return reply
+
+
 def listing_queue(db: Session, header: str = "") -> Reply:
     item = db.scalar(select(Listing).where(ops.queue_condition()).order_by(Listing.id).limit(1))
     waiting = _count(db, Listing, ops.queue_condition())
@@ -225,6 +243,10 @@ def user_card(db: Session, tg_id: str) -> Reply:
             f"Объявлений: {listings} · жалоб на него: {reports} · оплат: {paid}\n"
             f"Статус: {'🚫 заблокирован — ' + (user.block_reason or 'без причины') if user.blocked else 'активен'}"
             + ("\nАккаунт удалён" if user.deleted_at else ""))
+    act = adminx.user_activity(db, tg_id)
+    searches = "; ".join(f"{s['name']}" for s in act["saved_searches"][:3]) or "нет"
+    text += (f"\nОтклики: {act['applications_total']}" + (f" ({', '.join(f'{k}: {v}' for k, v in act['applications'].items())})" if act["applications"] else "")
+             + f"\nПоиски под наблюдением: {len(act['saved_searches'])} ({searches})\nЖалоб подано: {act['reports_made']}")
     action = ("✅ Разблокировать", f"a:U:unb:{tg_id}") if user.blocked else ("🚫 Заблокировать", f"a:U:blk:{tg_id}")
     return Reply(text, [[action], BACK])
 
@@ -261,6 +283,55 @@ def promos_view(db: Session, header: str = "") -> Reply:
     buttons = [[(("⏸ " if p.is_active else "▶️ ") + p.code, f"a:K:t:{p.id}")] for p in rows]
     return Reply(header + "🎟 Промокоды\n" + ("\n".join(lines) if lines else "Пока нет промокодов."),
                  [[("➕ Создать", "a:K:new")]] + buttons + [BACK])
+
+
+def analytics_view(db: Session) -> Reply:
+    data = adminx.analytics(db, 30)
+    week = data["days"][-7:]
+    f = data["funnel"]
+    text = ("📈 За 30 дней\n"
+            f"Новых пользователей: {data['totals']['users']} (за 7 дней: {sum(d['users'] for d in week)})\n"
+            f"Новых объявлений: {data['totals']['listings']} (за 7 дней: {sum(d['listings'] for d in week)})\n"
+            f"Откликов: {data['totals']['applications']}\nЗаработано: {data['totals']['stars']} ⭐ (за 7 дней: {sum(d['stars'] for d in week)})\n\n"
+            f"Воронка за всё время: просмотры {f['views']} → чаты {f['chats']} → отклики {f['applications']} → оплаты {f['paid']}\n"
+            + ("\nПо услугам:\n" + "\n".join(f"• {s['service']}: {s['stars']} ⭐" for s in data["stars_by_service"][:5]) if data["stars_by_service"] else ""))
+    return Reply(text, [BACK])
+
+
+def broadcast_preview(db: Session, b: Broadcast, header: str = "") -> Reply:
+    region = db.get(Region, b.region_code).name_ru if b.region_code else "вся Корея"
+    text = f"{header}📣 Рассылка #{b.id}\nКому: {region} — получателей: {b.total}\n\n{b.text}"
+    if b.status == "draft":
+        return Reply(text + "\n\nОтправить?", [[("📤 Отправить", f"a:B:go:{b.id}"), ("❌ Отмена", f"a:B:no:{b.id}")],
+                                              [("📍 Только один регион", f"a:B:rg:{b.id}")], BACK])
+    return Reply(f"{text}\n\nСтатус: {b.status} · отправлено {b.sent}, ошибок {b.failed} из {b.total}",
+                 ([[("⏹ Остановить", f"a:B:no:{b.id}")]] if b.status == "sending" else []) + [[("🔄 Обновить", f"a:B:v:{b.id}")], BACK])
+
+
+def broadcasts_view(db: Session, header: str = "") -> Reply:
+    rows = db.scalars(select(Broadcast).order_by(Broadcast.id.desc()).limit(6)).all()
+    lines = [f"#{b.id} · {b.status} · {b.sent}/{b.total} · {_short(b.text, 40)}" for b in rows]
+    return Reply(header + "📣 Рассылки\n" + ("\n".join(lines) if lines else "Пока не было."),
+                 [[("➕ Новая рассылка", "a:B:new")]] + [[(f"#{b.id} {b.status}", f"a:B:v:{b.id}")] for b in rows] + [BACK])
+
+
+def banners_view(db: Session, header: str = "") -> Reply:
+    rows = db.scalars(select(Banner).order_by(Banner.id.desc()).limit(8)).all()
+    lines = [f"{'🟢' if b.is_active else '⚪️'} #{b.id} {_short(b.text, 50)}" + (f" → {b.link}" if b.link else "") for b in rows]
+    buttons = [[(("⏸ " if b.is_active else "▶️ ") + f"#{b.id}", f"a:W:t:{b.id}"), (f"🗑 #{b.id}", f"a:W:d:{b.id}")] for b in rows]
+    return Reply(header + "🖼 Баннеры на главной (показываются до трёх)\n" + ("\n".join(lines) if lines else "Пока нет."),
+                 [[("➕ Новый баннер", "a:W:new")]] + buttons + [BACK])
+
+
+def content_view(db: Session, header: str = "") -> Reply:
+    groups = db.scalars(select(Group).order_by(Group.id)).all()
+    arts = db.scalars(select(Article).order_by(Article.section, Article.id)).all()
+    glines = [f"{g.flag} {g.name}: {'🔗' if g.telegram_link else 'нет ссылки'} · {g.members_count} уч." for g in groups[:12]]
+    alines = [f"{'🟢' if a.published else '⚪️'} #{a.id} {_short(a.title, 36)}" + ("" if a.source_url else " (нет источника)") for a in arts[:12]]
+    rows = [[(f"🔗 {g.name[:18]}", f"a:G:l:{g.id}"), (f"👥 {g.id}", f"a:G:m:{g.id}")] for g in groups[:12]]
+    rows += [[(("⏸ " if a.published else "✅ ") + f"#{a.id}", f"a:G:p:{a.id}"), (f"📎 источник #{a.id}", f"a:G:s:{a.id}")] for a in arts[:12]]
+    return Reply(header + "📚 Группы сообщества\n" + "\n".join(glines) + "\n\n📘 Статьи гида (текст пишется в веб-админке)\n" + "\n".join(alines),
+                 rows + [BACK])
 
 
 def prices_view(db: Session) -> Reply:
@@ -303,10 +374,21 @@ def _handle(db: Session, admin_id: int, role: str, parts: list[str]) -> Reply:
 
     try:
         if section == "L":
-            if action in ("fix", "no"):
-                return Reply(("Напишите, что исправить (автор это увидит)" if action == "fix"
+            if action in ("fix", "no"):   # first the ready-made reasons, then "write your own"
+                rows = [[(t[:46], f"a:L:{action}t:{arg}:{i}")] for i, (_k, t) in enumerate(adminx.REASON_TEMPLATES)]
+                rows.append([("✍️ Написать свою причину", f"a:L:{action}x:{arg}")])
+                rows.append([("↩ К очереди", "a:L")])
+                return Reply("Выберите причину (автор её увидит):" if action == "no" else "Что нужно исправить (автор это увидит)?", rows)
+            if action in ("fixx", "nox"):
+                return Reply(("Напишите, что исправить (автор это увидит)" if action == "fixx"
                               else "Напишите причину отказа (автор её увидит)") + ", или /cancel:",
-                             state={"kind": f"listing_{action}", "id": int(arg)})
+                             state={"kind": "listing_fix" if action == "fixx" else "listing_no", "id": int(arg)})
+            if action in ("fixt", "not"):
+                idx = int(parts[4]) if len(parts) > 4 and parts[4].isdigit() else -1
+                if not 0 <= idx < len(adminx.REASON_TEMPLATES):
+                    return Reply("", alert="Шаблон не найден")
+                return _listing_decision(db, actor, int(arg), "needs_fix" if action == "fixt" else "reject",
+                                         adminx.REASON_TEMPLATES[idx][1])
             if action == "find":
                 return Reply("Отправьте номер объявления (число) или /cancel:", state={"kind": "find_listing"})
             if action in ("hide", "show"):
@@ -394,6 +476,72 @@ def _handle(db: Session, admin_id: int, role: str, parts: list[str]) -> Reply:
                 log_action(db, actor, "promo.toggle", "promo", promo.code, f"active={promo.is_active}")
                 db.commit()
             return promos_view(db)
+        if section == "N":
+            return analytics_view(db)
+        if section == "B":
+            if action == "new":
+                return Reply("Напишите текст рассылки (до 500 символов) или /cancel.\nСначала я покажу, сколько человек его получит.",
+                             state={"kind": "bc_text"})
+            if action == "v":
+                b = db.get(Broadcast, int(arg))
+                return broadcast_preview(db, b) if b else Reply("", alert="Рассылка не найдена")
+            if action == "rg":
+                regs = db.scalars(select(Region).order_by(Region.sort)).all()
+                rows = [[(r.name_ru, f"a:B:rc:{arg}:{r.code}") for r in regs[i:i + 3]] for i in range(0, len(regs), 3)]
+                rows.append([("🇰🇷 Вся Корея", f"a:B:rc:{arg}:-")])
+                return Reply("Кому отправить?", rows)
+            if action == "rc":
+                b = db.get(Broadcast, int(arg))
+                if b is None or b.status != "draft":
+                    return Reply("", alert="Рассылка уже запущена")
+                code = parts[4] if len(parts) > 4 and parts[4] != "-" else None
+                b.region_code = code
+                b.total = len(adminx.audience(db, code))
+                db.commit()
+                return broadcast_preview(db, b)
+            if action in ("go", "no"):
+                try:
+                    b = (adminx.start_broadcast if action == "go" else adminx.cancel_broadcast)(db, actor, int(arg))
+                except Exception as e:  # HTTPException from the shared function
+                    return Reply("", alert=str(getattr(e, "detail", e)))
+                return broadcast_preview(db, b, "🚀 Рассылка запущена, отправка идёт постепенно\n\n" if action == "go" else "⏹ Остановлено\n\n")
+            return broadcasts_view(db)
+        if section == "W":
+            if action == "new":
+                return Reply("Напишите баннер одной строкой:\nТекст | ссылка (необязательно) | дней показа (необязательно)\n"
+                             "Например: Новые вакансии в Пусане | https://t.me/koreahub | 7\nИли /cancel:", state={"kind": "banner_new"})
+            if action in ("t", "d"):
+                banner = db.get(Banner, int(arg))
+                if banner is None:
+                    return Reply("", alert="Баннер не найден")
+                if action == "t":
+                    banner.is_active = not banner.is_active
+                    log_action(db, actor, "banner.toggle", "banner", banner.id, f"active={banner.is_active}")
+                else:
+                    log_action(db, actor, "banner.delete", "banner", banner.id, banner.text[:40])
+                    db.delete(banner)
+                db.commit()
+            return banners_view(db)
+        if section == "G":
+            if action == "l":
+                return Reply("Отправьте ссылку на группу (https://t.me/…) или /cancel:", state={"kind": "group_link", "id": int(arg)})
+            if action == "m":
+                return Reply("Сколько участников в группе? Число или /cancel:", state={"kind": "group_members", "id": int(arg)})
+            if action == "s":
+                return Reply("Отправьте ссылку на официальный источник статьи (https://…) или /cancel.\nДата проверки поставится сегодняшняя.",
+                             state={"kind": "article_src", "id": int(arg)})
+            if action == "p":
+                art = db.get(Article, int(arg))
+                if art is None:
+                    return Reply("", alert="Статья не найдена")
+                if not art.published and (not art.source_url.startswith("http") or art.checked_at is None):
+                    return Reply("", alert="Сначала укажите источник (кнопка «источник»)")
+                if not art.published and not art.body.strip():
+                    return Reply("", alert="У статьи нет текста: допишите его в веб-админке")
+                art.published = not art.published
+                log_action(db, actor, "article.update", "article", art.id, f"published={art.published}")
+                db.commit()
+            return content_view(db)
         if section == "J":
             return audit_view(db)
         if section == "T":
@@ -424,16 +572,12 @@ def _handle_text(db: Session, admin_id: int, role: str, text: str) -> Reply | No
     kind = state["kind"]
     try:
         if kind in ("listing_fix", "listing_no"):
-            before = db.get(Listing, state["id"])
-            was_edit = bool(before and before.status == "approved" and before.has_edit)
-            item = ops.moderate_listing(db, actor, state["id"], "needs_fix" if kind == "listing_fix" else "reject", text)
-            PENDING_INPUT.pop(admin_id, None)
-            word = ("правка отклонена, объявление осталось опубликованным" if was_edit
-                    else "нужно исправить" if kind == "listing_fix" else "отклонено")
-            reply = listing_queue(db, f"{'✏️ Возвращено на доработку' if kind == 'listing_fix' else '❌ Отклонено'}: #{item.id}\n\n")
-            reply.notify.append((item.author_telegram_id,
-                                 f"Объявление «{_short(item.title, 60)}»: {word}.\nКомментарий: {item.note}"))
-            return reply
+            PENDING_INPUT.pop(admin_id, None)   # (re-asked below if the reason is refused)
+            try:
+                return _listing_decision(db, actor, state["id"], "needs_fix" if kind == "listing_fix" else "reject", text)
+            except ops.OpError:
+                PENDING_INPUT[admin_id] = state
+                raise
         if kind == "promo_new":
             from app import promos
             from fastapi import HTTPException
@@ -454,6 +598,50 @@ def _handle_text(db: Session, admin_id: int, role: str, text: str) -> Reply | No
                 return Reply("Не разобрал. Формат: КОД 20% [лимит] [дней] или КОД 30⭐ [лимит] [дней]. Ещё раз или /cancel.", state=state)
             PENDING_INPUT.pop(admin_id, None)
             return promos_view(db, f"✅ Создан промокод {promo.code}\n\n")
+        if kind == "bc_text":
+            if len(text) < 3 or len(text) > 500:
+                return Reply("Текст должен быть от 3 до 500 символов. Ещё раз или /cancel.", state=state)
+            PENDING_INPUT.pop(admin_id, None)
+            return broadcast_preview(db, adminx.create_broadcast(db, actor, text, None))
+        if kind == "banner_new":
+            from fastapi import HTTPException
+            bits = [x.strip() for x in text.split("|")]
+            try:
+                banner = adminx.create_banner(db, actor, adminx.BannerIn(text=bits[0], link=bits[1] if len(bits) > 1 else "",
+                                                                     days=int(bits[2]) if len(bits) > 2 and bits[2] else None))
+            except HTTPException as e:
+                return Reply(f"{e.detail}. Исправьте и отправьте ещё раз или /cancel.", state=state)
+            except ValueError:
+                return Reply("Не разобрал. Формат: Текст | ссылка | дней. Ещё раз или /cancel.", state=state)
+            PENDING_INPUT.pop(admin_id, None)
+            return banners_view(db, f"✅ Баннер #{banner['id']} добавлен\n\n")
+        if kind == "group_link":
+            group = db.get(Group, state["id"])
+            if group is None or not text.startswith("https://t.me/"):
+                return Reply("Ссылка должна начинаться с https://t.me/. Ещё раз или /cancel.", state=state)
+            group.telegram_link = text
+            log_action(db, actor, "group.update", "group", group.id, text)
+            db.commit()
+            PENDING_INPUT.pop(admin_id, None)
+            return content_view(db, "✅ Ссылка сохранена\n\n")
+        if kind == "group_members":
+            group = db.get(Group, state["id"])
+            if group is None or not text.isdigit():
+                return Reply("Нужно целое число. Ещё раз или /cancel.", state=state)
+            group.members_count = int(text)
+            log_action(db, actor, "group.update", "group", group.id, f"members={text}")
+            db.commit()
+            PENDING_INPUT.pop(admin_id, None)
+            return content_view(db, "✅ Сохранено\n\n")
+        if kind == "article_src":
+            art = db.get(Article, state["id"])
+            if art is None or not text.startswith("https://"):
+                return Reply("Нужна ссылка вида https://… Ещё раз или /cancel.", state=state)
+            art.source_url, art.checked_at = text[:255], payments.now()
+            log_action(db, actor, "article.update", "article", art.id, f"source={text[:80]}")
+            db.commit()
+            PENDING_INPUT.pop(admin_id, None)
+            return content_view(db, "✅ Источник и дата проверки сохранены\n\n")
         if kind == "find_listing":
             if not text.isdigit():
                 return Reply("Номер — это число. Отправьте ещё раз или /cancel.", state=state)

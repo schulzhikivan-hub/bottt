@@ -4,31 +4,63 @@
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
 *{box-sizing:border-box}
-body{font-family:system-ui,sans-serif;margin:0;background:#f4f6fa;color:#1b2430}
-header{background:#0c1f3f;color:#fff;padding:12px 16px;display:flex;justify-content:space-between;align-items:center}
-nav{background:#15315e;display:flex;flex-wrap:wrap;gap:4px;padding:6px}
-nav button{background:transparent;color:#cfd9ee;border:0;padding:8px 10px;border-radius:8px;cursor:pointer;font-size:14px}
-nav button.active{background:#1f6feb;color:#fff}
-main{padding:16px;max-width:980px;margin:0 auto}
-.card{background:#fff;border-radius:12px;padding:14px;margin-bottom:12px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
-.meta{color:#8a94a6;font-size:13px;margin:4px 0 8px}
-button.act{border:0;border-radius:10px;padding:9px 13px;font-size:14px;cursor:pointer;margin:4px 6px 4px 0;color:#fff;background:#1f6feb}
-button.ok{background:#22a45d}button.no{background:#e5484d}button.warn{background:#f5a524;color:#1b2430}button.gray{background:#8a94a6}
-input,select{padding:9px;border:1px solid #e3e8f0;border-radius:10px;font-size:14px}
-.stats{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px}
-.stats div{background:#fff;border-radius:12px;padding:12px}
-.stats b{font-size:22px;display:block}
-.muted{color:#8a94a6;font-size:13px}
-table{width:100%;border-collapse:collapse;background:#fff;border-radius:12px;overflow:hidden}
-td,th{padding:8px;border-bottom:1px solid #eef1f6;text-align:left;font-size:13px;vertical-align:top}
+:root{--side:#0b1b34;--side2:#13294d;--accent:#1f6feb;--bg:#eef2f8;--card:#fff;--text:#1b2430;--hint:#7b8798;--line:#e3e8f0;--ok:#22a45d;--bad:#e5484d;--warn:#f5a524}
+body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;margin:0;background:var(--bg);color:var(--text)}
+.layout{display:flex;min-height:100vh}
+aside{width:230px;flex:none;background:var(--side);color:#cfd9ee;display:flex;flex-direction:column;position:sticky;top:0;height:100vh;overflow-y:auto}
+aside .brand{padding:18px 16px;font-weight:800;color:#fff;font-size:17px;letter-spacing:.4px;border-bottom:1px solid #ffffff14}
+aside .brand small{display:block;font-weight:400;color:#8fa3c7;font-size:12px;margin-top:2px}
+#tabs{display:flex;flex-direction:column;padding:8px}
+#tabs button{display:flex;align-items:center;gap:10px;background:none;color:#cfd9ee;border:0;text-align:left;padding:10px 12px;border-radius:9px;cursor:pointer;font-size:14px}
+#tabs button:hover{background:var(--side2)}
+#tabs button.active{background:var(--accent);color:#fff}
+#tabs button em{margin-left:auto;font-style:normal;background:var(--bad);color:#fff;border-radius:9px;font-size:11px;padding:1px 7px}
+#tabs .sep{font-size:11px;letter-spacing:1px;text-transform:uppercase;color:#6f86ad;padding:12px 12px 4px}
+aside .foot{margin-top:auto;padding:12px 16px;font-size:12px;color:#8fa3c7}
+.content{flex:1;min-width:0}
+header.top{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:14px 22px;background:var(--card);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5}
+header.top h1{margin:0;font-size:18px}
+main{padding:20px 22px;max-width:1100px}
+.card{background:var(--card);border-radius:14px;padding:16px;margin-bottom:14px;box-shadow:0 1px 3px rgba(11,27,52,.06)}
+.card h3{margin:0 0 8px}
+.meta{color:var(--hint);font-size:13px;margin:4px 0 8px}
+button.act{border:0;border-radius:10px;padding:9px 14px;font-size:14px;cursor:pointer;margin:4px 6px 4px 0;color:#fff;background:var(--accent)}
+button.ok{background:var(--ok)}button.no{background:var(--bad)}button.warn{background:var(--warn);color:#1b2430}button.gray{background:#8a94a6}
+input,select,textarea{padding:9px 10px;border:1px solid var(--line);border-radius:10px;font-size:14px;font:inherit;max-width:100%}
+textarea{width:100%}
+.stats{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:12px;margin-bottom:14px}
+.stats div{background:var(--card);border-radius:14px;padding:14px;box-shadow:0 1px 3px rgba(11,27,52,.06)}
+.stats b{font-size:24px;display:block}.stats small{color:var(--hint)}
+.muted{color:var(--hint);font-size:13px}
+table{width:100%;border-collapse:collapse;background:var(--card);border-radius:14px;overflow:hidden}
+td,th{padding:9px 10px;border-bottom:1px solid #eef1f6;text-align:left;font-size:13px;vertical-align:top}
+th{background:#f6f8fc;color:var(--hint);font-weight:600}
 .hidden{display:none !important}
-#login{max-width:420px;margin:40px auto}
+.card select{max-width:240px}
+.bars{display:flex;align-items:flex-end;gap:3px;height:90px;margin:6px 0 2px}
+.bars i{flex:1;background:var(--accent);border-radius:3px 3px 0 0;min-height:2px;opacity:.85}
+.bars i.zero{background:#cfd8e6}
+.funnel{display:flex;gap:8px;flex-wrap:wrap}
+.funnel span{background:#eaf1ff;border-radius:10px;padding:8px 12px;font-size:13px}
+.badge{display:inline-block;font-size:11px;padding:2px 8px;border-radius:9px;background:#eaf1ff;color:#1f4fae}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0}
+.thumbs img{height:84px;border-radius:8px;margin:2px}
+.toolbar{position:sticky;top:57px;background:var(--bg);padding:8px 0;z-index:4;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+#login{max-width:420px;margin:60px auto}
+#status{color:var(--hint);font-size:13px}
+@media(max-width:820px){
+  .layout{flex-direction:column}
+  aside{width:100%;height:auto;position:static;flex-direction:row;align-items:center;overflow-x:auto}
+  aside .brand{border:0;white-space:nowrap}
+  #tabs{flex-direction:row;padding:6px}
+  #tabs button{white-space:nowrap}#tabs .sep,aside .foot{display:none}
+  main{padding:14px}
+  header.top{position:static}
+}
 </style></head>
 <body>
-<header><b>KOREA HUB — админ-панель</b><span><span id="who" class="muted"></span> <button class="act gray" id="logout" hidden>Выйти</button></span></header>
-
 <div id="login" class="card">
-  <h3>Вход в админ-панель</h3>
+  <h3>Вход в админ-панель KOREA HUB</h3>
   <p id="loginHint">Нажмите кнопку: откроется Telegram, подтвердите вход кнопкой «Это я, войти».
   Если вы открыли панель кнопкой в боте, вход произойдёт сам.</p>
   <p><button class="act" id="webLoginBtn">Войти через Telegram</button>
@@ -36,35 +68,16 @@ td,th{padding:8px;border-bottom:1px solid #eef1f6;text-align:left;font-size:13px
   <p class="muted" id="loginError"></p>
 </div>
 
-<div id="app" class="hidden">
-  <nav id="tabs">
-    <button data-tab="dash" class="active">Дашборд</button>
-    <button data-tab="listings">Модерация</button>
-    <button data-tab="dating">Знакомства</button>
-    <button data-tab="reports">Жалобы</button>
-    <button data-tab="users">Пользователи</button>
-    <button data-tab="employers">Работодатели</button>
-    <button data-tab="payments">Платежи</button>
-    <button data-tab="pricing">Цены</button>
-    <button data-tab="audit">Журнал</button>
-    <button data-tab="admins" id="tabAdmins" hidden>Сотрудники</button>
-  </nav>
-  <main>
-    <p class="muted" id="status"></p>
-    <section id="tab-dash"></section>
-    <section id="tab-listings" class="hidden"></section>
-    <section id="tab-dating" class="hidden"></section>
-    <section id="tab-reports" class="hidden"></section>
-    <section id="tab-users" class="hidden">
-      <p><input id="userQuery" placeholder="ID пользователя"> <button class="act" id="userSearch">Найти</button></p>
-      <div id="usersList"></div>
-    </section>
-    <section id="tab-employers" class="hidden"></section>
-    <section id="tab-payments" class="hidden"></section>
-    <section id="tab-pricing" class="hidden"></section>
-    <section id="tab-audit" class="hidden"></section>
-    <section id="tab-admins" class="hidden"></section>
-  </main>
+<div class="layout hidden" id="app">
+  <aside>
+    <div class="brand">KOREA HUB<small>админ-панель</small></div>
+    <nav id="tabs"></nav>
+    <div class="foot"><span id="who"></span><br><button class="act gray" id="logout" hidden>Выйти</button></div>
+  </aside>
+  <div class="content">
+    <header class="top"><h1 id="title">Главная</h1><span id="status"></span></header>
+    <main id="main"></main>
+  </div>
 </div>
 <script src="/static/admin.js"></script>
 </body></html>

@@ -317,7 +317,28 @@ function jobCard(x) {
     <div class="price">${esc(priceText(x))}</div><div class="pills">${bits.join("")}</div>
     <button class="more-btn" data-open-btn>Подробнее</button></div></article>`;
 }
+async function loadBanners() {
+  const box = $("#banners");
+  try {
+    const rows = await api("/api/banners", {quiet: true});
+    box.innerHTML = rows.map((b) => b.link
+      ? `<a href="${esc(b.link)}" data-banner="${esc(b.link)}">📢 ${esc(b.text)}</a>` : `<div>📢 ${esc(b.text)}</div>`).join("");
+    box.hidden = !rows.length;
+  } catch (e) { box.hidden = true; }
+}
+document.addEventListener("click", (e) => {
+  const a = e.target.closest("[data-banner]");
+  if (!a) return;
+  e.preventDefault();
+  const link = a.dataset.banner;
+  const m = link.match(/[?&]listing=(\d+)/);
+  if (m) openDetail(m[1]);
+  else if (tg?.openTelegramLink && link.startsWith("https://t.me/")) tg.openTelegramLink(link);
+  else if (tg?.openLink) tg.openLink(link);
+  else window.open(link, "_blank", "noopener");
+});
 async function loadLanding() {
+  loadBanners();
   const jobs = $("#freshJobs"), ads = $("#freshAds");
   jobs.innerHTML = '<div class="skeleton" style="width:236px;height:230px"></div><div class="skeleton" style="width:236px;height:230px"></div>';
   ads.innerHTML = '<div class="skeleton"></div><div class="skeleton"></div>';
