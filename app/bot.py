@@ -8,7 +8,7 @@ from aiogram.types import (
 )
 from sqlalchemy import select
 
-from app import lifecycle, payments, webauth
+from app import lifecycle, payments, searches, webauth
 from app.botadmin import register_admin
 from app.config import settings
 from app.database import SessionLocal
@@ -281,6 +281,7 @@ def _expire_once() -> list[tuple[str, str]]:
             messages.append((listing.author_telegram_id,
                              f"Срок услуги «{placement.kind}» для #{listing.id} {listing.title} закончился. "
                              "Продлить можно в приложении: Профиль → Мои объявления."))
+        messages.extend(searches.new_matches(db))
         return messages
 
 

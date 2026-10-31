@@ -29,7 +29,7 @@ from app.manage import router as manage_router
 from app.guard import rate_limit, check_text, duplicate_note, notify_user
 from app import admin_ops as ops
 from app import catalog
-from app import photos, applications
+from app import photos, applications, searches
 from app import geo
 from app import fields as listing_fields
 from app.users import get_or_create_user, writer, is_blocked_pair
@@ -53,6 +53,7 @@ app.include_router(webauth_router)
 app.include_router(catalog.router)
 app.include_router(photos.router)
 app.include_router(applications.router)
+app.include_router(searches.router)
 app.include_router(geo.router)
 app.include_router(listing_fields.router)
 STATIC = Path(__file__).parent / "static"

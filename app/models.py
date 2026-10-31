@@ -330,3 +330,14 @@ class Application(Base):
     city: Mapped[str] = mapped_column(String(100), default="")
     status: Mapped[str] = mapped_column(String(12), default="new")  # new, viewed, invited, rejected
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class SavedSearch(Base):
+    """A user's saved filters; the bot messages them when new matching listings are published."""
+    __tablename__ = "saved_searches"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_tg_id: Mapped[str] = mapped_column(String(40), index=True)
+    name: Mapped[str] = mapped_column(String(80), default="")
+    params: Mapped[dict] = mapped_column(JSON, default=dict)
+    last_checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

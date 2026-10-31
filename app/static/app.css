@@ -8,6 +8,7 @@
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{height:100%;margin:0;overflow:hidden;background:var(--bg);color:var(--text);overscroll-behavior:none}
+body{position:fixed;inset:0;width:100%;touch-action:manipulation;-webkit-text-size-adjust:100%}
 [hidden]{display:none !important}
 .hidden{display:none !important}
 button{font:inherit;color:inherit;cursor:pointer}

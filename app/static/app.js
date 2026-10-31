@@ -349,9 +349,7 @@ async function openFilters() {
 }
 $("#filterBtn").onclick = openFilters;
 $("#closeFilters").onclick = () => $("#filters").classList.add("hidden");
-$("#filterForm").onsubmit = (e) => {
-  e.preventDefault();
-  const f = e.target;
+function applyFormToFilters(f) {
   filters.region_code = f.region_code.value; filters.district_id = f.district_id.value;
   filters.price_min = f.price_min.value; filters.price_max = f.price_max.value;
   for (const k of SECTION_FILTERS) {
@@ -360,8 +358,25 @@ $("#filterForm").onsubmit = (e) => {
     const visible = el && !el.closest("[data-for]")?.hidden;
     filters[k] = visible ? (el.type === "checkbox" ? el.checked : el.value) : DEFAULT_FILTERS[k];
   }
+}
+$("#filterForm").onsubmit = (e) => {
+  e.preventDefault();
+  applyFormToFilters(e.target);
   $("#filters").classList.add("hidden");
   reloadCatalog();
+};
+$("#watchBtn").onclick = async () => {
+  const body = {};
+  applyFormToFilters($("#filterForm"));
+  for (const [k, v] of Object.entries(filters)) {
+    if (k === "sort" || v === "" || v === false || v == null) continue;
+    body[k === "region_code" ? "region" : k] = v;
+  }
+  try {
+    if (!(await requireConsent())) return;
+    await api("/api/me/searches", {method: "POST", body: JSON.stringify(body)});
+    toast("Готово: пришлём уведомление о новых объявлениях");
+  } catch (err) { toast(err.message); }
 };
 $("#resetFilters").onclick = () => {
   filters = {...DEFAULT_FILTERS, category: filters.category, q: filters.q, sort: filters.sort};
@@ -605,6 +620,12 @@ async function openMenu(key) {
       <span class="status ${a.status === "invited" ? "approved" : a.status === "rejected" ? "rejected" : "pending"}">${APP_STATUS[a.status] || a.status}</span></div>
       <p class="muted">${esc(fmtDate(a.created_at))}</p></article>`).join("")
       : '<div class="empty">Вы пока не откликались на вакансии</div>';
+  }
+  if (key === "searches") {
+    const rows = await api("/api/me/searches");
+    body.innerHTML = rows.length ? rows.map((s) => `<article class="listing"><h3>${esc(s.name)}</h3>
+      <div class="actions"><button data-delsearch="${s.id}" class="secondary">Не следить</button></div></article>`).join("")
+      : '<div class="empty">Нет сохранённых поисков. Откройте «Фильтры» и нажмите «Следить за этим поиском».</div>';
   }
   if (key === "visa") {
     await loadFields();
@@ -1003,6 +1024,12 @@ document.addEventListener("click", async (e) => {
     catch (err) { toast(err.message); }
     return;
   }
+  const del = e.target.closest("[data-delsearch]");
+  if (del) {
+    try { await api(`/api/me/searches/${del.dataset.delsearch}`, {method: "DELETE"}); openMenu("searches"); }
+    catch (err) { toast(err.message); }
+    return;
+  }
   const st = e.target.closest("[data-appstatus]");
   if (st) {
     try {
@@ -1123,3 +1150,32 @@ loadFavIds().then(() => {
 api("/api/me", {quiet: true})
   .then((user) => { me = user; if (!me.consent) $("#consent").classList.remove("hidden"); })
   .catch(() => { if (!inTelegram) $("#loginTop").hidden = false; });
+
+// ---------- страница не двигается ----------
+// Страница целиком неподвижна: прокручиваются только внутренние области, а когда прокрутка
+// доходит до края, остаток жеста не «тянет» всё приложение (резинка в iOS и сворачивание в Telegram).
+(() => {
+  let startY = 0;
+  const scroller = (el) => {
+    for (; el && el !== document.body; el = el.parentElement) {
+      const o = getComputedStyle(el).overflowY;
+      if ((o === "auto" || o === "scroll") && el.scrollHeight > el.clientHeight) return el;
+    }
+    return null;
+  };
+  document.addEventListener("touchstart", (e) => {
+    startY = e.touches[0].clientY;
+    const el = scroller(e.target);
+    if (!el) return;
+    if (el.scrollTop <= 0) el.scrollTop = 1;
+    else if (el.scrollTop + el.clientHeight >= el.scrollHeight) el.scrollTop = el.scrollHeight - el.clientHeight - 1;
+  }, {passive: true});
+  document.addEventListener("touchmove", (e) => {
+    if (e.touches.length > 1) return;  // щипок оставляем системе
+    if (e.target.closest("textarea, input, select")) return;
+    const el = scroller(e.target);
+    if (!el) { e.preventDefault(); return; }
+    const dy = e.touches[0].clientY - startY;
+    if ((dy > 0 && el.scrollTop <= 0) || (dy < 0 && el.scrollTop + el.clientHeight >= el.scrollHeight)) e.preventDefault();
+  }, {passive: false});
+})();
