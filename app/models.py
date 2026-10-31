@@ -25,6 +25,10 @@ class User(Base):
     contact_person: Mapped[str] = mapped_column(String(80), default="")
     block_reason: Mapped[str] = mapped_column(String(300), default="")
     notify_messages: Mapped[bool] = mapped_column(Boolean, default=True)
+    notify_prefs: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # {"messages": false, ...}; missing = on
+    display_name: Mapped[str] = mapped_column(String(40), default="")
+    avatar_key: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     visa: Mapped[str] = mapped_column(String(8), default="")  # private; used for job filters and applications
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
@@ -174,6 +178,8 @@ class Message(Base):
     conversation_id: Mapped[int] = mapped_column(ForeignKey("conversations.id", ondelete="CASCADE"), index=True)
     sender_tg_id: Mapped[str] = mapped_column(String(40))
     text: Mapped[str] = mapped_column(Text)
+    photo_key: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, index=True)
 
 
@@ -330,6 +336,7 @@ class Application(Base):
     visa: Mapped[str] = mapped_column(String(8), default="")
     city: Mapped[str] = mapped_column(String(100), default="")
     status: Mapped[str] = mapped_column(String(12), default="new")  # new, viewed, invited, rejected, withdrawn
+    name: Mapped[str] = mapped_column(String(40), default="")  # display name of the applicant at that moment
     reply: Mapped[str] = mapped_column(String(500), default="")  # the employer's answer to the applicant
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
@@ -343,3 +350,14 @@ class SavedSearch(Base):
     params: Mapped[dict] = mapped_column(JSON, default=dict)
     last_checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class Notification(Base):
+    """In-app feed: every notice is stored here, and also sent to Telegram when the user allows that kind."""
+    __tablename__ = "notifications"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_tg_id: Mapped[str] = mapped_column(String(40), index=True)
+    kind: Mapped[str] = mapped_column(String(16), default="system")
+    text: Mapped[str] = mapped_column(String(600))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, index=True)
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

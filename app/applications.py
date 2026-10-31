@@ -54,8 +54,9 @@ def apply(listing_id: int, payload: ApplyIn, user_id: str = Depends(writer), db:
     # a withdrawn reply can be sent again: the same row starts over
     row.message, row.contact = payload.message.strip(), payload.contact.strip()
     row.visa, row.city, row.status, row.reply = user.visa or "", user.city or "", "new", ""
+    row.name = user.display_name or ""
     db.commit()
-    guard.notify_user(db, item.author_telegram_id, f"📩 Новый отклик на вакансию «{item.title}». Откройте «Профиль» → «Отклики».")
+    guard.notify_user(db, item.author_telegram_id, f"📩 Новый отклик на вакансию «{item.title}». Откройте «Профиль» → «Мои объявления».", "applications")
     return {"id": row.id, "status": row.status}
 
 
@@ -91,7 +92,7 @@ def listing_applications(listing_id: int, user_id: str = Depends(writer), db: Se
                       .where(Application.listing_id == listing_id, Application.status != "withdrawn",
                              User.blocked.is_(False), User.deleted_at.is_(None))
                       .order_by(Application.id.desc())).all()
-    out = [{"id": a.id, "message": a.message, "contact": a.contact, "visa": a.visa, "city": a.city,
+    out = [{"id": a.id, "name": a.name, "message": a.message, "contact": a.contact, "visa": a.visa, "city": a.city,
             "status": a.status, "reply": a.reply, "created_at": a.created_at} for a in rows]
     for a in rows:  # opening the list marks new ones as seen (the answer shows the state before)
         if a.status == "new":
@@ -115,7 +116,7 @@ def set_status(app_id: int, payload: StatusIn, user_id: str = Depends(writer), d
             "rejected": f"По вакансии «{item.title}» автор выбрал другого кандидата."}[payload.status]
     if row.reply:
         text += f"\nОтвет работодателя: {row.reply}"
-    guard.notify_user(db, row.applicant_tg_id, text)
+    guard.notify_user(db, row.applicant_tg_id, text, "applications")
     return {"id": row.id, "status": row.status}
 
 
@@ -151,5 +152,5 @@ def notify_ended(db: Session, item: Listing, why: str) -> int:
     waiting = db.scalars(select(Application).where(Application.listing_id == item.id,
                                                    Application.status.in_(["new", "viewed", "invited"]))).all()
     for row in waiting:
-        guard.notify_user(db, row.applicant_tg_id, f"Вакансия «{item.title}» {why}.")
+        guard.notify_user(db, row.applicant_tg_id, f"Вакансия «{item.title}» {why}.", "applications")
     return len(waiting)

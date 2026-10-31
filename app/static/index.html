@@ -13,7 +13,7 @@
     <button class="link" id="loginTop" hidden>Войти</button>
     <button class="tchip" id="cityChip" aria-label="Город">📍 <span id="cityChipText">Город</span></button>
     <button class="tchip" id="langBtn" aria-label="Язык">RU</button>
-    <button class="tbell" id="bellBtn" aria-label="Уведомления"><svg viewBox="0 0 24 24"><path d="M6 17V11a6 6 0 0 1 12 0v6l2 2H4zM10 21h4"/></svg></button>
+    <button class="tbell" id="bellBtn" aria-label="Уведомления"><svg viewBox="0 0 24 24"><path d="M6 17V11a6 6 0 0 1 12 0v6l2 2H4zM10 21h4"/></svg><em id="bellBadge" hidden>0</em></button>
   </div>
 </header>
 
@@ -88,13 +88,14 @@
 <section id="view-chat" class="chat-view" hidden>
   <div class="chat-head">
     <button class="link" id="chatBack" aria-label="Назад">←</button>
-    <b id="chatTitle">Чат</b>
+    <b class="chat-name"><span id="chatTitle">Чат</span><span class="chat-sub" id="chatSub"></span></b>
     <button class="link" id="chatBlock">Заблокировать</button>
     <button class="link" id="chatReport" aria-label="Пожаловаться">⚑</button>
   </div>
   <div id="messages" class="messages"></div>
   <form id="chatForm" class="chat-form">
-    <input id="chatInput" maxlength="2000" placeholder="Сообщение" required autocomplete="off">
+    <label class="attach" aria-label="Прикрепить фото">📎<input type="file" id="chatPhoto" accept="image/jpeg,image/png,image/webp" hidden></label>
+    <input id="chatInput" maxlength="2000" placeholder="Сообщение" autocomplete="off">
     <button type="submit" aria-label="Отправить">➤</button>
   </form>
 </section>
@@ -137,6 +138,12 @@
     <button class="wide danger" data-menu="logout" id="logoutItem" hidden><i>⎋</i>Выйти</button>
     <button class="wide danger" data-menu="delete"><i>🗑</i>Удалить аккаунт</button>
   </div>
+</section>
+
+<section id="view-notifs" class="view" hidden>
+  <div class="subhead"><button class="back-btn" data-back aria-label="Назад">←</button><b>Уведомления</b>
+    <button class="link" id="readAll" style="margin-left:auto">Прочитать все</button></div>
+  <div id="notifList" class="listings"></div>
 </section>
 
 <section id="view-mine" class="view" hidden>
@@ -390,10 +397,6 @@
 <label>Сообщение работодателю<textarea name="message" rows="3" maxlength="1000" placeholder="Опыт, когда можете начать"></textarea></label>
 <p class="muted">Работодатель увидит ваш контакт, город и визу из профиля. Telegram ID не передаётся.</p>
 <button class="submit" type="submit">Откликнуться</button></form></div></div>
-
-<div id="notifModal" class="modal hidden"><div class="sheet"><div class="sheet-top"><b>Уведомления</b><button id="closeNotif">✕</button></div>
-<label class="check"><input type="checkbox" id="notifToggle"> Присылать уведомления в Telegram</label>
-<p class="muted">О новых сообщениях, откликах, решениях модератора и новых объявлениях по вашим сохранённым поискам.</p></div></div>
 
 <div id="employerModal" class="modal hidden"><div class="sheet"><div class="sheet-top"><b>Заявка работодателя</b><button id="closeEmployer">✕</button></div>
 <form id="employerForm"><label>Название компании<input name="company_name" required minlength="2" maxlength="160"></label>

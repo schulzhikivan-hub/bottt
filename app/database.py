@@ -52,6 +52,13 @@ def migrate() -> None:
             conn.execute(text(f"ALTER TABLE listings ADD COLUMN IF NOT EXISTS {column}"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_listings_expires_at ON listings (expires_at)"))
         conn.execute(text("ALTER TABLE applications ADD COLUMN IF NOT EXISTS reply VARCHAR(500) DEFAULT ''"))
+        conn.execute(text("ALTER TABLE applications ADD COLUMN IF NOT EXISTS name VARCHAR(40) DEFAULT ''"))
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS notify_prefs JSON"))
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS display_name VARCHAR(40) DEFAULT ''"))
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_key VARCHAR(40)"))
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ"))
+        conn.execute(text("ALTER TABLE messages ADD COLUMN IF NOT EXISTS photo_key VARCHAR(40)"))
+        conn.execute(text("ALTER TABLE messages ADD COLUMN IF NOT EXISTS read_at TIMESTAMPTZ"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_listings_has_edit ON listings (has_edit)"))
         # Listings published before expiry dates existed get 30 days from now
         conn.execute(text("UPDATE listings SET expires_at = NOW() + INTERVAL '30 days', published_at = created_at "

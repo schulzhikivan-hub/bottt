@@ -1,7 +1,9 @@
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from fastapi import FastAPI, Depends, HTTPException, Header, Query
+import uuid
+
+from fastapi import FastAPI, Depends, File, HTTPException, Header, Query, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -29,7 +31,7 @@ from app.manage import router as manage_router
 from app.guard import rate_limit, check_text, duplicate_note, notify_user
 from app import admin_ops as ops
 from app import catalog
-from app import photos, applications, searches
+from app import photos, applications, searches, inbox
 from app import geo
 from app import fields as listing_fields
 from app.users import get_or_create_user, writer, is_blocked_pair
@@ -54,6 +56,7 @@ app.include_router(catalog.router)
 app.include_router(photos.router)
 app.include_router(applications.router)
 app.include_router(searches.router)
+app.include_router(inbox.router)
 app.include_router(geo.router)
 app.include_router(listing_fields.router)
 STATIC = Path(__file__).parent / "static"
@@ -100,11 +103,14 @@ class ConsentIn(BaseModel):
 @app.get("/api/me")
 def me(user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
     user = get_or_create_user(db, user_id)
+    inbox.touch(db, user_id)
     return {"tg_id": user.tg_id, "consent": user.consent_at is not None, "city": user.city,
             "region_code": user.region_code, "district_id": user.district_id,
             "language": "ru", "blocked": user.blocked, "block_reason": user.block_reason,
             "employer_status": user.employer_status, "company_name": user.company_name, "visa": user.visa,
-            "notify_messages": user.notify_messages}
+            "notify_messages": user.notify_messages, "display_name": user.display_name,
+            "avatar": photos.url(user.avatar_key) if user.avatar_key else None,
+            "unread": inbox.unread_count(db, user_id)}
 
 
 @app.post("/api/me/consent")
@@ -242,7 +248,8 @@ def create_report(payload: ReportIn, user_id: str = Depends(writer), db: Session
             listing.note = "Скрыто по жалобам пользователей, пока модератор проверяет"
             db.commit()
             notify_user(db, listing.author_telegram_id,
-                        f"Объявление «{listing.title}» временно скрыто: на него пожаловались несколько человек. Модератор проверит его.")
+                        f"Объявление «{listing.title}» временно скрыто: на него пожаловались несколько человек. Модератор проверит его.",
+                        "moderation")
     return {"received": True}
 
 
@@ -386,26 +393,47 @@ def my_conversations(user_id: str = Depends(current_user_id), db: Session = Depe
             listing_id=conv.listing_id,
             listing_title=("Знакомство" if conv.match_key else
                            (listing.title if listing else "Объявление удалено")),
-            last_text=last.text if last else "",
+            last_text=(last.text or "📷 Фото") if last else "",
             last_at=last.created_at if last else None,
+            unread=db.scalar(select(func.count()).select_from(Message).where(
+                Message.conversation_id == conv.id, Message.sender_tg_id != user_id, Message.read_at.is_(None))) or 0,
         ))
     epoch = datetime.min.replace(tzinfo=timezone.utc)
     out.sort(key=lambda c: aware(c.last_at) if c.last_at else epoch, reverse=True)
     return out
 
 
+def _msg_out(m: Message, user_id: str) -> MessageOut:
+    return MessageOut(id=m.id, mine=m.sender_tg_id == user_id, text=m.text, created_at=m.created_at,
+                      read=m.read_at is not None, photo=photos.url(m.photo_key) if m.photo_key else None)
+
+
 @app.get("/api/conversations/{conv_id}/messages", response_model=list[MessageOut])
 def get_messages(conv_id: int, before_id: int | None = Query(default=None, ge=1),
                  limit: int = Query(default=100, ge=1, le=100),
                  user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
-    """Latest messages; pass before_id (the oldest id on screen) to load earlier ones."""
+    """Latest messages; pass before_id (the oldest id on screen) to load earlier ones. Opening the chat marks
+    the other person's messages as read."""
     _get_conversation_for(db, conv_id, user_id)
+    inbox.touch(db, user_id)
     stmt = select(Message).where(Message.conversation_id == conv_id)
     if before_id is not None:
         stmt = stmt.where(Message.id < before_id)
     msgs = db.scalars(stmt.order_by(desc(Message.id)).limit(limit)).all()
-    return [MessageOut(id=m.id, mine=m.sender_tg_id == user_id, text=m.text, created_at=m.created_at)
-            for m in reversed(msgs)]
+    unread = [m for m in msgs if m.sender_tg_id != user_id and m.read_at is None]
+    for m in unread:
+        m.read_at = now()
+    if unread:
+        db.commit()
+    return [_msg_out(m, user_id) for m in reversed(msgs)]
+
+
+@app.get("/api/conversations/{conv_id}/status")
+def chat_status(conv_id: int, user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
+    """Roughly whether the other person is around: online / recently / nothing. Never an exact time."""
+    conv = _get_conversation_for(db, conv_id, user_id)
+    other = conv.seller_tg_id if conv.buyer_tg_id == user_id else conv.buyer_tg_id
+    return {"status": inbox.coarse_status(db.get(User, other))}
 
 
 @app.post("/api/conversations/{conv_id}/messages", response_model=MessageOut, status_code=201)
@@ -424,8 +452,34 @@ def send_message(conv_id: int, payload: MessageIn, user_id: str = Depends(writer
     db.add(msg)
     db.commit()
     db.refresh(msg)
-    notify_user(db, other, f"Новое сообщение в KOREA HUB:\n{text[:200]}")
-    return MessageOut(id=msg.id, mine=True, text=msg.text, created_at=msg.created_at)
+    inbox.touch(db, user_id)
+    notify_user(db, other, f"Новое сообщение в KOREA HUB:\n{text[:200]}", "messages")
+    return _msg_out(msg, user_id)
+
+
+@app.post("/api/conversations/{conv_id}/photo", response_model=MessageOut, status_code=201)
+async def send_chat_photo(conv_id: int, file: UploadFile = File(...), user_id: str = Depends(writer),
+                          db: Session = Depends(get_db)):
+    """A picture in the chat. Re-encoded like listing photos (no EXIF, no GPS); the link is an unguessable key."""
+    conv = _get_conversation_for(db, conv_id, user_id)
+    other = conv.seller_tg_id if conv.buyer_tg_id == user_id else conv.buyer_tg_id
+    other_user = db.get(User, other)
+    if is_blocked_pair(db, user_id, other) or (other_user is not None and (other_user.blocked or other_user.deleted_at)):
+        raise HTTPException(403, "Диалог недоступен")
+    rate_limit(user_id, "chat_photo", 20, 600)
+    data = await file.read(photos.MAX_UPLOAD_BYTES + 1)
+    if len(data) > photos.MAX_UPLOAD_BYTES:
+        raise HTTPException(413, "Фото больше 8 МБ")
+    full, thumb = photos.process_image(data)
+    key = uuid.uuid4().hex
+    (photos.photo_root() / f"{key}.jpg").write_bytes(full)
+    (photos.photo_root() / f"{key}_t.jpg").write_bytes(thumb)
+    msg = Message(conversation_id=conv_id, sender_tg_id=user_id, text="", photo_key=key)
+    db.add(msg)
+    db.commit()
+    db.refresh(msg)
+    notify_user(db, other, "Новое сообщение в KOREA HUB: 📷 фото", "messages")
+    return _msg_out(msg, user_id)
 
 
 def _other_party(conv: Conversation, user_id: str) -> str:

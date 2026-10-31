@@ -90,7 +90,7 @@ def new_matches(db: Session) -> list[tuple[str, str]]:
         since = aware(row.last_checked_at)
         row.last_checked_at = now()
         user = db.get(User, row.user_tg_id)
-        if user is None or user.blocked or user.deleted_at is not None or not user.notify_messages:
+        if user is None or user.blocked or user.deleted_at is not None:
             continue
         items, _ = catalog.search(db, limit=50, **row.params)
         fresh = [x for x in items if x.published_at and aware(x.published_at) > since

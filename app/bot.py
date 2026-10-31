@@ -8,7 +8,7 @@ from aiogram.types import (
 )
 from sqlalchemy import select
 
-from app import lifecycle, payments, searches, webauth
+from app import guard, lifecycle, payments, searches, webauth
 from app.botadmin import register_admin
 from app.botbrowse import register_browse
 from app.config import settings
@@ -267,7 +267,7 @@ async def notify_author(bot: Bot, item: Listing, text: str) -> None:
 def _expire_once() -> list[tuple[str, str]]:
     """End finished placements and listings, warn about listings ending soon. Returns (user_id, message) pairs."""
     with SessionLocal() as db:
-        messages = []
+        messages = []  # (user, text, kind)
         for item in lifecycle.expiring_soon(db):
             messages.append((item.author_telegram_id,
                              f"Объявление «{item.title}» закончится через несколько дней. "
@@ -275,15 +275,15 @@ def _expire_once() -> list[tuple[str, str]]:
         for item in lifecycle.expiring_tomorrow(db):
             messages.append((item.author_telegram_id,
                              f"Завтра закончится срок объявления «{item.title}». Продлить можно в один шаг: "
-                             "Профиль → Мои объявления → Продлить."))
+                             "Профиль → Мои объявления → Продлить.", "expiry"))
         for item in lifecycle.expire_listings(db):
             messages.append((item.author_telegram_id,
                              f"Срок объявления «{item.title}» истёк, его больше не видно в поиске. "
-                             "Продлить можно в приложении: Профиль → Мои объявления."))
+                             "Продлить можно в приложении: Профиль → Мои объявления.", "expiry"))
             if item.category == "job":
                 for row in db.scalars(select(Application).where(Application.listing_id == item.id,
                                                                 Application.status.in_(["new", "viewed", "invited"]))).all():
-                    messages.append((row.applicant_tg_id, f"Вакансия «{item.title}» закрыта: срок объявления истёк."))
+                    messages.append((row.applicant_tg_id, f"Вакансия «{item.title}» закрыта: срок объявления истёк.", "applications"))
         ended = payments.expire_placements(db)
         for placement in ended:
             listing = db.get(Listing, placement.listing_id)
@@ -291,9 +291,15 @@ def _expire_once() -> list[tuple[str, str]]:
                 continue
             messages.append((listing.author_telegram_id,
                              f"Срок услуги «{placement.kind}» для #{listing.id} {listing.title} закончился. "
-                             "Продлить можно в приложении: Профиль → Мои объявления."))
-        messages.extend(searches.new_matches(db))
-        return messages
+                             "Продлить можно в приложении: Профиль → Мои объявления.", "payments"))
+        messages.extend((tg, text, "searches") for tg, text in searches.new_matches(db))
+        # every notice goes to the in-app feed; Telegram only gets what the user allows
+        out = []
+        for tg, text, kind in messages:
+            guard.record_notification(db, tg, text, kind)
+            if guard.telegram_allowed(db, tg, kind):
+                out.append((tg, text))
+        return out
 
 
 async def expiry_loop(bot: Bot) -> None:

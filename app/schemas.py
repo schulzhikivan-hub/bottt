@@ -104,6 +104,8 @@ class MessageOut(BaseModel):
     mine: bool
     text: str
     created_at: datetime
+    read: bool = False          # my message that the other person has opened
+    photo: str | None = None    # picture sent in the chat
 
 
 class ConversationOut(BaseModel):
@@ -112,3 +114,4 @@ class ConversationOut(BaseModel):
     listing_title: str
     last_text: str
     last_at: datetime | None
+    unread: int = 0

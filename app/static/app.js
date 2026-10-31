@@ -19,7 +19,7 @@ const SECTIONS = {visas: "Визы и документы", registration: "Рег
 const PROMO = {pin: "📌 Закреплено", vip: "VIP", bump: "⬆ Поднято", highlight: "★ Выделено"};
 const NAV_VIEWS = ["home", "saved", "chats", "profile"];
 const MAIN_VIEWS = [...NAV_VIEWS, "dating", "community", "guide"];
-const ALL_VIEWS = [...MAIN_VIEWS, "detail", "chat", "article", "mine", "sub"];
+const ALL_VIEWS = [...MAIN_VIEWS, "detail", "chat", "article", "mine", "sub", "notifs"];
 
 let currentChat = null;
 let chatTimer = null;
@@ -130,7 +130,7 @@ function showView(name, opts = {}) {
   currentView = name;
   for (const v of ALL_VIEWS) { const el = $("#view-" + v); if (el) el.hidden = v !== name; }
   box.classList.toggle("fill", name === "chat");
-  const parent = ["detail", "article", "mine", "sub"].includes(name) ? backStack[backStack.length - 1] : name;
+  const parent = ["detail", "article", "mine", "sub", "notifs"].includes(name) ? backStack[backStack.length - 1] : name;
   const navName = name === "chat" ? "chats" : (NAV_VIEWS.includes(parent) ? parent : "");
   document.querySelectorAll(".bottom [data-view]").forEach((b) => b.classList.toggle("active", b.dataset.view === navName));
   if (name !== "chat") clearInterval(chatTimer);
@@ -139,6 +139,7 @@ function showView(name, opts = {}) {
   if (name === "saved") loadFavorites();
   if (name === "chats") loadConversations();
   if (name === "profile" || name === "mine") loadProfile();
+  if (name === "notifs") loadNotifs();
   if (name === "community") loadGroups();
   if (name === "guide") loadGuide();
   if (name === "dating") loadDating();
@@ -570,7 +571,7 @@ async function loadConversations() {
     const items = await api("/api/conversations");
     box.innerHTML = items.length ? items.map((c) => `
       <article class="listing convo" data-chat="${c.id}" data-title="${esc(c.listing_title)}">
-        <h3>${esc(c.listing_title)}</h3><p>${esc(c.last_text || "Нет сообщений")}</p></article>`).join("")
+        <h3>${esc(c.listing_title)}${c.unread ? `<span class="unread-dot">${c.unread}</span>` : ""}</h3><p>${esc(c.last_text || "Нет сообщений")}</p></article>`).join("")
       : '<div class="empty">Переписок пока нет. Откройте объявление и нажмите «Написать».</div>';
   } catch (e) { box.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
 }
@@ -578,13 +579,15 @@ async function openChat(id, title) {
   currentChat = id;
   lastMessageKey = ""; olderMessages = []; hasOlder = false;
   $("#chatTitle").textContent = title || "Чат";
+  $("#chatSub").textContent = "";
   showView("chat", {push: true});
   await loadMessages();
+  loadChatStatus();
   clearInterval(chatTimer);
   chatTimer = setInterval(loadMessages, 5000);
 }
 const msgHtml = (m) => `
-      <div class="bubble ${m.mine ? "mine" : ""}">${esc(m.text)}<small>${new Date(m.created_at).toLocaleTimeString("ru-RU", {hour: "2-digit", minute: "2-digit"})}</small></div>`;
+      <div class="bubble ${m.mine ? "mine" : ""}">${m.photo ? `<a href="${esc(m.photo)}" target="_blank" rel="noopener"><img class="chatpic" src="${esc(m.photo)}" alt="" loading="lazy"></a>` : ""}${esc(m.text)}<small>${new Date(m.created_at).toLocaleTimeString("ru-RU", {hour: "2-digit", minute: "2-digit"})}${m.mine ? `<span class="ticks ${m.read ? "read" : ""}">${m.read ? "✓✓" : "✓"}</span>` : ""}</small></div>`;
 function renderMessages(items, stick) {
   const all = [...olderMessages, ...items];
   const box = $("#messages");
@@ -597,7 +600,7 @@ async function loadMessages() {
   if (!currentChat) return;
   try {
     const items = await api(`/api/conversations/${currentChat}/messages?limit=50`);
-    const key = items.length + ":" + (items[items.length - 1]?.id || 0);
+    const key = items.length + ":" + (items[items.length - 1]?.id || 0) + ":" + items.filter((m) => m.read).length;
     if (key === lastMessageKey) return;  // ничего нового: не перерисовываем, экран не дёргается
     if (lastMessageKey === "") hasOlder = items.length === 50;
     lastMessageKey = key;
@@ -631,6 +634,26 @@ $("#chatReport").onclick = async () => {
     toast("Жалоба отправлена. Спасибо!");
   } catch (err) { toast(err.message); }
 };
+$("#chatPhoto").onchange = async (e) => {
+  const file = e.target.files[0];
+  e.target.value = "";
+  if (!file || !currentChat) return;
+  const form = new FormData(); form.append("file", file);
+  try {
+    await api(`/api/conversations/${currentChat}/photo`, {method: "POST", body: form});
+    lastMessageKey = ""; olderMessages = []; hasOlder = false;
+    await loadMessages();
+  } catch (err) { toast(err.message); }
+};
+async function loadChatStatus() {
+  if (!currentChat) return;
+  try {
+    const r = await api(`/api/conversations/${currentChat}/status`, {quiet: true});
+    const el = $("#chatSub");
+    el.textContent = r.status === "online" ? "в сети" : r.status === "recently" ? "был(а) недавно" : "";
+    el.className = "chat-sub " + r.status;
+  } catch (e) { /* статус не обязателен */ }
+}
 $("#chatForm").onsubmit = async (e) => {
   e.preventDefault();
   const input = $("#chatInput");
@@ -696,20 +719,14 @@ async function showApplicants(id) {
 }
 function fillProfileHead() {
   const u = tg?.initDataUnsafe?.user;
-  if (!u) return;
-  $("#pName").textContent = [u.first_name, u.last_name].filter(Boolean).join(" ") || "Мой профиль";
-  $("#pName").dataset.id = u.id || "";
-  const initials = ((u.first_name || "?")[0] + ((u.last_name || "")[0] || "")).toUpperCase();
-  $("#pAvatar").innerHTML = u.photo_url ? `<img src="${esc(u.photo_url)}" alt="">` : esc(initials);
-}
-function fillProfileHead() {
-  const u = tg?.initDataUnsafe?.user;
-  if (!u) return;
-  $("#pName").textContent = [u.first_name, u.last_name].filter(Boolean).join(" ") || "Мой профиль";
-  const initials = ((u.first_name || "?")[0] + ((u.last_name || "")[0] || "")).toUpperCase();
-  $("#pAvatar").innerHTML = u.photo_url ? `<img src="${esc(u.photo_url)}" alt="">` : esc(initials);
+  const name = me?.display_name || [u?.first_name, u?.last_name].filter(Boolean).join(" ") || "Мой профиль";
+  $("#pName").textContent = name;
+  const initials = ((name || "?")[0] + ((name.split(" ")[1] || "")[0] || "")).toUpperCase();
+  const photo = me?.avatar || u?.photo_url;
+  $("#pAvatar").innerHTML = photo ? `<img src="${esc(photo)}" alt="">` : esc(initials);
 }
 function showProfileChips() {
+  fillProfileHead();
   $("#pCity").textContent = me?.city || "Выберите город";
   $("#pVisa").textContent = me?.visa ? "виза " + me.visa : "виза не указана";
   $("#pEmployer").hidden = me?.employer_status !== "approved";
@@ -720,6 +737,7 @@ async function loadProfile() {
   try {
     const [user, mine, favs, convs, apps] = await Promise.all([api("/api/me"), api("/api/me/listings"), api("/api/favorites"), api("/api/conversations"), api("/api/me/applications")]);
     me = user;
+    showBell(user.unread || 0);
     showProfileChips();
     favIds = new Set(favs.map((x) => x.id));
     const alive = mine.filter((x) => x.status !== "archived");
@@ -789,24 +807,53 @@ async function openMenu(key) {
   }
   if (key === "settings") {
     await loadFields();
-    try { await loadMe(); } catch (e) { /* без входа api() сам покажет окно входа */ }
+    let prefs = {master: true, kinds: []};
+    try { await loadMe(); prefs = await api("/api/me/notify-prefs"); } catch (e) { /* без входа api() сам покажет окно входа */ }
+    const initials = ((me?.display_name || "?")[0] || "?").toUpperCase();
     body.innerHTML = `<article class="listing">
+      <div class="avatar-row"><div class="avatar" id="setAvatar">${me?.avatar ? `<img src="${esc(me.avatar)}" alt="">` : esc(initials)}</div>
+        <div style="flex:1;min-width:0"><input id="setName" type="text" maxlength="40" placeholder="Ваше имя" value="${esc(me?.display_name || "")}">
+        <small class="muted">Имя видит только работодатель, когда вы откликаетесь</small></div></div>
+      <div class="actions"><label class="btn secondary" style="flex:1;text-align:center;cursor:pointer;padding:10px;border-radius:10px">Загрузить фото<input type="file" id="setAvatarFile" accept="image/jpeg,image/png,image/webp" hidden></label>
+        <button class="secondary" id="setAvatarDel">Убрать</button><button id="setNameSave">Сохранить имя</button></div>
       <div class="set-row"><div><b>Город</b><small>${esc(me?.city || "не выбран")}</small></div><button class="secondary" id="setCity">Изменить</button></div>
       <div class="set-row"><div><b>Виза</b><small>Видна только вам: подставляется в отклики и фильтры</small></div>
         <select id="myVisa"><option value="">Не указана</option>${fieldDefs.visas.map((v) => `<option value="${v.value}">${v.label}</option>`).join("")}</select></div>
-      <div class="set-row"><div><b>Уведомления в Telegram</b><small>Сообщения, отклики, решения модератора</small></div>
+      <div class="set-row"><div><b>Уведомления в Telegram</b><small>Главный выключатель</small></div>
         <label class="check" style="margin:0"><input type="checkbox" id="setNotify"></label></div>
+      ${prefs.kinds.map((k) => `<div class="set-row" style="padding-left:14px"><div>${esc(k.label)}</div>
+        <label class="check" style="margin:0"><input type="checkbox" data-kind="${k.key}" ${k.on ? "checked" : ""}></label></div>`).join("")}
+      <p class="muted">Все уведомления всегда видны в приложении (колокольчик), даже если в Telegram они выключены.</p>
       <div class="set-row"><div><b>Язык</b><small>Сейчас доступен русский</small></div><span class="muted">RU</span></div></article>`;
     $("#myVisa").value = me?.visa || "";
-    $("#setNotify").checked = Boolean(me?.notify_messages);
+    $("#setNotify").checked = Boolean(prefs.master);
     $("#setCity").onclick = openCity;
     $("#myVisa").onchange = async () => {
       try { const r = await api("/api/me/settings", {method: "PUT", body: JSON.stringify({visa: $("#myVisa").value})}); me.visa = r.visa; showProfileChips(); toast("Сохранено"); }
       catch (err) { toast(err.message); }
     };
     $("#setNotify").onchange = async (e) => {
-      try { await api("/api/me/notifications", {method: "PUT", body: JSON.stringify({messages: e.target.checked})}); me.notify_messages = e.target.checked; toast("Сохранено"); }
+      try { await api("/api/me/notify-prefs", {method: "PUT", body: JSON.stringify({master: e.target.checked})}); me.notify_messages = e.target.checked; toast("Сохранено"); }
       catch (err) { toast(err.message); e.target.checked = !e.target.checked; }
+    };
+    document.querySelectorAll("[data-kind]").forEach((c) => c.onchange = async () => {
+      try { await api("/api/me/notify-prefs", {method: "PUT", body: JSON.stringify({kinds: {[c.dataset.kind]: c.checked}})}); toast("Сохранено"); }
+      catch (err) { toast(err.message); c.checked = !c.checked; }
+    });
+    $("#setNameSave").onclick = async () => {
+      try { const r = await api("/api/me/profile", {method: "PUT", body: JSON.stringify({display_name: $("#setName").value})}); me.display_name = r.display_name; showProfileChips(); toast("Имя сохранено"); }
+      catch (err) { toast(err.message); }
+    };
+    $("#setAvatarFile").onchange = async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const form = new FormData(); form.append("file", file);
+      try { const r = await api("/api/me/avatar", {method: "POST", body: form}); me.avatar = r.avatar; showProfileChips(); openMenu("settings"); toast("Фото сохранено"); }
+      catch (err) { toast(err.message); }
+    };
+    $("#setAvatarDel").onclick = async () => {
+      try { await api("/api/me/avatar", {method: "DELETE"}); me.avatar = null; showProfileChips(); openMenu("settings"); }
+      catch (err) { toast(err.message); }
     };
   }
   if (key === "employer") {
@@ -1355,15 +1402,22 @@ $("#consentOk").onclick = async () => {
 function showCityChip() { $("#cityChipText").textContent = (me?.city || "Город").split(",")[0]; }
 $("#cityChip").onclick = () => openCity();
 $("#langBtn").onclick = () => toast("Сейчас приложение на русском. Другие языки появятся позже");
-$("#bellBtn").onclick = async () => {
-  if (!(await requireConsent())) return;
-  $("#notifToggle").checked = Boolean(me.notify_messages);
-  $("#notifModal").classList.remove("hidden");
-};
-$("#closeNotif").onclick = () => $("#notifModal").classList.add("hidden");
-$("#notifToggle").onchange = async (e) => {
-  try { await api("/api/me/notifications", {method: "PUT", body: JSON.stringify({messages: e.target.checked})}); me.notify_messages = e.target.checked; toast("Сохранено"); }
-  catch (err) { toast(err.message); e.target.checked = !e.target.checked; }
+function showBell(n) { $("#bellBadge").textContent = n > 99 ? "99+" : n; $("#bellBadge").hidden = !n; }
+$("#bellBtn").onclick = async () => { if (await requireConsent()) showView("notifs", {push: true}); };
+async function loadNotifs() {
+  const box = $("#notifList");
+  box.innerHTML = '<div class="skeleton"></div>';
+  try {
+    const r = await api("/api/me/notifications");
+    box.innerHTML = r.items.length ? r.items.map((n) => `<article class="listing nitem ${n.read ? "" : "unread"}">
+      <small>${esc(n.label)} · ${esc(fmtDate(n.created_at))}</small><p>${esc(n.text)}</p></article>`).join("")
+      : '<div class="empty">Пока ничего нового.<br>Здесь появятся сообщения, отклики и решения модератора.</div>';
+    if (r.unread) { await api("/api/me/notifications/read", {method: "POST", body: JSON.stringify({})}); showBell(0); }
+  } catch (e) { box.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+$("#readAll").onclick = async () => {
+  try { await api("/api/me/notifications/read", {method: "POST", body: JSON.stringify({})}); showBell(0); loadNotifs(); }
+  catch (err) { toast(err.message); }
 };
 async function openCity() {
   await setGeo("#cityGeo", me?.region_code || "", me?.district_id || "");
@@ -1426,7 +1480,7 @@ loadFavIds().then(() => {
   });
 });
 api("/api/me", {quiet: true})
-  .then((user) => { me = user; showCityChip(); if (!me.consent) $("#consent").classList.remove("hidden"); })
+  .then((user) => { me = user; showCityChip(); showBell(user.unread || 0); if (!me.consent) $("#consent").classList.remove("hidden"); })
   .catch(() => { if (!inTelegram) $("#loginTop").hidden = false; });
 
 // ---------- страница не двигается ----------

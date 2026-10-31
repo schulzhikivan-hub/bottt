@@ -110,10 +110,12 @@ def decide_report(db: Session, actor: str, report_id: int, decision: str) -> Rep
     # the person who complained learns the result; the author learns why the listing is gone
     guard.notify_user(db, report.reporter_tg_id,
                       "Спасибо за жалобу. Мы проверили и приняли меры." if decision == "resolve"
-                      else "Мы проверили вашу жалобу: нарушений не нашли. Спасибо, что помогаете делать KOREA HUB лучше.")
+                      else "Мы проверили вашу жалобу: нарушений не нашли. Спасибо, что помогаете делать KOREA HUB лучше.",
+                      "moderation")
     if hidden_listing is not None:
         guard.notify_user(db, hidden_listing.author_telegram_id,
-                          f"Объявление «{hidden_listing.title}» скрыто по жалобам пользователей. Если это ошибка, напишите в поддержку.")
+                          f"Объявление «{hidden_listing.title}» скрыто по жалобам пользователей. Если это ошибка, напишите в поддержку.",
+                          "moderation")
         applications.notify_ended(db, hidden_listing, "скрыта модератором")
     return report
 

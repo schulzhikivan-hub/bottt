@@ -494,6 +494,7 @@ def _markup(rows):
 
 async def _send(bot, chat_id: int, reply: Reply) -> None:
     from aiogram.types import FSInputFile
+    from app.database import SessionLocal
     markup = _markup(reply.rows)
     sent = False
     if reply.photo is not None:
@@ -504,7 +505,13 @@ async def _send(bot, chat_id: int, reply: Reply) -> None:
             sent = False
     if not sent:
         await bot.send_message(chat_id, reply.text[:4000], reply_markup=markup)
+    from app import guard
     for tg_id, text in reply.notify:
+        with SessionLocal() as db:
+            guard.record_notification(db, tg_id, text, "moderation")
+            allowed = guard.telegram_allowed(db, tg_id, "moderation")
+        if not allowed:
+            continue
         try:
             await bot.send_message(int(tg_id), text)
         except Exception:

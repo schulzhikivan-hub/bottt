@@ -68,14 +68,34 @@ def send_telegram(tg_id: str, text: str) -> bool:
         return False
 
 
-def notify_user(db: Session, tg_id: str, text: str) -> None:
-    """Notify a user about an event, respecting their settings and the global switch."""
+NOTIFY_KINDS = {"messages": "Сообщения", "applications": "Отклики", "moderation": "Решения модератора",
+                "searches": "Новые по моим поискам", "expiry": "Срок объявлений", "payments": "Платежи и продвижение"}
+
+
+def telegram_allowed(db: Session, tg_id: str, kind: str) -> bool:
+    """May this kind of notice be sent to the user's Telegram? (master switch + the kind's own switch)"""
+    user = db.get(User, tg_id)
+    if user is None:
+        return True
+    if not user.notify_messages:
+        return False
+    return (user.notify_prefs or {}).get(kind, True) is not False
+
+
+def record_notification(db: Session, tg_id: str, text: str, kind: str = "system") -> None:
+    """Put the notice in the in-app feed (always, even when Telegram is switched off)."""
+    from app.models import Notification
+    db.add(Notification(user_tg_id=tg_id, kind=kind if kind in NOTIFY_KINDS else "system", text=text[:600]))
+    db.commit()
+
+
+def notify_user(db: Session, tg_id: str, text: str, kind: str = "system") -> None:
+    """Notify a user: the in-app feed always, Telegram when the global switch and the user's settings allow."""
+    record_notification(db, tg_id, text, kind)
     if not settings.notifications_enabled:
         return
-    user = db.get(User, tg_id)
-    if user is not None and not user.notify_messages:
-        return
-    send_telegram(tg_id, text)
+    if telegram_allowed(db, tg_id, kind):
+        send_telegram(tg_id, text)
 
 
 # ---- views counter ----
