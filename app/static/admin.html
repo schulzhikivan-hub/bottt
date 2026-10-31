@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>KOREA HUB — модерация</title>
+<style>
+body{font-family:system-ui,sans-serif;margin:0;background:#f4f6fa;color:#1b2430}
+header{background:#0c1f3f;color:#fff;padding:14px 16px}
+main{padding:16px;max-width:760px;margin:0 auto}
+.card{background:#fff;border-radius:12px;padding:14px;margin-bottom:12px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+.meta{color:#8a94a6;font-size:13px;margin:4px 0 8px}
+button{border:0;border-radius:10px;padding:10px 14px;font-size:15px;cursor:pointer;margin-right:8px}
+.ok{background:#22a45d;color:#fff}.no{background:#e5484d;color:#fff}
+input{padding:10px;border:1px solid #e3e8f0;border-radius:10px;width:100%;box-sizing:border-box}
+.muted{color:#8a94a6}
+</style></head>
+<body>
+<header><b>KOREA HUB — модерация</b></header>
+<main>
+  <div class="card" id="login">
+    <p>Введите админ-ключ (ADMIN_API_KEY из .env). Он хранится только в этой вкладке браузера.</p>
+    <input id="key" type="password" placeholder="Админ-ключ">
+    <p><button class="ok" id="enter">Войти</button></p>
+  </div>
+  <div id="queue" hidden>
+    <p><button class="ok" id="reload">Обновить</button> <span class="muted" id="status"></span></p>
+    <div id="items"></div>
+  </div>
+</main>
+<script src="/static/admin.js"></script>
+</body></html>

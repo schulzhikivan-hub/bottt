@@ -18,6 +18,10 @@ app.mount("/static", StaticFiles(directory=STATIC), name="static")
 def home():
     return FileResponse(STATIC / "index.html")
 
+@app.get("/admin")
+def admin_page():
+    return FileResponse(STATIC / "admin.html")
+
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "korea-hub"}
