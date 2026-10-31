@@ -146,6 +146,9 @@ async def main():
         while True:
             await asyncio.sleep(3600)
     bot = Bot(settings.bot_token)
+    # Бот работает через polling. Если у токена активен webhook (например, остался
+    # от другого сервиса), Telegram не отдаёт обновления и /start молчит.
+    await bot.delete_webhook(drop_pending_updates=True)
     dp = Dispatcher()
     register(dp, bot)
     await dp.start_polling(bot)
