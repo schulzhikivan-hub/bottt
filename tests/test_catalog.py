@@ -72,7 +72,7 @@ def test_unpublished_listings_are_never_found(client):
 
 def test_category_and_city_filters(client):
     job = make(client, category="job", city="Асан")
-    flat = make(client, category="housing", city="Сеул, Gangnam")
+    flat = make(client, category="housing", city="Сеул, Каннам")
     assert ids(client, category="job") == [job]
     assert ids(client, city="СЕУЛ") == [flat]  # part of the city, any case
     assert client.get("/api/catalog", params={"category": "cars"}).status_code == 400
@@ -181,11 +181,11 @@ def test_cities_with_counts(client):
     make(client, city="Сеул")
     make(client, city="Сеул")
     make(client, city="Пусан")
-    make(client, city="Тайный", publish=False)
+    make(client, city="Седжон", publish=False)
     cities = client.get("/api/cities").json()
     assert cities[0] == {"city": "Сеул", "count": 2}
     assert {"city": "Пусан", "count": 1} in cities
-    assert all(c["city"] != "Тайный" for c in cities)
+    assert all(c["city"] != "Седжон" for c in cities)
 
 
 # ---- editing keeps search working ----

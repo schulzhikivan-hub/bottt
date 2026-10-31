@@ -170,3 +170,15 @@ form textarea{resize:vertical}
 @supports (color: color-mix(in srgb, red, blue)) {
   :root{--soft:color-mix(in srgb, var(--accent) 14%, var(--card))}
 }
+
+.geo{display:block}
+
+/* характеристики объявления и выбор виз */
+.specs{display:grid;grid-template-columns:auto 1fr;gap:8px 16px;margin:14px 0;font-size:14px}
+.specs dt{color:var(--hint)}
+.specs dd{margin:0;font-weight:600;word-break:break-word}
+.vchips{display:flex;flex-wrap:wrap;gap:8px;margin:2px 0 8px}
+.vchip{margin:0 !important;display:inline-block !important}
+.vchip input{display:none !important}
+.vchip span{display:inline-block;padding:7px 13px;border:1px solid var(--border);border-radius:999px;font-size:13px;color:var(--text)}
+.vchip input:checked + span{background:var(--accent);border-color:var(--accent);color:var(--accent-text)}

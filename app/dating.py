@@ -15,6 +15,7 @@ from app.payments import now
 from app.users import writer, is_blocked_pair, get_or_create_user
 from app.audit import log_action
 from app import admin_ops as ops
+from app import geo
 from app.admin_auth import staff, MOD, ADM, SUP
 from app.admin_auth import staff, MOD, ADM, SUP
 
@@ -53,7 +54,9 @@ def _public(profile: DatingProfile) -> dict:
 class DatingIn(BaseModel):
     birth_year: int = Field(ge=1930, le=2100)
     gender: str = Field(min_length=1, max_length=1)
-    city: str = Field(min_length=2, max_length=80)
+    city: str | None = Field(default=None, max_length=100)
+    region_code: str | None = Field(default=None, max_length=20)
+    district_id: int | None = None
     bio: str = Field(default="", max_length=500)
 
 
@@ -62,7 +65,8 @@ def my_profile(user_id: str = Depends(writer), db: Session = Depends(get_db)):
     profile = db.scalar(select(DatingProfile).where(DatingProfile.owner_tg_id == user_id))
     if profile is None:
         return None
-    return {**_public(profile), "status": profile.status, "has_photo": profile.photo_key is not None}
+    return {**_public(profile), "status": profile.status, "has_photo": profile.photo_key is not None,
+            "region_code": profile.region_code, "district_id": profile.district_id}
 
 
 @router.put("/api/dating/profile")
@@ -77,7 +81,10 @@ def save_profile(payload: DatingIn, user_id: str = Depends(writer), db: Session 
         db.add(profile)
     profile.birth_year = payload.birth_year
     profile.gender = payload.gender
-    profile.city = payload.city
+    place = geo.resolve_place(db, payload.district_id, payload.region_code, payload.city)
+    if place is None:
+        raise HTTPException(400, "Выберите город или район из списка. Сайт только для Южной Кореи")
+    profile.city, profile.region_code, profile.district_id = place.label, place.region_code, place.district_id
     profile.bio = payload.bio
     profile.status = "pending"  # every change goes back to moderation
     db.commit()

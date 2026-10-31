@@ -41,5 +41,20 @@ def migrate() -> None:
         for column in ("price_amount BIGINT", "housing_provided BOOLEAN", "meals_provided BOOLEAN",
                        "rooms INTEGER", "condition VARCHAR(10)", "search_text TEXT", "city_key VARCHAR(80)"):
             conn.execute(text(f"ALTER TABLE listings ADD COLUMN IF NOT EXISTS {column}"))
+        for column in ("salary_period VARCHAR(8)", "visas VARCHAR(120)", "employment VARCHAR(10)", "schedule VARCHAR(10)",
+                       "housing_type VARCHAR(12)", "deposit BIGINT", "area_m2 INTEGER", "pets_allowed BOOLEAN",
+                       "furnished BOOLEAN", "goods_category VARCHAR(16)", "negotiable BOOLEAN", "details JSON"):
+            conn.execute(text(f"ALTER TABLE listings ADD COLUMN IF NOT EXISTS {column}"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_listings_price_amount ON listings (price_amount)"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_listings_city_key ON listings (city_key)"))
+        conn.execute(text("ALTER TABLE listings ALTER COLUMN city TYPE VARCHAR(100)"))
+        conn.execute(text("ALTER TABLE listings ADD COLUMN IF NOT EXISTS region_code VARCHAR(20)"))
+        conn.execute(text("ALTER TABLE listings ADD COLUMN IF NOT EXISTS district_id INTEGER"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_listings_region_code ON listings (region_code)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_listings_district_id ON listings (district_id)"))
+        conn.execute(text("ALTER TABLE users ALTER COLUMN city TYPE VARCHAR(100)"))
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS region_code VARCHAR(20)"))
+        conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS district_id INTEGER"))
+        conn.execute(text("ALTER TABLE dating_profiles ALTER COLUMN city TYPE VARCHAR(100)"))
+        conn.execute(text("ALTER TABLE dating_profiles ADD COLUMN IF NOT EXISTS region_code VARCHAR(20)"))
+        conn.execute(text("ALTER TABLE dating_profiles ADD COLUMN IF NOT EXISTS district_id INTEGER"))

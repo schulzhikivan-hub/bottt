@@ -167,42 +167,98 @@
 <form id="listingForm">
 <label>Раздел<select name="category" id="formCategory"><option value="job">Работа</option><option value="housing">Жильё</option><option value="marketplace">Барахолка</option></select></label>
 <label>Заголовок<input name="title" required minlength="3" maxlength="160" placeholder="Например: Работа на заводе"></label>
-<label>Город<input name="city" required maxlength="80" placeholder="Например: Асан" list="cityHints"></label>
+<div class="geo" id="formGeo">
+<label>Регион<select name="region_code" required data-geo-region></select></label>
+<label>Город / район<select name="district_id" required data-geo-district></select></label>
+</div>
 <div class="row2">
-  <label>Сумма, ₩<input name="price_amount" type="number" inputmode="numeric" min="0" placeholder="2800000"></label>
+  <label><span id="amountLabel">Сумма, ₩</span><input name="price_amount" type="number" inputmode="numeric" min="0" placeholder="2800000"></label>
   <label>Пометка к цене<input name="price" maxlength="80" placeholder="в месяц, торг"></label>
 </div>
 <div data-for="job" hidden>
+  <label>Компания<input name="d_company" maxlength="120" placeholder="Например: Samin Motors"></label>
+  <label>Должность<input name="d_position" maxlength="120" placeholder="Оператор, упаковщик…"></label>
+  <div class="row2">
+    <label>Оплата<select name="salary_period" data-list="salary_period" data-any="В месяц"></select></label>
+    <label>Зарплата до, ₩<input name="d_salary_max" type="number" inputmode="numeric" min="0"></label>
+  </div>
+  <div class="row2">
+    <label>Занятость<select name="employment" data-list="employment"></select></label>
+    <label>График<select name="schedule" data-list="schedule"></select></label>
+  </div>
+  <label>Подходящие визы</label>
+  <div class="vchips" data-visas></div>
+  <div class="row2">
+    <label>Мест<input name="d_vacancies" type="number" inputmode="numeric" min="1" max="999"></label>
+    <label>Начало работы<input name="d_start_date" type="date"></label>
+  </div>
   <label class="check"><input type="checkbox" name="housing_provided"> Жильё предоставляется</label>
   <label class="check"><input type="checkbox" name="meals_provided"> Питание включено</label>
+  <label class="check"><input type="checkbox" name="d_transport"> Есть развозка</label>
+  <label class="check"><input type="checkbox" name="d_experience"> Нужен опыт</label>
 </div>
 <div data-for="housing" hidden>
-  <label>Комнат<input name="rooms" type="number" inputmode="numeric" min="0" max="20" placeholder="2"></label>
+  <label>Тип жилья<select name="housing_type" data-list="housing_type"></select></label>
+  <div class="row2">
+    <label>Залог, ₩<input name="deposit" type="number" inputmode="numeric" min="0"></label>
+    <label>Коммунальные, ₩<input name="d_maintenance_fee" type="number" inputmode="numeric" min="0"></label>
+  </div>
+  <div class="row2">
+    <label>Площадь, м²<input name="area_m2" type="number" inputmode="numeric" min="1" max="2000"></label>
+    <label>Комнат<input name="rooms" type="number" inputmode="numeric" min="0" max="20"></label>
+  </div>
+  <div class="row2">
+    <label>Этаж<input name="d_floor" type="number" inputmode="numeric" min="-5" max="200"></label>
+    <label>Свободно с<input name="d_available_from" type="date"></label>
+  </div>
+  <label>Срок договора<input name="d_contract_term" maxlength="40" placeholder="Например: 1 год"></label>
+  <label>Ближайшая станция метро<input name="d_station" maxlength="80" placeholder="Например: Каннам"></label>
+  <label class="check"><input type="checkbox" name="pets_allowed"> Можно с животными</label>
+  <label class="check"><input type="checkbox" name="furnished"> С мебелью</label>
 </div>
 <div data-for="marketplace" hidden>
-  <label>Состояние<select name="condition"><option value="">Не указано</option><option value="new">Новое</option><option value="used">Б/у</option></select></label>
+  <label>Категория<select name="goods_category" data-list="goods_category"></select></label>
+  <label>Состояние<select name="condition" data-list="condition"></select></label>
+  <label>Бренд<input name="d_brand" maxlength="60" placeholder="Например: Samsung"></label>
+  <label class="check"><input type="checkbox" name="negotiable"> Торг возможен</label>
+  <label class="check"><input type="checkbox" name="d_delivery"> Есть доставка</label>
 </div>
 <label>Описание<textarea name="description" rows="3" maxlength="4000" placeholder="Подробности. Телефон и ссылки пишите в поле «Контакт»"></textarea></label>
 <label>Контакт<input name="contact" maxlength="160" placeholder="@username или телефон"></label>
 <button class="submit" type="submit">Отправить на проверку</button></form></div></div>
-<datalist id="cityHints"></datalist>
 
 <div id="filters" class="modal hidden"><div class="sheet"><div class="sheet-top"><b>Фильтры</b><button id="closeFilters">✕</button></div>
 <form id="filterForm">
-<label>Город<input name="city" maxlength="80" placeholder="Любой" list="cityHints"></label>
+<div class="geo" id="filterGeo">
+<label>Регион<select name="region_code" data-geo-region></select></label>
+<label>Город / район<select name="district_id" data-geo-district></select></label>
+</div>
 <div class="row2">
   <label>Цена от, ₩<input name="price_min" type="number" inputmode="numeric" min="0"></label>
   <label>Цена до, ₩<input name="price_max" type="number" inputmode="numeric" min="0"></label>
 </div>
 <div data-for="job" hidden>
+  <label>Виза<select name="visa" data-list="visas" data-any="Любая"></select></label>
+  <div class="row2">
+    <label>График<select name="schedule" data-list="schedule" data-any="Любой"></select></label>
+    <label>Занятость<select name="employment" data-list="employment" data-any="Любая"></select></label>
+  </div>
   <label class="check"><input type="checkbox" name="housing_provided"> Жильё предоставляется</label>
   <label class="check"><input type="checkbox" name="meals_provided"> Питание включено</label>
 </div>
 <div data-for="housing" hidden>
+  <label>Тип жилья<select name="housing_type" data-list="housing_type" data-any="Любой"></select></label>
+  <div class="row2">
+    <label>Залог до, ₩<input name="deposit_max" type="number" inputmode="numeric" min="0"></label>
+    <label>Площадь от, м²<input name="area_min" type="number" inputmode="numeric" min="0"></label>
+  </div>
   <label>Комнат не меньше<select name="rooms_min"><option value="">Любое</option><option>1</option><option>2</option><option>3</option><option>4</option></select></label>
+  <label class="check"><input type="checkbox" name="pets_allowed"> Можно с животными</label>
+  <label class="check"><input type="checkbox" name="furnished"> С мебелью</label>
 </div>
 <div data-for="marketplace" hidden>
-  <label>Состояние<select name="condition"><option value="">Любое</option><option value="new">Новое</option><option value="used">Б/у</option></select></label>
+  <label>Категория<select name="goods_category" data-list="goods_category" data-any="Любая"></select></label>
+  <label>Состояние<select name="condition" data-list="condition" data-any="Любое"></select></label>
 </div>
 <p class="muted" id="filterHint">Выберите раздел «Работа», «Жильё» или «Барахолка», чтобы появились дополнительные фильтры.</p>
 <button class="submit" type="submit">Показать</button>
@@ -217,14 +273,20 @@
 <div id="datingModal" class="modal hidden"><div class="sheet"><div class="sheet-top"><b>Моя анкета</b><button id="closeDating">✕</button></div>
 <form id="datingForm"><label>Год рождения<input name="birth_year" type="number" min="1930" max="2100" required></label>
 <label>Пол<select name="gender"><option value="f">Женщина</option><option value="m">Мужчина</option></select></label>
-<label>Город<input name="city" required maxlength="80" placeholder="Например: Сеул"></label>
+<div class="geo" id="datingGeo">
+<label>Регион<select name="region_code" required data-geo-region></select></label>
+<label>Город / район<select name="district_id" required data-geo-district></select></label>
+</div>
 <label>О себе<textarea name="bio" rows="3" maxlength="500"></textarea></label>
 <label>Фото (JPEG, PNG или WebP, до 5 МБ)<input name="photo" type="file" accept="image/jpeg,image/png,image/webp"></label>
 <p class="muted">Анкета появится после проверки модератором. Контакты в анкете не нужны: общение только в приложении.</p>
 <button class="submit" type="submit">Сохранить</button></form></div></div>
 
 <div id="cityModal" class="modal hidden"><div class="sheet"><div class="sheet-top"><b>Мой город</b><button id="closeCity">✕</button></div>
-<form id="cityForm"><label>Город<input name="city" required minlength="2" maxlength="80" placeholder="Например: Пусан" list="cityHints"></label>
+<form id="cityForm"><div class="geo" id="cityGeo">
+<label>Регион<select name="region_code" required data-geo-region></select></label>
+<label>Город / район<select name="district_id" required data-geo-district></select></label>
+</div>
 <button class="submit" type="submit">Сохранить</button></form></div></div>
 
 <div id="employerModal" class="modal hidden"><div class="sheet"><div class="sheet-top"><b>Заявка работодателя</b><button id="closeEmployer">✕</button></div>

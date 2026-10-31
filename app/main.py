@@ -29,6 +29,8 @@ from app.manage import router as manage_router
 from app.guard import rate_limit, check_text, duplicate_note, notify_user
 from app import admin_ops as ops
 from app import catalog
+from app import geo
+from app import fields as listing_fields
 from app.users import get_or_create_user, writer, is_blocked_pair
 from app.models import DatingProfile
 from app.dating import router as dating_router
@@ -39,6 +41,7 @@ migrate()
 with SessionLocal() as _db:
     seed_reference(_db)
     bootstrap_admins(_db)
+    geo.backfill_places(_db)
     catalog.backfill_search_fields(_db)
 
 app = FastAPI(title="KOREA HUB API", version="0.4.0")
@@ -47,6 +50,8 @@ app.include_router(manage_router)
 app.include_router(admin_auth_router)
 app.include_router(webauth_router)
 app.include_router(catalog.router)
+app.include_router(geo.router)
+app.include_router(listing_fields.router)
 STATIC = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
@@ -82,7 +87,9 @@ def health():
 
 class ConsentIn(BaseModel):
     accept: bool
-    city: str | None = Field(default=None, max_length=80)
+    city: str | None = Field(default=None, max_length=100)
+    district_id: int | None = None
+    region_code: str | None = Field(default=None, max_length=20)
     language: str | None = Field(default=None, max_length=8)
 
 
@@ -90,6 +97,7 @@ class ConsentIn(BaseModel):
 def me(user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
     user = get_or_create_user(db, user_id)
     return {"tg_id": user.tg_id, "consent": user.consent_at is not None, "city": user.city,
+            "region_code": user.region_code, "district_id": user.district_id,
             "language": "ru", "blocked": user.blocked, "block_reason": user.block_reason,
             "employer_status": user.employer_status, "company_name": user.company_name}
 
@@ -102,8 +110,9 @@ def give_consent(payload: ConsentIn, user_id: str = Depends(current_user_id), db
     if user.deleted_at is not None:
         raise HTTPException(403, "Аккаунт удалён")
     user.consent_at = now()
-    if payload.city:
-        user.city = payload.city
+    place = geo.resolve_place(db, payload.district_id, payload.region_code, payload.city)
+    if place:
+        user.city, user.region_code, user.district_id = place.label, place.region_code, place.district_id
     if payload.language:
         user.language = payload.language
     db.commit()
@@ -242,6 +251,9 @@ def create_listing(payload: ListingCreate, user_id: str = Depends(writer), db: S
         raise HTTPException(400, "Неизвестная категория")
     rate_limit(user_id, "listing", 10, 3600)
     check_text(payload.title, payload.description)
+    place = geo.resolve_place(db, payload.district_id, payload.region_code, payload.city)
+    if place is None:
+        raise HTTPException(400, "Выберите город или район из списка. Сайт только для Южной Кореи")
     active = db.scalar(
         select(func.count()).select_from(Listing).where(
             Listing.author_telegram_id == user_id,
@@ -251,7 +263,8 @@ def create_listing(payload: ListingCreate, user_id: str = Depends(writer), db: S
     )
     if active >= MAX_ACTIVE_PER_CATEGORY:
         raise HTTPException(409, f"Лимит: не больше {MAX_ACTIVE_PER_CATEGORY} активных объявлений в разделе")
-    item = Listing(**catalog.clean_extras(payload.category, payload.model_dump()),
+    data = catalog.clean_extras(payload.category, payload.model_dump(exclude={"city", "region_code", "district_id"}))
+    item = Listing(**data, city=place.label, region_code=place.region_code, district_id=place.district_id,
                    author_telegram_id=user_id, status="pending")
     db.add(item)
     db.commit()

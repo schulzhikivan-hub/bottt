@@ -1,7 +1,10 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_validator
+
+from app.fields import (VisaCode, Employment, Schedule, SalaryPeriod, HousingType, GoodsCategory,
+                        visas_from_text)
 
 CATEGORIES = {"job", "housing", "marketplace"}
 MAX_ACTIVE_PER_CATEGORY = 5
@@ -10,7 +13,11 @@ MAX_ACTIVE_PER_CATEGORY = 5
 class ListingCreate(BaseModel):
     category: str
     title: str = Field(min_length=3, max_length=160)
-    city: str = Field(min_length=2, max_length=80)
+    # Place in South Korea: pick a district (best) or a region from the list; free text is accepted only
+    # when it names exactly one place of the list (see app/geo.py)
+    city: str | None = Field(default=None, max_length=100)
+    region_code: str | None = Field(default=None, max_length=20)
+    district_id: int | None = None
     price: str = Field(default="", max_length=80)
     description: str = Field(default="", max_length=4000)
     contact: str = Field(default="", max_length=160)
@@ -20,6 +27,18 @@ class ListingCreate(BaseModel):
     meals_provided: bool | None = None
     rooms: int | None = Field(default=None, ge=0, le=20)
     condition: Literal["new", "used"] | None = None
+    salary_period: SalaryPeriod | None = None
+    visas: list[VisaCode] | None = Field(default=None, max_length=11)
+    employment: Employment | None = None
+    schedule: Schedule | None = None
+    housing_type: HousingType | None = None
+    deposit: int | None = Field(default=None, ge=0, le=10_000_000_000)
+    area_m2: int | None = Field(default=None, ge=1, le=2000)
+    pets_allowed: bool | None = None
+    furnished: bool | None = None
+    goods_category: GoodsCategory | None = None
+    negotiable: bool | None = None
+    details: dict | None = None  # descriptive details, validated per section (see app/fields.py)
 
 
 class ListingOut(BaseModel):
@@ -33,13 +52,38 @@ class ListingOut(BaseModel):
     contact: str
     status: str
     note: str = ""
+    region_code: str | None = None
+    district_id: int | None = None
     price_amount: int | None = None
     housing_provided: bool | None = None
     meals_provided: bool | None = None
     rooms: int | None = None
     condition: str | None = None
+    salary_period: str | None = None
+    visas: list[str] = []
+    employment: str | None = None
+    schedule: str | None = None
+    housing_type: str | None = None
+    deposit: int | None = None
+    area_m2: int | None = None
+    pets_allowed: bool | None = None
+    furnished: bool | None = None
+    goods_category: str | None = None
+    negotiable: bool | None = None
+    details: dict = {}
     promo: str | None = None  # active paid placement: pin, vip, bump, highlight
     created_at: datetime | None = None
+
+
+    @field_validator("visas", mode="before")
+    @classmethod
+    def _visas(cls, value):
+        return visas_from_text(value) if isinstance(value, str) or value is None else value
+
+    @field_validator("details", mode="before")
+    @classmethod
+    def _details(cls, value):
+        return value or {}
 
 
 class MessageIn(BaseModel):

@@ -10,7 +10,9 @@ from app.audit import log_action
 from app.admin_auth import staff, MOD, ADM, SUP
 from app.guard import check_text
 from app.catalog import drop_irrelevant
+from app.fields import (VisaCode, Employment, Schedule, SalaryPeriod, HousingType, GoodsCategory)
 from app import admin_ops as ops
+from app import geo
 from app.database import get_db
 from app.models import Listing, User, Block, Report
 from app.schemas import CATEGORIES, ListingOut
@@ -36,7 +38,9 @@ def _own_listing(db: Session, listing_id: int, user_id: str) -> Listing:
 
 class ListingEdit(BaseModel):
     title: str | None = Field(default=None, min_length=3, max_length=160)
-    city: str | None = Field(default=None, min_length=2, max_length=80)
+    city: str | None = Field(default=None, max_length=100)
+    region_code: str | None = Field(default=None, max_length=20)
+    district_id: int | None = None
     price: str | None = Field(default=None, max_length=80)
     description: str | None = Field(default=None, max_length=4000)
     contact: str | None = Field(default=None, max_length=160)
@@ -45,6 +49,18 @@ class ListingEdit(BaseModel):
     meals_provided: bool | None = None
     rooms: int | None = Field(default=None, ge=0, le=20)
     condition: Literal["new", "used"] | None = None
+    salary_period: SalaryPeriod | None = None
+    visas: list[VisaCode] | None = Field(default=None, max_length=11)
+    employment: Employment | None = None
+    schedule: Schedule | None = None
+    housing_type: HousingType | None = None
+    deposit: int | None = Field(default=None, ge=0, le=10_000_000_000)
+    area_m2: int | None = Field(default=None, ge=1, le=2000)
+    pets_allowed: bool | None = None
+    furnished: bool | None = None
+    goods_category: GoodsCategory | None = None
+    negotiable: bool | None = None
+    details: dict | None = None
 
 
 @router.put("/api/listings/{listing_id}", response_model=ListingOut)
@@ -57,6 +73,11 @@ def edit_listing(listing_id: int, payload: ListingEdit, user_id: str = Depends(w
     if not changes:
         return item
     check_text(changes.get("title", item.title), changes.get("description", item.description))
+    if any(k in changes for k in ("city", "region_code", "district_id")):
+        place = geo.resolve_place(db, changes.pop("district_id", None), changes.pop("region_code", None), changes.pop("city", None))
+        if place is None:
+            raise HTTPException(400, "Выберите город или район из списка. Сайт только для Южной Кореи")
+        changes.update(city=place.label, region_code=place.region_code, district_id=place.district_id)
     for key, value in changes.items():
         setattr(item, key, value)
     # Любое изменение снова проходит модерацию (ТЗ § 7.4)
@@ -111,7 +132,9 @@ def archive_listing(listing_id: int, user_id: str = Depends(writer), db: Session
 # ---------- Settings and employer application ----------
 
 class SettingsIn(BaseModel):
-    city: str = Field(min_length=2, max_length=80)
+    city: str | None = Field(default=None, max_length=100)
+    region_code: str | None = Field(default=None, max_length=20)
+    district_id: int | None = None
 
 
 class NotificationsIn(BaseModel):
@@ -129,9 +152,12 @@ def update_notifications(payload: NotificationsIn, user_id: str = Depends(writer
 @router.put("/api/me/settings")
 def update_settings(payload: SettingsIn, user_id: str = Depends(writer), db: Session = Depends(get_db)):
     user = get_or_create_user(db, user_id)
-    user.city = payload.city.strip()
+    place = geo.resolve_place(db, payload.district_id, payload.region_code, payload.city)
+    if place is None:
+        raise HTTPException(400, "Выберите город или район из списка. Сайт только для Южной Кореи")
+    user.city, user.region_code, user.district_id = place.label, place.region_code, place.district_id
     db.commit()
-    return {"city": user.city}
+    return {"city": user.city, "region_code": user.region_code, "district_id": user.district_id}
 
 
 class EmployerIn(BaseModel):

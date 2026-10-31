@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from sqlalchemy import String, Text, DateTime, Integer, BigInteger, ForeignKey, UniqueConstraint, Boolean, event
+from sqlalchemy import String, Text, DateTime, Integer, BigInteger, ForeignKey, UniqueConstraint, Boolean, JSON, event
 from sqlalchemy.orm import Mapped, mapped_column
 from app.database import Base
 
@@ -12,7 +12,9 @@ class User(Base):
     __tablename__ = "users"
     tg_id: Mapped[str] = mapped_column(String(40), primary_key=True)
     language: Mapped[str] = mapped_column(String(8), default="ru")
-    city: Mapped[str] = mapped_column(String(80), default="Сеул")
+    city: Mapped[str] = mapped_column(String(100), default="Сеул")
+    region_code: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    district_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     consent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     blocked: Mapped[bool] = mapped_column(Boolean, default=False)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -65,7 +67,9 @@ class Listing(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     category: Mapped[str] = mapped_column(String(30), index=True)
     title: Mapped[str] = mapped_column(String(160))
-    city: Mapped[str] = mapped_column(String(80), index=True)
+    city: Mapped[str] = mapped_column(String(100), index=True)  # shown label, e.g. "Асан" or "Сеул, Каннам"
+    region_code: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)
+    district_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     price: Mapped[str] = mapped_column(String(80), default="")
     description: Mapped[str] = mapped_column(Text, default="")
     contact: Mapped[str] = mapped_column(String(160), default="")
@@ -80,6 +84,19 @@ class Listing(Base):
     meals_provided: Mapped[bool | None] = mapped_column(Boolean, nullable=True)    # job
     rooms: Mapped[int | None] = mapped_column(Integer, nullable=True)              # housing
     condition: Mapped[str | None] = mapped_column(String(10), nullable=True)       # goods: new or used
+    # More searchable details (see app/fields.py)
+    salary_period: Mapped[str | None] = mapped_column(String(8), nullable=True)    # job: month, day, hour
+    visas: Mapped[str | None] = mapped_column(String(120), nullable=True)          # job: ",E-9,F-4,"
+    employment: Mapped[str | None] = mapped_column(String(10), nullable=True)      # job
+    schedule: Mapped[str | None] = mapped_column(String(10), nullable=True)        # job
+    housing_type: Mapped[str | None] = mapped_column(String(12), nullable=True)    # housing
+    deposit: Mapped[int | None] = mapped_column(BigInteger, nullable=True)         # housing, KRW
+    area_m2: Mapped[int | None] = mapped_column(Integer, nullable=True)            # housing
+    pets_allowed: Mapped[bool | None] = mapped_column(Boolean, nullable=True)      # housing
+    furnished: Mapped[bool | None] = mapped_column(Boolean, nullable=True)         # housing
+    goods_category: Mapped[str | None] = mapped_column(String(16), nullable=True)  # goods
+    negotiable: Mapped[bool | None] = mapped_column(Boolean, nullable=True)        # goods
+    details: Mapped[dict | None] = mapped_column(JSON, nullable=True)              # descriptive, not filtered
     # Lower-case copies kept by the application, so search ignores case in any database locale
     search_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     city_key: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
@@ -89,7 +106,8 @@ class Listing(Base):
 @event.listens_for(Listing, "before_insert")
 @event.listens_for(Listing, "before_update")
 def _refresh_search_fields(mapper, connection, target):
-    target.search_text = " ".join([target.title or "", target.description or "", target.city or ""]).lower()
+    extra = [str(v) for k, v in (target.details or {}).items() if k in ("company", "position", "station", "brand")]
+    target.search_text = " ".join([target.title or "", target.description or "", target.city or "", *extra]).lower()
     target.city_key = (target.city or "").strip().lower()
 
 
@@ -122,7 +140,9 @@ class DatingProfile(Base):
     owner_tg_id: Mapped[str] = mapped_column(String(40), unique=True, index=True)
     birth_year: Mapped[int] = mapped_column(Integer)
     gender: Mapped[str] = mapped_column(String(1))  # f or m
-    city: Mapped[str] = mapped_column(String(80), index=True)
+    city: Mapped[str] = mapped_column(String(100), index=True)
+    region_code: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)
+    district_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     bio: Mapped[str] = mapped_column(Text, default="")
     photo_key: Mapped[str | None] = mapped_column(String(80), nullable=True)
     # pending, published, rejected
@@ -252,3 +272,25 @@ class WebSession(Base):
     token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
     tg_id: Mapped[str] = mapped_column(String(40), index=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class Region(Base):
+    """One of the 17 regions of South Korea (see app/geo.py)."""
+    __tablename__ = "regions"
+    code: Mapped[str] = mapped_column(String(20), primary_key=True)
+    name_ru: Mapped[str] = mapped_column(String(60))
+    name_ko: Mapped[str] = mapped_column(String(40))
+    sort: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class District(Base):
+    """A city (si), county (gun) or district (gu) inside a region."""
+    __tablename__ = "districts"
+    __table_args__ = (UniqueConstraint("region_code", "name_ko", name="uq_district"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    region_code: Mapped[str] = mapped_column(ForeignKey("regions.code"), index=True)
+    name_ru: Mapped[str] = mapped_column(String(60))
+    name_ko: Mapped[str] = mapped_column(String(40))
+    kind: Mapped[str] = mapped_column(String(4))  # gu, si, gun
+    label: Mapped[str] = mapped_column(String(100), index=True)
+    sort: Mapped[int] = mapped_column(Integer, default=0)

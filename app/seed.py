@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Group, Article
 from app.payments import ensure_pricing
+from app.geo import ensure_geo
 
 # Communities from screen 9 of the design. Telegram links are added by administrators.
 GROUPS = [
@@ -30,6 +31,7 @@ ARTICLE_SECTIONS = [
 
 def seed_reference(db: Session) -> None:
     ensure_pricing(db)
+    ensure_geo(db)
     if db.scalar(select(func.count()).select_from(Group)) == 0:
         for name, flag, description in GROUPS:
             db.add(Group(name=name, flag=flag, description=description, telegram_link=""))

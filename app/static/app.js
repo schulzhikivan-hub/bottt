@@ -143,21 +143,77 @@ function goBack() {
 }
 tg?.BackButton?.onClick(goBack);
 
+// ---------- справочники полей: визы, графики, типы жилья… (приходят с сервера) ----------
+let fieldDefs = null;
+async function loadFields() {
+  if (!fieldDefs) fieldDefs = await api("/api/fields", {quiet: true});
+  document.querySelectorAll("select[data-list]").forEach((sel) => {
+    sel.innerHTML = `<option value="">${sel.dataset.any || "Не указано"}</option>` +
+      (fieldDefs[sel.dataset.list] || []).map((i) => `<option value="${i.value}">${esc(i.label)}</option>`).join("");
+  });
+  document.querySelectorAll("[data-visas]").forEach((box) => {
+    box.innerHTML = fieldDefs.visas.map((v) => `<label class="vchip"><input type="checkbox" value="${v.value}"><span>${v.label}</span></label>`).join("");
+  });
+  return fieldDefs;
+}
+const labelOf = (list, value) => (fieldDefs?.[list] || []).find((i) => i.value === value)?.label || value;
+
 // ---------- карточки ----------
 const promoBadge = (x) => (x.promo ? `<span class="promo ${x.promo}">${PROMO[x.promo] || ""}</span>` : "");
 function priceText(x) {
-  if (x.price_amount != null) return fmtKRW(x.price_amount) + (x.price ? " " + x.price : "");
-  return x.price || "Цена договорная";
+  if (x.price_amount == null) return x.price || "Цена договорная";
+  let text = fmtKRW(x.price_amount);
+  if (x.category === "job" && x.details?.salary_max) text = new Intl.NumberFormat("ru-RU").format(x.price_amount) + " – " + fmtKRW(x.details.salary_max);
+  const suffix = x.category === "job" ? labelOf("salary_period", x.salary_period || "month") : x.category === "housing" ? "в месяц" : "";
+  return [text, suffix, x.price].filter(Boolean).join(" ");
 }
 function pills(x) {
   const out = [];
   if (x.category === "job") {
     if (x.housing_provided) out.push("🏠 Жильё");
     if (x.meals_provided) out.push("🍱 Питание");
+    if (x.schedule) out.push(labelOf("schedule", x.schedule));
+    (x.visas || []).slice(0, 3).forEach((v) => out.push(v));
   }
-  if (x.category === "housing" && x.rooms) out.push(`🛏 ${x.rooms} комн.`);
-  if (x.category === "marketplace" && x.condition) out.push(x.condition === "new" ? "Новое" : "Б/у");
-  return out.map((t) => `<span class="pill">${t}</span>`).join("");
+  if (x.category === "housing") {
+    if (x.housing_type) out.push(labelOf("housing_type", x.housing_type));
+    if (x.rooms) out.push(`🛏 ${x.rooms} комн.`);
+    if (x.area_m2) out.push(`${x.area_m2} м²`);
+  }
+  if (x.category === "marketplace") {
+    if (x.goods_category) out.push(labelOf("goods_category", x.goods_category));
+    if (x.condition) out.push(labelOf("condition", x.condition));
+  }
+  return out.map((t) => `<span class="pill">${esc(t)}</span>`).join("");
+}
+// Полный список характеристик для страницы объявления
+function specs(x) {
+  const d = x.details || {};
+  const yes = (v, a = "Да", b = "Нет") => (v === true ? a : v === false ? b : null);
+  const rows = [];
+  if (x.category === "job") {
+    rows.push(["Компания", d.company], ["Должность", d.position],
+      ["Занятость", x.employment && labelOf("employment", x.employment)], ["График", x.schedule && labelOf("schedule", x.schedule)],
+      ["Подходящие визы", (x.visas || []).join(", ")], ["Жильё", yes(x.housing_provided, "Предоставляется", "Нет")],
+      ["Питание", yes(x.meals_provided, "Включено", "Нет")], ["Развозка", yes(d.transport)],
+      ["Опыт", yes(d.experience, "Нужен", "Не нужен")], ["Мест", d.vacancies], ["Начало работы", d.start_date]);
+  } else if (x.category === "housing") {
+    rows.push(["Тип", x.housing_type && labelOf("housing_type", x.housing_type)],
+      ["Залог", x.deposit != null && fmtKRW(x.deposit)], ["Коммунальные", d.maintenance_fee != null && fmtKRW(d.maintenance_fee)],
+      ["Площадь", x.area_m2 && x.area_m2 + " м²"], ["Комнат", x.rooms], ["Этаж", d.floor], ["Свободно с", d.available_from],
+      ["Срок договора", d.contract_term], ["Станция метро", d.station],
+      ["Животные", yes(x.pets_allowed, "Можно", "Нельзя")], ["Мебель", yes(x.furnished, "Есть", "Нет")]);
+    if (x.price_amount != null && x.deposit != null) {
+      rows.push(["Въезд", `залог + первый месяц = ${fmtKRW(x.deposit + x.price_amount)}`]);
+    }
+  } else {
+    rows.push(["Категория", x.goods_category && labelOf("goods_category", x.goods_category)],
+      ["Состояние", x.condition && labelOf("condition", x.condition)], ["Бренд", d.brand],
+      ["Торг", yes(x.negotiable, "Возможен", "Нет")], ["Доставка", yes(d.delivery, "Есть", "Нет")]);
+  }
+  const html = rows.filter(([, v]) => v !== null && v !== undefined && v !== "" && v !== false)
+    .map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("");
+  return html ? `<dl class="specs">${html}</dl>` : "";
 }
 function listingCard(x) {
   const fav = favIds.has(x.id);
@@ -172,8 +228,12 @@ function listingCard(x) {
 }
 
 // ---------- каталог: поиск, фильтры, страницы ----------
-const DEFAULT_FILTERS = {q: "", category: "", city: "", price_min: "", price_max: "", sort: "new",
-                         housing_provided: false, meals_provided: false, condition: "", rooms_min: ""};
+const DEFAULT_FILTERS = {q: "", category: "", region_code: "", district_id: "", price_min: "", price_max: "", sort: "new",
+                         housing_provided: false, meals_provided: false, condition: "", rooms_min: "",
+                         visa: "", schedule: "", employment: "", housing_type: "", deposit_max: "", area_min: "",
+                         pets_allowed: false, furnished: false, goods_category: ""};
+const SECTION_FILTERS = ["housing_provided", "meals_provided", "condition", "rooms_min", "visa", "schedule", "employment",
+                         "housing_type", "deposit_max", "area_min", "pets_allowed", "furnished", "goods_category"];
 let filters = {...DEFAULT_FILTERS};
 const page = {offset: 0, loading: false};
 
@@ -181,13 +241,12 @@ function catalogParams(offset) {
   const p = new URLSearchParams({limit: "20", offset: String(offset)});
   for (const [key, value] of Object.entries(filters)) {
     if (value === "" || value === false || value == null) continue;
-    p.set(key, value === true ? "true" : value);
+    p.set(key === "region_code" ? "region" : key, value === true ? "true" : value);
   }
   return p;
 }
 function activeFilterCount() {
-  return ["city", "price_min", "price_max", "condition", "rooms_min"].filter((k) => filters[k]).length
-    + (filters.housing_provided ? 1 : 0) + (filters.meals_provided ? 1 : 0);
+  return ["region_code", "price_min", "price_max", ...SECTION_FILTERS].filter((k) => filters[k]).length;
 }
 function updateFilterUi() {
   const n = activeFilterCount();
@@ -234,26 +293,50 @@ $("#search").addEventListener("keydown", (e) => {
 document.querySelectorAll("#chips .chip").forEach((chip) => chip.addEventListener("click", () => {
   filters.category = chip.dataset.cat;
   // Особые фильтры подходят только одному разделу
-  filters.housing_provided = false; filters.meals_provided = false; filters.condition = ""; filters.rooms_min = "";
+  for (const k of SECTION_FILTERS) filters[k] = DEFAULT_FILTERS[k];
   reloadCatalog();
 }));
 $("#sortSelect").onchange = () => { filters.sort = $("#sortSelect").value; reloadCatalog(); };
 $("#moreBtn").onclick = () => loadCatalog(true);
 
-async function loadCityHints() {
-  try {
-    const rows = await api("/api/cities", {quiet: true});
-    $("#cityHints").innerHTML = rows.map((c) => `<option value="${esc(c.city)}">`).join("");
-  } catch (e) { /* подсказки не обязательны */ }
+// ---------- города и районы Южной Кореи ----------
+let geoData = null;
+async function loadGeo() {
+  if (!geoData) geoData = (await api("/api/geo", {quiet: true})).regions;
+  return geoData;
+}
+function regionOptions(selected, anyText) {
+  return `<option value="">${anyText || "Выберите регион"}</option>` + (geoData || []).map((r) =>
+    `<option value="${r.code}" ${r.code === selected ? "selected" : ""}>${esc(r.name)} (${esc(r.name_ko)})</option>`).join("");
+}
+function districtOptions(regionCode, selectedId, anyText) {
+  const r = (geoData || []).find((x) => x.code === regionCode);
+  if (!r) return `<option value="">${anyText || "Сначала выберите регион"}</option>`;
+  return `<option value="">${anyText || "Выберите город / район"}</option>` + r.districts.map((d) =>
+    `<option value="${d.id}" ${d.id === Number(selectedId) ? "selected" : ""}>${esc(d.name)} (${esc(d.name_ko)})</option>`).join("");
+}
+// Два связанных списка: регион → город или район
+async function setGeo(container, regionCode, districtId, anyRegion, anyDistrict) {
+  await loadGeo();
+  const region = document.querySelector(`${container} [data-geo-region]`);
+  const district = document.querySelector(`${container} [data-geo-district]`);
+  region.innerHTML = regionOptions(regionCode, anyRegion);
+  district.innerHTML = districtOptions(regionCode, districtId, anyDistrict);
+  region.onchange = () => { district.innerHTML = districtOptions(region.value, null, anyDistrict); };
 }
 function showBlocks(formSelector, category) {
   document.querySelectorAll(`${formSelector} [data-for]`).forEach((el) => { el.hidden = el.dataset.for !== category; });
 }
-function openFilters() {
+async function openFilters() {
   const f = $("#filterForm");
-  f.city.value = filters.city; f.price_min.value = filters.price_min; f.price_max.value = filters.price_max;
-  f.housing_provided.checked = filters.housing_provided; f.meals_provided.checked = filters.meals_provided;
-  f.condition.value = filters.condition; f.rooms_min.value = filters.rooms_min;
+  await loadFields();
+  await setGeo("#filterGeo", filters.region_code, filters.district_id, "Вся Корея", "Любой район");
+  f.price_min.value = filters.price_min; f.price_max.value = filters.price_max;
+  for (const k of SECTION_FILTERS) {
+    const el = f.elements[k];
+    if (!el) continue;
+    if (el.type === "checkbox") el.checked = Boolean(filters[k]); else el.value = filters[k] || "";
+  }
   showBlocks("#filterForm", filters.category);
   $("#filterHint").hidden = Boolean(filters.category);
   $("#filters").classList.remove("hidden");
@@ -263,10 +346,14 @@ $("#closeFilters").onclick = () => $("#filters").classList.add("hidden");
 $("#filterForm").onsubmit = (e) => {
   e.preventDefault();
   const f = e.target;
-  filters.city = f.city.value.trim();
+  filters.region_code = f.region_code.value; filters.district_id = f.district_id.value;
   filters.price_min = f.price_min.value; filters.price_max = f.price_max.value;
-  filters.housing_provided = f.housing_provided.checked; filters.meals_provided = f.meals_provided.checked;
-  filters.condition = f.condition.value; filters.rooms_min = f.rooms_min.value;
+  for (const k of SECTION_FILTERS) {
+    const el = f.elements[k];
+    // Скрытые поля других разделов не учитываются
+    const visible = el && !el.closest("[data-for]")?.hidden;
+    filters[k] = visible ? (el.type === "checkbox" ? el.checked : el.value) : DEFAULT_FILTERS[k];
+  }
   $("#filters").classList.add("hidden");
   reloadCatalog();
 };
@@ -286,6 +373,7 @@ function contactLinks(contact) {
 }
 async function openDetail(id, push = true) {
   try {
+    await loadFields();
     const x = await api(`/api/listings/${id}`, {quiet: true});
     const {phone, user} = contactLinks(x.contact);
     const fav = favIds.has(x.id);
@@ -294,7 +382,7 @@ async function openDetail(id, push = true) {
       <h1>${esc(x.title)}</h1>
       <div class="meta">📍 ${esc(x.city)} · ${esc(CAT[x.category] || x.category)}</div>
       <div class="price big">${esc(priceText(x))}</div>
-      <div class="pills">${pills(x)}</div>
+      ${specs(x)}
       <p class="desc">${esc(x.description || "Подробности уточняйте у автора")}</p>
       <p class="muted">Опубликовано: ${esc(fmtDate(x.created_at).split(",")[0] || "")}${x.contact && !phone && !user ? " · Контакт: " + esc(x.contact) : ""}</p>
       <div class="cta">
@@ -495,46 +583,74 @@ async function deleteMyAccount() {
 }
 
 // ---------- создание и редактирование объявления ----------
-function updateFormBlocks() { showBlocks("#listingForm", $("#formCategory").value); }
+function updateFormBlocks() {
+  const category = $("#formCategory").value;
+  showBlocks("#listingForm", category);
+  $("#amountLabel").textContent = {job: "Зарплата от, ₩", housing: "Аренда в месяц, ₩", marketplace: "Цена, ₩"}[category] || "Сумма, ₩";
+}
 $("#formCategory").onchange = updateFormBlocks;
-function openAdd(category) {
+async function openAdd(category) {
   if (category === "dating") return openMyDating();
+  await loadFields();
   currentEditId = null;
   const f = $("#listingForm");
   f.reset();
   f.category.value = category;
-  f.city.value = me?.city || "";
+  await setGeo("#formGeo", me?.region_code || "", me?.district_id || "");
   f.category.disabled = false;
   $("#modalTitle").textContent = "Новое объявление";
   updateFormBlocks();
   $("#addSheet").classList.add("hidden");
   $("#modal").classList.remove("hidden");
 }
-function openEdit(item) {
+async function openEdit(item) {
+  await loadFields();
   currentEditId = item.id;
   const f = $("#listingForm");
   f.reset();
   f.category.value = item.category;
   f.category.disabled = true;  // раздел менять нельзя
-  for (const k of ["title", "city", "price", "description", "contact"]) f[k].value = item[k] || "";
+  await setGeo("#formGeo", item.region_code || "", item.district_id || "");
+  const d = item.details || {};
+  for (const k of ["title", "price", "description", "contact"]) f[k].value = item[k] || "";
   f.price_amount.value = item.price_amount ?? "";
-  f.housing_provided.checked = Boolean(item.housing_provided);
-  f.meals_provided.checked = Boolean(item.meals_provided);
-  f.rooms.value = item.rooms ?? "";
-  f.condition.value = item.condition || "";
+  for (const k of ["salary_period", "employment", "schedule", "housing_type", "goods_category", "condition"]) f[k].value = item[k] || "";
+  for (const k of ["deposit", "area_m2", "rooms"]) f[k].value = item[k] ?? "";
+  for (const k of ["housing_provided", "meals_provided", "pets_allowed", "furnished", "negotiable"]) f[k].checked = Boolean(item[k]);
+  for (const k of ["company", "position", "salary_max", "vacancies", "start_date", "maintenance_fee", "floor",
+                   "available_from", "contract_term", "station", "brand"]) f["d_" + k].value = d[k] ?? "";
+  for (const k of ["transport", "experience", "delivery"]) f["d_" + k].checked = Boolean(d[k]);
+  document.querySelectorAll("#listingForm [data-visas] input").forEach((c) => { c.checked = (item.visas || []).includes(c.value); });
   $("#modalTitle").textContent = "Изменить объявление";
   updateFormBlocks();
   $("#modal").classList.remove("hidden");
 }
 function listingPayload(f) {
   const v = (n) => f[n].value.trim();
+  const num = (n) => (v(n) === "" ? undefined : Number(v(n)));
   const category = f.category.value;
-  const data = {category, title: v("title"), city: v("city"), price: v("price"), description: v("description"), contact: v("contact")};
-  if (v("price_amount") !== "") data.price_amount = Number(v("price_amount"));
-  if (category === "job") { data.housing_provided = f.housing_provided.checked; data.meals_provided = f.meals_provided.checked; }
-  if (category === "housing" && v("rooms") !== "") data.rooms = Number(v("rooms"));
-  if (category === "marketplace" && f.condition.value) data.condition = f.condition.value;
-  return data;
+  const data = {category, title: v("title"), region_code: f.region_code.value, price: v("price"),
+                description: v("description"), contact: v("contact"), price_amount: num("price_amount")};
+  if (f.district_id.value) data.district_id = Number(f.district_id.value);
+  let details = {};
+  if (category === "job") {
+    Object.assign(data, {salary_period: v("salary_period") || undefined, employment: v("employment") || undefined,
+      schedule: v("schedule") || undefined, housing_provided: f.housing_provided.checked, meals_provided: f.meals_provided.checked,
+      visas: [...document.querySelectorAll("#listingForm [data-visas] input:checked")].map((c) => c.value)});
+    details = {company: v("d_company"), position: v("d_position"), salary_max: num("d_salary_max"), vacancies: num("d_vacancies"),
+               start_date: v("d_start_date"), transport: f.d_transport.checked, experience: f.d_experience.checked};
+  } else if (category === "housing") {
+    Object.assign(data, {housing_type: v("housing_type") || undefined, deposit: num("deposit"), area_m2: num("area_m2"),
+      rooms: num("rooms"), pets_allowed: f.pets_allowed.checked, furnished: f.furnished.checked});
+    details = {maintenance_fee: num("d_maintenance_fee"), floor: num("d_floor"), available_from: v("d_available_from"),
+               contract_term: v("d_contract_term"), station: v("d_station")};
+  } else {
+    Object.assign(data, {goods_category: v("goods_category") || undefined, condition: v("condition") || undefined,
+      negotiable: f.negotiable.checked});
+    details = {brand: v("d_brand"), delivery: f.d_delivery.checked};
+  }
+  data.details = Object.fromEntries(Object.entries(details).filter(([, x]) => x !== undefined && x !== ""));
+  return Object.fromEntries(Object.entries(data).filter(([, x]) => x !== undefined));
 }
 $("#listingForm").onsubmit = async (e) => {
   e.preventDefault();
@@ -648,11 +764,13 @@ document.querySelectorAll("#datingChips .chip").forEach((chip) => chip.addEventL
 async function openMyDating() {
   if (!(await requireConsent())) return;
   const f = $("#datingForm");
+  await setGeo("#datingGeo", me?.region_code || "", me?.district_id || "");
   try {
     const mine = await api("/api/dating/me");
     if (mine) {
       f.birth_year.value = mine.age ? new Date().getFullYear() - mine.age : "";
-      f.gender.value = mine.gender; f.city.value = mine.city;
+      f.gender.value = mine.gender;
+      await setGeo("#datingGeo", mine.region_code || "", mine.district_id || "");
       toast("Статус анкеты: " + ({pending: "на проверке", published: "опубликована", rejected: "отклонена"}[mine.status] || mine.status));
     }
   } catch (e) { toast(e.message); }
@@ -666,7 +784,8 @@ $("#datingForm").onsubmit = async (e) => {
   const f = e.target;
   try {
     await api("/api/dating/profile", {method: "PUT", body: JSON.stringify({
-      birth_year: Number(f.birth_year.value), gender: f.gender.value, city: f.city.value.trim(), bio: f.bio.value.trim()})});
+      birth_year: Number(f.birth_year.value), gender: f.gender.value, region_code: f.region_code.value,
+      district_id: f.district_id.value ? Number(f.district_id.value) : null, bio: f.bio.value.trim()})});
     if (f.photo.files[0]) {
       const data = new FormData();
       data.append("file", f.photo.files[0]);
@@ -781,12 +900,17 @@ $("#consentOk").onclick = async () => {
     toast("Спасибо! Теперь можно пользоваться приложением");
   } catch (err) { toast(err.message); }
 };
-$("#cityBtn").onclick = () => { $("#cityForm").city.value = me?.city || ""; $("#cityModal").classList.remove("hidden"); };
+$("#cityBtn").onclick = async () => {
+  await setGeo("#cityGeo", me?.region_code || "", me?.district_id || "");
+  $("#cityModal").classList.remove("hidden");
+};
 $("#closeCity").onclick = () => $("#cityModal").classList.add("hidden");
 $("#cityForm").onsubmit = async (e) => {
   e.preventDefault();
   try {
-    await api("/api/me/settings", {method: "PUT", body: JSON.stringify({city: e.target.city.value.trim()})});
+    const f = e.target;
+    await api("/api/me/settings", {method: "PUT", body: JSON.stringify({
+      region_code: f.region_code.value, district_id: f.district_id.value ? Number(f.district_id.value) : null})});
     $("#cityModal").classList.add("hidden");
     toast("Город сохранён");
     loadProfile();
@@ -833,8 +957,8 @@ function openFromLink() {
 if (!inTelegram) $("#logoutItem").hidden = !localStorage.getItem("webSession");
 const openedFromLink = openFromLink();
 updateFilterUi();
-loadCatalog();  // список главной грузится в любом случае, даже если сразу открыта другая страница
-loadCityHints();
+loadFields().then(() => loadCatalog());  // подписи полей нужны карточкам с первой отрисовки
+loadGeo();
 loadFavIds().then(() => {
   document.querySelectorAll("#listings .fav").forEach((b) => {
     const id = Number(b.closest("[data-id]")?.dataset.id);
