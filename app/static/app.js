@@ -213,7 +213,9 @@ function specs(x) {
     }
   } else {
     rows.push(["Категория", x.goods_category && labelOf("goods_category", x.goods_category)],
-      ["Состояние", x.condition && labelOf("condition", x.condition)], ["Бренд", d.brand],
+      ["Состояние", x.condition && labelOf("condition", x.condition)], ["Бренд", d.brand], ["Модель", d.model],
+      ["Год выпуска", d.year], ["Пробег", d.mileage_km != null && new Intl.NumberFormat("ru-RU").format(d.mileage_km) + " км"],
+      ["Где оказывается", d.service_area], ["Опыт", d.experience_years != null && d.experience_years + " лет"],
       ["Торг", yes(x.negotiable, "Возможен", "Нет")], ["Доставка", yes(d.delivery, "Есть", "Нет")]);
   }
   const html = rows.filter(([, v]) => v !== null && v !== undefined && v !== "" && v !== false)
@@ -771,14 +773,79 @@ async function deleteMyAccount() {
 }
 
 // ---------- создание и редактирование объявления ----------
+let formKind = "job";
+const KIND_CATEGORY = {job: "job", housing: "housing", goods: "marketplace", car: "marketplace", service: "marketplace"};
+const KIND_TITLE = {job: "Добавить вакансию", housing: "Добавить жильё", goods: "Добавить товар", car: "Добавить автомобиль", service: "Добавить услугу"};
+const KIND_HINT = {job: "Например: Работа на заводе", housing: "Например: Квартира 2 комнаты, Каннам", goods: "Например: iPhone 13, 128 ГБ",
+                   car: "Например: Hyundai Sonata 2018", service: "Например: Перевод документов"};
+const kindOfItem = (x) => x.category !== "marketplace" ? x.category
+  : x.goods_category === "auto" ? "car" : x.goods_category === "services" ? "service" : "goods";
+const needsPhoto = (kind) => ["housing", "goods", "car"].includes(kind);
 function updateFormBlocks() {
-  const category = $("#formCategory").value;
+  const category = KIND_CATEGORY[formKind];
+  $("#formCategory").value = category;
   showBlocks("#listingForm", category);
-  $("#photoHint").textContent = ["housing", "marketplace"].includes(category)
-    ? "Для жилья и товаров нужно хотя бы одно фото." : "Фото по желанию.";
-  $("#amountLabel").textContent = {job: "Зарплата от, ₩", housing: "Аренда в месяц, ₩", marketplace: "Цена, ₩"}[category] || "Сумма, ₩";
+  document.querySelectorAll("#listingForm [data-showfor]").forEach((el) => { el.hidden = !el.dataset.showfor.split(",").includes(formKind); });
+  $("#listingForm [name=title]").placeholder = KIND_HINT[formKind];
+  $("#listingForm [name=d_brand]").placeholder = formKind === "car" ? "Например: Hyundai" : "Например: Samsung";
+  $("#photoHint").textContent = needsPhoto(formKind) ? "Нужно хотя бы одно фото: с ним объявлениям доверяют больше." : "Фото по желанию.";
+  $("#amountLabel").textContent = {job: "Зарплата от, ₩", housing: "Аренда в месяц, ₩", goods: "Цена, ₩", car: "Цена, ₩", service: "Стоимость от, ₩"}[formKind];
 }
-$("#formCategory").onchange = updateFormBlocks;
+$("#priceNego").onchange = () => {
+  const f = $("#listingForm");
+  f.price_amount.disabled = $("#priceNego").checked;
+  if ($("#priceNego").checked) { f.price_amount.value = ""; f.price.value = "Договорная"; }
+  else if (f.price.value === "Договорная") f.price.value = "";
+};
+
+// ---- шаги мастера ----
+const STEP_NAMES = ["Основное", "Детали", "Фото и текст", "Проверка"];
+let wizStep = 1;
+function showStep(n) {
+  wizStep = n;
+  document.querySelectorAll("#listingForm .step").forEach((el) => { el.hidden = Number(el.dataset.step) !== n; });
+  $("#stepsBar").innerHTML = STEP_NAMES.map((t, i) => `<div class="${i + 1 === n ? "on" : i + 1 < n ? "done" : ""}"><i></i>${i + 1}. ${t}</div>`).join("");
+  $("#prevBtn").hidden = n === 1;
+  $("#nextBtn").hidden = n === 4;
+  if (n === 4) renderPreview();
+  $("#scroll").scrollTop = 0;
+  $("#modal .sheet").scrollTop = 0;
+}
+function validateStep(n) {
+  const f = $("#listingForm");
+  if (n === 1) {
+    if (f.title.value.trim().length < 3) { toast("Напишите заголовок (не короче 3 букв)"); return false; }
+    if (!f.region_code.value || !f.district_id.value) { toast("Выберите регион и город или район"); return false; }
+  }
+  if (n === 3 && needsPhoto(formKind) && !formPhotos.length && !formFiles.length) { toast("Добавьте хотя бы одно фото"); return false; }
+  return true;
+}
+$("#nextBtn").onclick = () => { if (validateStep(wizStep)) showStep(wizStep + 1); };
+$("#prevBtn").onclick = () => showStep(wizStep - 1);
+function renderPreview() {
+  const f = $("#listingForm");
+  const data = listingPayload(f);
+  const place = f.district_id.selectedOptions[0]?.text || "";
+  const first = formPhotos[0]?.thumb || formFiles[0]?.preview || null;
+  const item = {...data, id: 0, city: place, cover: first, visas: data.visas || [], details: data.details || {}, promo: null};
+  $("#listingPreview").innerHTML = listingCard(item);
+}
+
+// ---- черновик на устройстве: форма не пропадает, если закрыть окно ----
+const draftKey = () => "khDraft:" + formKind;
+let draftTimer = null;
+function saveLocalDraft() {
+  if (currentEditId) return;
+  clearTimeout(draftTimer);
+  draftTimer = setTimeout(() => {
+    try {
+      const data = listingPayload($("#listingForm"));
+      if (data.title || data.description) localStorage.setItem(draftKey(), JSON.stringify({data, step: wizStep}));
+    } catch (e) { /* форма ещё не готова */ }
+  }, 400);
+}
+$("#listingForm").addEventListener("input", saveLocalDraft);
+$("#listingForm").addEventListener("change", saveLocalDraft);
 function renderPhotos() {
   const cells = formPhotos.map((p, i) => `<div class="ph" data-ph="${p.id}"><img src="${esc(p.thumb)}" alt="">
       ${p.status === "pending" ? '<small>на проверке</small>' : ""}${i === 0 ? "<small>обложка</small>" : ""}
@@ -815,29 +882,34 @@ function resetPhotos(list) {
   formPhotos = list || []; formFiles = []; removedPhotos = [];
   renderPhotos();
 }
-async function openAdd(category) {
-  if (category === "dating") return openMyDating();
+async function openAdd(kind) {
+  if (kind === "dating") return openMyDating();
+  if (me?.blocked) { toast("Аккаунт ограничен" + (me.block_reason ? ": " + me.block_reason : "")); return; }
   await loadFields();
   currentEditId = null;
+  formKind = kind;
   const f = $("#listingForm");
   f.reset();
-  f.category.value = category;
-  await setGeo("#formGeo", me?.region_code || "", me?.district_id || "");
   f.category.disabled = false;
-  $("#modalTitle").textContent = {job: "Добавить вакансию", housing: "Добавить жильё", marketplace: "Добавить товар"}[category] || "Новое объявление";
+  f.price_amount.disabled = false;
+  await setGeo("#formGeo", me?.region_code || "", me?.district_id || "");
+  $("#modalTitle").textContent = KIND_TITLE[kind];
   resetPhotos([]);
   updateFormBlocks();
+  // Незаконченный черновик на этом устройстве
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(draftKey()) || "null"); } catch (e) { saved = null; }
   $("#addSheet").classList.add("hidden");
   $("#modal").classList.remove("hidden");
+  showStep(1);
+  if (saved?.data && (await confirmDialog("Продолжить незаконченное объявление?"))) {
+    fillForm(saved.data);
+    updateFormBlocks();
+    toast("Фото нужно добавить заново");
+  } else if (saved) localStorage.removeItem(draftKey());
 }
-async function openEdit(item) {
-  await loadFields();
-  currentEditId = item.id;
+function fillForm(item) {
   const f = $("#listingForm");
-  f.reset();
-  f.category.value = item.category;
-  f.category.disabled = true;  // раздел менять нельзя
-  await setGeo("#formGeo", item.region_code || "", item.district_id || "");
   const d = item.details || {};
   for (const k of ["title", "price", "description", "contact"]) f[k].value = item[k] || "";
   f.price_amount.value = item.price_amount ?? "";
@@ -845,20 +917,35 @@ async function openEdit(item) {
   for (const k of ["deposit", "area_m2", "rooms"]) f[k].value = item[k] ?? "";
   for (const k of ["housing_provided", "meals_provided", "pets_allowed", "furnished", "negotiable"]) f[k].checked = Boolean(item[k]);
   for (const k of ["company", "position", "salary_max", "vacancies", "start_date", "maintenance_fee", "floor",
-                   "available_from", "contract_term", "station", "brand"]) f["d_" + k].value = d[k] ?? "";
+                   "available_from", "contract_term", "station", "brand", "model", "year", "mileage_km", "service_area",
+                   "experience_years"]) f["d_" + k].value = d[k] ?? "";
   for (const k of ["transport", "experience", "delivery"]) f["d_" + k].checked = Boolean(d[k]);
   document.querySelectorAll("#listingForm [data-visas] input").forEach((c) => { c.checked = (item.visas || []).includes(c.value); });
+  $("#priceNego").checked = item.price === "Договорная" && item.price_amount == null;
+  f.price_amount.disabled = $("#priceNego").checked;
+}
+async function openEdit(item) {
+  await loadFields();
+  currentEditId = item.id;
+  const f = $("#listingForm");
+  f.reset();
+  formKind = kindOfItem(item);
+  f.category.value = item.category;
+  f.category.disabled = true;  // раздел менять нельзя
+  await setGeo("#formGeo", item.region_code || "", item.district_id || "");
+  fillForm(item);
   $("#modalTitle").textContent = "Изменить объявление";
   resetPhotos((item.photos || []).filter((p) => p.status !== "removal"));
   updateFormBlocks();
   $("#modal").classList.remove("hidden");
+  showStep(1);
 }
 function listingPayload(f) {
   const v = (n) => f[n].value.trim();
   const num = (n) => (v(n) === "" ? undefined : Number(v(n)));
-  const category = f.category.value;
+  const category = KIND_CATEGORY[formKind] || f.category.value;
   const data = {category, title: v("title"), region_code: f.region_code.value, price: v("price"),
-                description: v("description"), contact: v("contact"), price_amount: num("price_amount")};
+                description: v("description"), contact: v("contact"), price_amount: $("#priceNego").checked ? undefined : num("price_amount")};
   if (f.district_id.value) data.district_id = Number(f.district_id.value);
   let details = {};
   if (category === "job") {
@@ -873,9 +960,13 @@ function listingPayload(f) {
     details = {maintenance_fee: num("d_maintenance_fee"), floor: num("d_floor"), available_from: v("d_available_from"),
                contract_term: v("d_contract_term"), station: v("d_station")};
   } else {
-    Object.assign(data, {goods_category: v("goods_category") || undefined, condition: v("condition") || undefined,
-      negotiable: f.negotiable.checked});
-    details = {brand: v("d_brand"), delivery: f.d_delivery.checked};
+    const goodsCategory = formKind === "car" ? "auto" : formKind === "service" ? "services" : (v("goods_category") || undefined);
+    Object.assign(data, {goods_category: goodsCategory, negotiable: f.negotiable.checked});
+    if (formKind !== "service") data.condition = v("condition") || undefined;
+    details = formKind === "service"
+      ? {service_area: v("d_service_area"), experience_years: num("d_experience_years")}
+      : {brand: v("d_brand"), delivery: f.d_delivery.checked, ...(formKind === "car"
+          ? {model: v("d_model"), year: num("d_year"), mileage_km: num("d_mileage_km")} : {})};
   }
   data.details = Object.fromEntries(Object.entries(details).filter(([, x]) => x !== undefined && x !== ""));
   return Object.fromEntries(Object.entries(data).filter(([, x]) => x !== undefined));
@@ -883,9 +974,10 @@ function listingPayload(f) {
 async function saveListing(send) {
   const f = $("#listingForm");
   const data = listingPayload(f);
-  if (send && ["housing", "marketplace"].includes(data.category || f.category.value) && !formPhotos.length && !formFiles.length) {
-    toast("Добавьте хотя бы одно фото"); return;
-  }
+  if (send) {
+    for (const n of [1, 3]) if (!validateStep(n)) { showStep(n); return; }
+    if (!$("#rulesOk").checked) { toast("Отметьте, что объявление правдивое и без предоплат"); return; }
+  } else if (data.title.length < 3 || !data.district_id) { toast("Для черновика укажите заголовок и город"); return; }
   try {
     let id = currentEditId;
     const wasDraft = id ? ownItems[id]?.status === "draft" : true;
@@ -899,15 +991,24 @@ async function saveListing(send) {
     }
     await uploadPhotos(id);
     if (send && wasDraft) await api(`/api/listings/${id}/submit`, {method: "POST"});
-    toast(!send ? "Черновик сохранён" : wasLive ? "Изменения отправлены на проверку" : "Отправлено на проверку");
+    const wasEdit = Boolean(currentEditId);
+    if (!wasEdit) localStorage.removeItem(draftKey());
     currentEditId = null;
     $("#modal").classList.add("hidden");
-    showView("profile");
+    homeLoaded = false;
+    if (send) {
+      $("#doneTitle").textContent = wasLive ? "Изменения отправлены" : "Отправлено на проверку";
+      $("#doneText").textContent = wasLive ? "Пока модератор проверяет, остаётся прежняя версия."
+        : "Мы сообщим в Telegram, когда модератор примет решение. Объявление будет показано 30 дней.";
+      $("#doneSheet").classList.remove("hidden");
+    } else { toast("Черновик сохранён: он в профиле, вкладка «Черновики»"); showView("profile"); }
     loadProfile();
   } catch (err) { toast(err.message); }
 }
-$("#listingForm").onsubmit = (e) => { e.preventDefault(); saveListing(true); };
+$("#listingForm").onsubmit = (e) => { e.preventDefault(); if (wizStep < 4) { $("#nextBtn").onclick(); return; } saveListing(true); };
 $("#draftBtn").onclick = () => saveListing(false);
+$("#doneMine").onclick = () => { $("#doneSheet").classList.add("hidden"); showView("profile"); };
+$("#doneMore").onclick = () => { $("#doneSheet").classList.add("hidden"); $("#addSheet").classList.remove("hidden"); };
 $("#closeModal").onclick = () => $("#modal").classList.add("hidden");
 $("#addBtn").onclick = async () => { if (await requireConsent()) $("#addSheet").classList.remove("hidden"); };
 $("#closeAdd").onclick = () => $("#addSheet").classList.add("hidden");

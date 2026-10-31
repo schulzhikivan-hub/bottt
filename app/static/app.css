@@ -393,3 +393,16 @@ form textarea{resize:vertical}
 .retry{margin-top:8px;border:0;background:var(--accent);color:#fff;border-radius:10px;padding:8px 14px}
 .hscroll{scroll-padding-left:16px}
 .searchbar input{font-size:14px;text-overflow:ellipsis}
+
+/* ===== мастер создания ===== */
+.steps{display:flex;gap:6px;margin:4px 0 14px}
+.steps div{flex:1;text-align:center;font-size:11px;color:var(--hint)}
+.steps i{display:block;height:5px;border-radius:3px;background:var(--border);margin-bottom:4px}
+.steps .on{color:var(--accent);font-weight:700}
+.steps .on i,.steps .done i{background:var(--accent)}
+.wizbar{display:flex;gap:10px;margin-top:14px;position:sticky;bottom:0;background:var(--bg);padding:8px 0 4px}
+.wizbar .submit{flex:2;margin:0}
+.ghostbtn{flex:1;border:1px solid var(--border);background:var(--card);border-radius:12px;padding:14px;font-weight:700;color:var(--accent)}
+.preview{pointer-events:none;margin:6px 0 12px}
+.preview .fav{display:none}
+.step[hidden],.wizbar [hidden]{display:none !important}

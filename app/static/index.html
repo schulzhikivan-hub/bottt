@@ -191,13 +191,17 @@
 <div class="menu-list">
 <button class="wide" data-add="job">💼 Вакансия</button>
 <button class="wide" data-add="housing">🏠 Жильё</button>
-<button class="wide" data-add="marketplace">🛍️ Товар</button>
+<button class="wide" data-add="goods">🛍️ Товар</button>
+<button class="wide" data-add="car">🚗 Автомобиль</button>
+<button class="wide" data-add="service">🛠️ Услуга</button>
 <button class="wide" data-add="dating">💗 Анкета знакомств</button>
 </div></div></div>
 
 <div id="modal" class="modal page hidden"><div class="sheet"><div class="sheet-top"><button id="closeModal" aria-label="Назад">←</button><b id="modalTitle">Новое объявление</b><span></span></div>
-<form id="listingForm">
-<label>Раздел<select name="category" id="formCategory"><option value="job">Работа</option><option value="housing">Жильё</option><option value="marketplace">Барахолка</option></select></label>
+<form id="listingForm" novalidate>
+<label hidden>Раздел<select name="category" id="formCategory"><option value="job">Работа</option><option value="housing">Жильё</option><option value="marketplace">Барахолка</option></select></label>
+<div id="stepsBar" class="steps"></div>
+<div class="step" data-step="1">
 <label>Заголовок<input name="title" required minlength="3" maxlength="160" placeholder="Например: Работа на заводе"></label>
 <div class="geo" id="formGeo">
 <label>Регион<select name="region_code" required data-geo-region></select></label>
@@ -207,6 +211,9 @@
   <label><span id="amountLabel">Сумма, ₩</span><input name="price_amount" type="number" inputmode="numeric" min="0" placeholder="2800000"></label>
   <label>Пометка к цене<input name="price" maxlength="80" placeholder="в месяц, торг"></label>
 </div>
+<label class="check"><input type="checkbox" name="price_nego" id="priceNego"> Цена договорная</label>
+</div>
+<div class="step" data-step="2" hidden>
 <div data-for="job" hidden>
   <label>Компания<input name="d_company" maxlength="120" placeholder="Например: Samin Motors"></label>
   <label>Должность<input name="d_position" maxlength="120" placeholder="Оператор, упаковщик…"></label>
@@ -249,19 +256,48 @@
   <label class="check"><input type="checkbox" name="furnished"> С мебелью</label>
 </div>
 <div data-for="marketplace" hidden>
-  <label>Категория<select name="goods_category" data-list="goods_category"></select></label>
-  <label>Состояние<select name="condition" data-list="condition"></select></label>
-  <label>Бренд<input name="d_brand" maxlength="60" placeholder="Например: Samsung"></label>
-  <label class="check"><input type="checkbox" name="negotiable"> Торг возможен</label>
-  <label class="check"><input type="checkbox" name="d_delivery"> Есть доставка</label>
+  <label data-showfor="goods">Категория<select name="goods_category" data-list="goods_category"></select></label>
+  <label data-showfor="goods,car">Состояние<select name="condition" data-list="condition"></select></label>
+  <label data-showfor="goods,car">Бренд<input name="d_brand" maxlength="60" placeholder="Например: Samsung"></label>
+  <div data-showfor="car">
+    <label>Модель<input name="d_model" maxlength="60" placeholder="Например: Sonata"></label>
+    <div class="row2">
+      <label>Год выпуска<input name="d_year" type="number" inputmode="numeric" min="1950" max="2100" placeholder="2018"></label>
+      <label>Пробег, км<input name="d_mileage_km" type="number" inputmode="numeric" min="0" placeholder="85000"></label>
+    </div>
+  </div>
+  <div data-showfor="service">
+    <label>Где оказываете услугу<input name="d_service_area" maxlength="120" placeholder="Например: Сеул и Кёнги, онлайн"></label>
+    <label>Опыт, лет<input name="d_experience_years" type="number" inputmode="numeric" min="0" max="60"></label>
+  </div>
+  <label class="check" data-showfor="goods,car,service"><input type="checkbox" name="negotiable"> Торг возможен</label>
+  <label class="check" data-showfor="goods,car"><input type="checkbox" name="d_delivery"> Есть доставка</label>
 </div>
+</div>
+<div class="step" data-step="3" hidden>
 <label>Описание<textarea name="description" rows="3" maxlength="4000" placeholder="Подробности. Телефон и ссылки пишите в поле «Контакт»"></textarea></label>
-<label>Контакт<input name="contact" maxlength="160" placeholder="@username или телефон"></label>
 <label>Фото (до 10)</label>
 <div class="photos" id="photoPreview"></div>
 <p class="muted" id="photoHint">Для жилья и товаров нужно хотя бы одно фото.</p>
+</div>
+<div class="step" data-step="4" hidden>
+<label>Контакт для связи<input name="contact" maxlength="160" placeholder="@username или телефон"></label>
+<p class="muted">Написать вам можно и в чате приложения. Телефон и @username — только в этом поле, не в описании.</p>
+<h3 class="dsub">Так увидят ваше объявление</h3>
+<div id="listingPreview" class="preview"></div>
+<label class="check"><input type="checkbox" id="rulesOk"> Подтверждаю: всё правда, предоплат и переводов на карту не прошу</label>
+<p class="muted" id="afterInfo">Модератор проверит объявление, обычно в течение суток. Оно будет показано 30 дней, потом его можно продлить.</p>
 <button class="submit" type="submit" id="sendBtn">Опубликовать</button>
-<button class="submit ghost" type="button" id="draftBtn">Сохранить черновик</button></form></div></div>
+<button class="submit ghost" type="button" id="draftBtn">Сохранить черновик</button>
+</div>
+<div class="wizbar"><button type="button" class="ghostbtn" id="prevBtn">← Назад</button><button type="button" class="submit" id="nextBtn">Далее</button></div>
+</form></div></div>
+
+<div id="doneSheet" class="modal hidden"><div class="sheet" style="text-align:center">
+<div style="font-size:54px">✅</div><h2 id="doneTitle" style="margin:6px 0">Отправлено на проверку</h2>
+<p class="muted" id="doneText">Мы сообщим в Telegram, когда модератор примет решение.</p>
+<button class="submit" id="doneMine" type="button">Мои объявления</button>
+<button class="submit ghost" id="doneMore" type="button">Добавить ещё</button></div></div>
 
 <div id="filters" class="modal hidden"><div class="sheet"><div class="sheet-top"><b>Фильтры</b><button id="closeFilters">✕</button></div>
 <form id="filterForm">

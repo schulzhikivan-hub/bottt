@@ -23,6 +23,8 @@ PHOTO_SECTIONS = {"housing", "marketplace"}  # sections that need at least one p
 
 def needs_photo(db: Session, item: Listing) -> bool:
     """True when the section requires a photo and the listing has none."""
+    if item.category == "marketplace" and item.goods_category == "services":
+        return False  # a service may be offered without a picture
     return (settings.require_photos and item.category in PHOTO_SECTIONS
             and photos.count_photos(db, item.id) == 0)
 

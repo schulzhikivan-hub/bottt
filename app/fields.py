@@ -58,6 +58,13 @@ class GoodsDetails(BaseModel):
     model_config = ConfigDict(extra="ignore")
     brand: str | None = Field(default=None, max_length=60)
     delivery: bool | None = None
+    # cars
+    model: str | None = Field(default=None, max_length=60)
+    year: int | None = Field(default=None, ge=1950, le=2100)
+    mileage_km: int | None = Field(default=None, ge=0, le=3_000_000)
+    # services
+    service_area: str | None = Field(default=None, max_length=120)
+    experience_years: int | None = Field(default=None, ge=0, le=60)
 
 
 DETAILS = {"job": JobDetails, "housing": HousingDetails, "marketplace": GoodsDetails}
@@ -68,7 +75,7 @@ CATEGORY_EXTRAS = {
     "marketplace": {"condition", "goods_category", "negotiable"},
 }
 ALL_EXTRAS = set().union(*CATEGORY_EXTRAS.values())
-SEARCHABLE_DETAILS = ("company", "position", "station", "brand")
+SEARCHABLE_DETAILS = ("company", "position", "station", "brand", "model", "service_area")
 
 
 def clean_details(category: str, raw: dict | None) -> dict | None:
