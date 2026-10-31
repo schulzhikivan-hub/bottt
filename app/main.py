@@ -29,7 +29,7 @@ from app.manage import router as manage_router
 from app.guard import rate_limit, check_text, duplicate_note, notify_user
 from app import admin_ops as ops
 from app import catalog
-from app import photos
+from app import photos, applications
 from app import geo
 from app import fields as listing_fields
 from app.users import get_or_create_user, writer, is_blocked_pair
@@ -52,6 +52,7 @@ app.include_router(admin_auth_router)
 app.include_router(webauth_router)
 app.include_router(catalog.router)
 app.include_router(photos.router)
+app.include_router(applications.router)
 app.include_router(geo.router)
 app.include_router(listing_fields.router)
 STATIC = Path(__file__).parent / "static"
@@ -101,7 +102,7 @@ def me(user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
     return {"tg_id": user.tg_id, "consent": user.consent_at is not None, "city": user.city,
             "region_code": user.region_code, "district_id": user.district_id,
             "language": "ru", "blocked": user.blocked, "block_reason": user.block_reason,
-            "employer_status": user.employer_status, "company_name": user.company_name}
+            "employer_status": user.employer_status, "company_name": user.company_name, "visa": user.visa}
 
 
 @app.post("/api/me/consent")

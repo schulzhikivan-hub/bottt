@@ -377,6 +377,29 @@ function contactLinks(contact) {
   const user = /^@?[A-Za-z][A-Za-z0-9_]{3,31}$/.test(c) ? c.replace(/^@/, "") : "";
   return {phone, user};
 }
+function authorBlock(x) {
+  const a = x.author || {};
+  const parts = [];
+  if (a.verified) parts.push(`<b class="badge-ok">✔ Проверенный работодатель${a.company ? ": " + esc(a.company) : ""}</b>`);
+  else if (a.since) parts.push("<b>Автор</b>");
+  if (a.active) parts.push(`Активных объявлений: ${a.active}`);
+  if (a.since) parts.push(`На сайте с ${a.since}`);
+  return parts.length ? `<p class="author">${parts.join(" · ")}</p>` : "";
+}
+const APP_STATUS = {new: "Отправлен", viewed: "Просмотрен", invited: "Приглашение", rejected: "Отказ"};
+let applyListingId = null;
+$("#closeApply").onclick = () => $("#applyModal").classList.add("hidden");
+$("#applyForm").onsubmit = async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  try {
+    await api(`/api/listings/${applyListingId}/apply`, {method: "POST",
+      body: JSON.stringify({contact: f.contact.value.trim(), message: f.message.value.trim()})});
+    $("#applyModal").classList.add("hidden");
+    f.reset();
+    toast("Отклик отправлен");
+  } catch (err) { toast(err.message); }
+};
 async function openDetail(id, push = true) {
   try {
     await loadFields();
@@ -391,9 +414,11 @@ async function openDetail(id, push = true) {
       <div class="price big">${esc(priceText(x))}</div>
       ${specs(x)}
       <p class="desc">${esc(x.description || "Подробности уточняйте у автора")}</p>
+      ${authorBlock(x)}
       <p class="muted">Опубликовано: ${esc(fmtDate(x.created_at).split(",")[0] || "")}${x.contact && !phone && !user ? " · Контакт: " + esc(x.contact) : ""}</p>
       <div class="cta">
-        <button class="primary" data-act="chat">Написать</button>
+        ${x.category === "job" ? '<button class="primary" data-act="apply">Откликнуться</button>' : ""}
+        <button class="${x.category === "job" ? "secondary" : "primary"}" data-act="chat">Написать</button>
         ${phone ? `<a class="btn secondary" href="tel:${esc(phone)}">Позвонить</a>` : ""}
         ${user ? `<a class="btn secondary" data-tglink href="https://t.me/${esc(user)}" target="_blank" rel="noopener">Telegram автора</a>` : ""}
       </div>
@@ -495,6 +520,7 @@ function ownCard(x) {
   const acts = [];
   if (x.status === "draft") acts.push('<button data-own="submit">Отправить на проверку</button>');
   if (["draft", "pending", "approved", "rejected", "needs_fix"].includes(x.status)) acts.push('<button data-own="edit" class="secondary">✏️ Изменить</button>');
+  if (x.category === "job" && x.applications?.total) acts.push(`<button data-own="applicants">📨 Отклики (${x.applications.total}${x.applications.new ? ", новых " + x.applications.new : ""})</button>`);
   if (["approved", "expired"].includes(x.status)) acts.push('<button data-own="renew">🔄 Продлить</button>');
   if (x.status === "approved") {
     acts.push('<button data-own="close" class="secondary">Закрыть</button>');
@@ -525,6 +551,19 @@ document.querySelectorAll("[data-own-filter]").forEach((b) => b.onclick = () => 
   document.querySelectorAll("[data-own-filter]").forEach((c) => c.classList.toggle("active", c === b));
   renderOwn();
 });
+async function showApplicants(id) {
+  const rows = await api(`/api/listings/${id}/applications`);
+  const body = $("#menuBody");
+  body.innerHTML = `<h3>Отклики: ${esc(ownItems[id]?.title || "")}</h3>` + (rows.map((a) => `<article class="listing" data-app="${a.id}">
+    <div class="listing-top"><div><b>${esc(a.contact)}</b><div class="meta">${a.city ? "📍 " + esc(a.city) : ""}${a.visa ? " · виза " + esc(a.visa) : ""}</div></div>
+    <span class="status ${a.status === "invited" ? "approved" : a.status === "rejected" ? "rejected" : "pending"}">${APP_STATUS[a.status] || a.status}</span></div>
+    ${a.message ? `<p>${esc(a.message)}</p>` : ""}<p class="muted">${esc(fmtDate(a.created_at))}</p>
+    <div class="actions"><button data-appstatus="invited" data-appid="${a.id}">Пригласить</button>
+    <button data-appstatus="rejected" data-appid="${a.id}" class="secondary">Отказать</button></div></article>`).join("")
+    || '<div class="empty">Откликов пока нет</div>');
+  body.scrollIntoView({block: "nearest"});
+  loadProfile();
+}
 function fillProfileHead() {
   const u = tg?.initDataUnsafe?.user;
   if (!u) return;
@@ -559,6 +598,28 @@ async function openMenu(key) {
   if (key === "favorites") return showView("saved");
   if (key === "chats") return showView("chats");
   if (key === "payments") body.innerHTML = renderPayments(await api("/api/me/payments"));
+  if (key === "applications") {
+    const rows = await api("/api/me/applications");
+    body.innerHTML = rows.length ? rows.map((a) => `<article class="listing" data-open="${a.listing_id}">
+      <div class="listing-top"><div><h3>${esc(a.title)}</h3><div class="meta">📍 ${esc(a.city)}</div></div>
+      <span class="status ${a.status === "invited" ? "approved" : a.status === "rejected" ? "rejected" : "pending"}">${APP_STATUS[a.status] || a.status}</span></div>
+      <p class="muted">${esc(fmtDate(a.created_at))}</p></article>`).join("")
+      : '<div class="empty">Вы пока не откликались на вакансии</div>';
+  }
+  if (key === "visa") {
+    await loadFields();
+    body.innerHTML = `<article class="listing"><h3>Моя виза</h3>
+      <p class="muted">Видна только вам. Используется в фильтре «Моя виза» и в откликах.</p>
+      <label>Тип визы<select id="myVisa"><option value="">Не указана</option>${fieldDefs.visas.map((v) => `<option value="${v.value}">${v.label}</option>`).join("")}</select></label>
+      <div class="actions"><button id="saveVisa">Сохранить</button></div></article>`;
+    $("#myVisa").value = me?.visa || "";
+    $("#saveVisa").onclick = async () => {
+      try {
+        const r = await api("/api/me/settings", {method: "PUT", body: JSON.stringify({visa: $("#myVisa").value})});
+        me.visa = r.visa; toast("Сохранено");
+      } catch (err) { toast(err.message); }
+    };
+  }
   if (key === "employer") {
     const st = me?.employer_status;
     const text = {none: "Вы ещё не подавали заявку.", pending: "Заявка на проверке модератора.",
@@ -903,6 +964,12 @@ document.addEventListener("click", async (e) => {
         const c = await api(`/api/listings/${id}/conversation`, {method: "POST"});
         openChat(c.id, owner.querySelector("h1,h3")?.textContent);
       }
+      if (btn.dataset.act === "apply") {
+        if (!(await requireConsent())) return;
+        applyListingId = id;
+        $("#applyForm").contact.value = me?.last_contact || "";
+        $("#applyModal").classList.remove("hidden");
+      }
       if (btn.dataset.act === "share") shareListing(id, owner.querySelector("h1,h3")?.textContent || "KOREA HUB");
       if (btn.dataset.act === "like") {
         if (!(await requireConsent())) return;
@@ -936,6 +1003,17 @@ document.addEventListener("click", async (e) => {
     catch (err) { toast(err.message); }
     return;
   }
+  const st = e.target.closest("[data-appstatus]");
+  if (st) {
+    try {
+      await api(`/api/applications/${st.dataset.appid}`, {method: "PUT", body: JSON.stringify({status: st.dataset.appstatus})});
+      const badge = st.closest("[data-app]").querySelector(".status");
+      badge.textContent = APP_STATUS[st.dataset.appstatus];
+      badge.className = "status " + (st.dataset.appstatus === "invited" ? "approved" : "rejected");
+      toast("Кандидат уведомлён");
+    } catch (err) { toast(err.message); }
+    return;
+  }
   const own = e.target.closest("[data-own]");
   if (own) {
     const cardEl = own.closest("[data-id]");
@@ -945,6 +1023,7 @@ document.addEventListener("click", async (e) => {
       const act = own.dataset.own;
       if (act === "employer-apply") { $("#employerModal").classList.remove("hidden"); return; }
       if (act === "edit") { openEdit(item); return; }
+      if (act === "applicants") { await showApplicants(id); return; }
       if (act === "promo") { await openServices(id, item.category); return; }
       if (act === "archive" && !(await confirmDialog("Удалить объявление? Его не будет видно другим."))) return;
       await api(`/api/listings/${id}/${{close: "close", sold: "sold", reopen: "reopen", archive: "archive", renew: "renew", submit: "submit"}[act]}`, {method: "POST"});

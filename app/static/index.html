@@ -101,6 +101,8 @@
   <div class="menu-list">
     <button class="wide" data-menu="favorites">♡ Избранное</button>
     <button class="wide" data-menu="chats">💬 Сообщения</button>
+    <button class="wide" data-menu="applications">📨 Мои отклики</button>
+    <button class="wide" data-menu="visa">🛂 Моя виза</button>
     <button class="wide" data-menu="payments">⭐ История платежей</button>
     <button class="wide" data-menu="employer">🏢 Статус работодателя</button>
     <button class="wide" data-menu="blocks">🚫 Заблокированные</button>
@@ -299,6 +301,12 @@
 <label>Город / район<select name="district_id" required data-geo-district></select></label>
 </div>
 <button class="submit" type="submit">Сохранить</button></form></div></div>
+
+<div id="applyModal" class="modal hidden"><div class="sheet"><div class="sheet-top"><b>Отклик на вакансию</b><button id="closeApply">✕</button></div>
+<form id="applyForm"><label>Как с вами связаться<input name="contact" required minlength="3" maxlength="160" placeholder="@username или телефон"></label>
+<label>Сообщение работодателю<textarea name="message" rows="3" maxlength="1000" placeholder="Опыт, когда можете начать"></textarea></label>
+<p class="muted">Работодатель увидит ваш контакт, город и визу из профиля. Telegram ID не передаётся.</p>
+<button class="submit" type="submit">Откликнуться</button></form></div></div>
 
 <div id="employerModal" class="modal hidden"><div class="sheet"><div class="sheet-top"><b>Заявка работодателя</b><button id="closeEmployer">✕</button></div>
 <form id="employerForm"><label>Название компании<input name="company_name" required minlength="2" maxlength="160"></label>

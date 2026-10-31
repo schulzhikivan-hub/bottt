@@ -25,6 +25,7 @@ class User(Base):
     contact_person: Mapped[str] = mapped_column(String(80), default="")
     block_reason: Mapped[str] = mapped_column(String(300), default="")
     notify_messages: Mapped[bool] = mapped_column(Boolean, default=True)
+    visa: Mapped[str] = mapped_column(String(8), default="")  # private; used for job filters and applications
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
@@ -313,4 +314,19 @@ class ListingPhoto(Base):
     position: Mapped[int] = mapped_column(Integer, default=0)
     # live: shown; pending: added to a published listing, waits for a moderator; removal: asked to delete
     status: Mapped[str] = mapped_column(String(10), default="live", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class Application(Base):
+    """A reply to a vacancy. The author sees the contact the applicant chose to give, never the Telegram ID."""
+    __tablename__ = "applications"
+    __table_args__ = (UniqueConstraint("listing_id", "applicant_tg_id", name="uq_application_once"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    listing_id: Mapped[int] = mapped_column(ForeignKey("listings.id"), index=True)
+    applicant_tg_id: Mapped[str] = mapped_column(String(40), index=True)
+    message: Mapped[str] = mapped_column(String(1000), default="")
+    contact: Mapped[str] = mapped_column(String(160), default="")
+    visa: Mapped[str] = mapped_column(String(8), default="")
+    city: Mapped[str] = mapped_column(String(100), default="")
+    status: Mapped[str] = mapped_column(String(12), default="new")  # new, viewed, invited, rejected
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

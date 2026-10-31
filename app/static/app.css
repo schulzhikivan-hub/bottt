@@ -199,3 +199,6 @@ form textarea{resize:vertical}
 .ph.add{display:grid;place-items:center;border:2px dashed var(--border);background:transparent;color:var(--hint);font-size:26px;margin:0 !important;cursor:pointer}
 .ph.add input{display:none !important}
 .meta-line{font-size:12px;color:var(--hint);margin:2px 0 6px}
+
+.author{margin:8px 0;color:var(--hint,#7d8590);font-size:13px}
+.badge-ok{color:#2e9b57}

@@ -78,6 +78,8 @@ class ListingOut(BaseModel):
     has_edit: bool = False  # owner only: changes wait for a moderator
     published_at: datetime | None = None
     expires_at: datetime | None = None  # owner only
+    author: dict = {}  # public trust signals on the listing page
+    applications: dict | None = None  # owner only: {total, new}
     promo: str | None = None  # active paid placement: pin, vip, bump, highlight
     created_at: datetime | None = None
 

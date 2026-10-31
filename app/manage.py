@@ -159,6 +159,7 @@ class SettingsIn(BaseModel):
     city: str | None = Field(default=None, max_length=100)
     region_code: str | None = Field(default=None, max_length=20)
     district_id: int | None = None
+    visa: VisaCode | Literal[""] | None = None
 
 
 class NotificationsIn(BaseModel):
@@ -176,12 +177,15 @@ def update_notifications(payload: NotificationsIn, user_id: str = Depends(writer
 @router.put("/api/me/settings")
 def update_settings(payload: SettingsIn, user_id: str = Depends(writer), db: Session = Depends(get_db)):
     user = get_or_create_user(db, user_id)
-    place = geo.resolve_place(db, payload.district_id, payload.region_code, payload.city)
-    if place is None:
-        raise HTTPException(400, "Выберите город или район из списка. Сайт только для Южной Кореи")
-    user.city, user.region_code, user.district_id = place.label, place.region_code, place.district_id
+    if payload.visa is not None:
+        user.visa = payload.visa
+    if payload.visa is None or payload.city or payload.region_code or payload.district_id:
+        place = geo.resolve_place(db, payload.district_id, payload.region_code, payload.city)
+        if place is None:
+            raise HTTPException(400, "Выберите город или район из списка. Сайт только для Южной Кореи")
+        user.city, user.region_code, user.district_id = place.label, place.region_code, place.district_id
     db.commit()
-    return {"city": user.city, "region_code": user.region_code, "district_id": user.district_id}
+    return {"city": user.city, "region_code": user.region_code, "district_id": user.district_id, "visa": user.visa}
 
 
 class EmployerIn(BaseModel):

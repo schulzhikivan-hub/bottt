@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select, func, case, or_
 from sqlalchemy.orm import Session
 
-from app import fields, payments, photos
+from app import applications, fields, payments, photos
 from app.payments import now
 from app import guard
 from app.database import get_db
@@ -126,6 +126,7 @@ def with_promo(db: Session, rows: list[Listing], owner: bool = False) -> list[Li
     ids = [x.id for x in rows]
     placed = payments.active_placements(db, ids)
     shots = photos.photos_map(db, ids, owner=owner)
+    applied = applications.counts(db, ids) if owner else {}
     out = []
     for x in rows:
         pics = shots.get(x.id, [])
@@ -133,6 +134,8 @@ def with_promo(db: Session, rows: list[Listing], owner: bool = False) -> list[Li
                   "cover": next((p["thumb"] for p in pics if p["status"] != "pending"), None)}
         if not owner:
             update.update(note="", has_edit=False, expires_at=None)
+        elif x.category == "job":
+            update["applications"] = applied.get(x.id, {"total": 0, "new": 0})
         out.append(ListingOut.model_validate(x).model_copy(update=update))
     return out
 
@@ -183,7 +186,8 @@ def listing_detail(listing_id: int, request: Request, db: Session = Depends(get_
     if guard.first_view(request, listing_id):  # one view per visitor per hour, not per refresh
         item.views = (item.views or 0) + 1
         db.commit()
-    return with_promo(db, [item])[0]
+    out = with_promo(db, [item])[0]
+    return out.model_copy(update={"author": applications.author_card(db, item)})
 
 
 def backfill_search_fields(db: Session) -> None:
