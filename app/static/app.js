@@ -300,7 +300,38 @@ $("#catBack").onclick = () => {
   reloadCatalog();
 };
 
+function jobCard(x) {
+  const bits = [];
+  if (x.schedule) bits.push(`<span class="pill">${esc(labelOf("schedule", x.schedule))}</span>`);
+  if (x.housing_provided) bits.push('<span class="pill">🏠 Жильё</span>');
+  return `<article class="jcard" data-id="${x.id}" data-cat="job" data-open="${x.id}">
+    <div class="jphoto">${x.cover ? `<img src="${esc(x.cover)}" alt="" loading="lazy">` : "💼"}${promoBadge(x)}</div>
+    <div class="jbody"><h3>${esc(x.title)}</h3><div class="meta">📍 ${esc(x.city)}</div>
+    <div class="price">${esc(priceText(x))}</div><div class="pills">${bits.join("")}</div>
+    <button class="more-btn" data-open-btn>Подробнее</button></div></article>`;
+}
+async function loadLanding() {
+  const jobs = $("#freshJobs"), ads = $("#freshAds");
+  jobs.innerHTML = '<div class="skeleton" style="width:236px;height:230px"></div><div class="skeleton" style="width:236px;height:230px"></div>';
+  ads.innerHTML = '<div class="skeleton"></div><div class="skeleton"></div>';
+  const failed = (box, again) => {
+    box.innerHTML = '<div class="hint-empty">Не удалось загрузить данные<br><button class="retry">Повторить</button></div>';
+    box.querySelector(".retry").onclick = again;
+  };
+  try {
+    const r = await api("/api/catalog?limit=8&category=job", {quiet: true});
+    jobs.innerHTML = r.items.length ? r.items.map(jobCard).join("") : '<div class="hint-empty">Свежих вакансий пока нет</div>';
+  } catch (e) { failed(jobs, loadLanding); }
+  try {
+    const [h, m] = await Promise.all([api("/api/catalog?limit=6&category=housing", {quiet: true}),
+                                      api("/api/catalog?limit=6&category=marketplace", {quiet: true})]);
+    const items = [...h.items, ...m.items].sort((a, b) => b.id - a.id).slice(0, 8);
+    ads.innerHTML = items.length ? items.map(listingCard).join("") : '<div class="hint-empty">Новых объявлений пока нет</div>';
+  } catch (e) { failed(ads, loadLanding); }
+  homeLoaded = true;
+}
 async function loadCatalog(append = false) {
+  if (!append && $("#view-home").classList.contains("landing")) return loadLanding();
   if (page.loading) return;
   page.loading = true;
   const box = $("#listings");
@@ -1131,6 +1162,19 @@ $("#consentOk").onclick = async () => {
     toast("Спасибо! Теперь можно пользоваться приложением");
   } catch (err) { toast(err.message); }
 };
+function showCityChip() { $("#cityChipText").textContent = (me?.city || "Город").split(",")[0]; }
+$("#cityChip").onclick = () => $("#cityBtn").onclick();
+$("#langBtn").onclick = () => toast("Сейчас приложение на русском. Другие языки появятся позже");
+$("#bellBtn").onclick = async () => {
+  if (!(await requireConsent())) return;
+  $("#notifToggle").checked = Boolean(me.notify_messages);
+  $("#notifModal").classList.remove("hidden");
+};
+$("#closeNotif").onclick = () => $("#notifModal").classList.add("hidden");
+$("#notifToggle").onchange = async (e) => {
+  try { await api("/api/me/notifications", {method: "PUT", body: JSON.stringify({messages: e.target.checked})}); me.notify_messages = e.target.checked; toast("Сохранено"); }
+  catch (err) { toast(err.message); e.target.checked = !e.target.checked; }
+};
 $("#cityBtn").onclick = async () => {
   await setGeo("#cityGeo", me?.region_code || "", me?.district_id || "");
   $("#cityModal").classList.remove("hidden");
@@ -1144,6 +1188,7 @@ $("#cityForm").onsubmit = async (e) => {
       region_code: f.region_code.value, district_id: f.district_id.value ? Number(f.district_id.value) : null})});
     $("#cityModal").classList.add("hidden");
     toast("Город сохранён");
+    await loadMe(); showCityChip();
     loadProfile();
   } catch (err) { toast(err.message); }
 };
@@ -1189,7 +1234,7 @@ loadFavIds().then(() => {
   });
 });
 api("/api/me", {quiet: true})
-  .then((user) => { me = user; if (!me.consent) $("#consent").classList.remove("hidden"); })
+  .then((user) => { me = user; showCityChip(); if (!me.consent) $("#consent").classList.remove("hidden"); })
   .catch(() => { if (!inTelegram) $("#loginTop").hidden = false; });
 
 // ---------- страница не двигается ----------

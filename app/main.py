@@ -103,7 +103,8 @@ def me(user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
     return {"tg_id": user.tg_id, "consent": user.consent_at is not None, "city": user.city,
             "region_code": user.region_code, "district_id": user.district_id,
             "language": "ru", "blocked": user.blocked, "block_reason": user.block_reason,
-            "employer_status": user.employer_status, "company_name": user.company_name, "visa": user.visa}
+            "employer_status": user.employer_status, "company_name": user.company_name, "visa": user.visa,
+            "notify_messages": user.notify_messages}
 
 
 @app.post("/api/me/consent")

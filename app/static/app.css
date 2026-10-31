@@ -3,7 +3,7 @@
    Цвета берутся из темы Telegram (переменные задаёт app.js), без неё — светлая тема. */
 :root{
   --bg:#f3f6fb;--card:#fff;--text:#1b2540;--hint:#6f7b91;--border:#e4e9f2;
-  --accent:#1f6fe5;--accent-text:#fff;--soft:#eaf2ff;--ok:#19a463;--warn:#f5a524;--bad:#e5484d;
+  --accent:#1b4b9b;--accent-text:#fff;--soft:#eaf2ff;--ok:#19a463;--warn:#f5a524;--bad:#e5484d;
   font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;font-synthesis:none;
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
@@ -238,7 +238,7 @@ form textarea{resize:vertical}
 .brand b{font-size:17px}
 /* баннер */
 .hero{display:none;margin:0 -16px 0;border-radius:0 0 22px 22px;padding:26px 20px 46px;position:relative;overflow:hidden;color:#fff;
-  background:linear-gradient(180deg,#1d4fb8 0%,#2f7bea 55%,#9cc7ff 100%)}
+  background:linear-gradient(180deg,#0b2d73 0%,#1b4b9b 55%,#6f9fe0 100%)}
 .landing .hero{display:block}
 .skyline{position:absolute;left:0;right:0;bottom:0;height:70px;opacity:.55;
   background:
@@ -360,3 +360,36 @@ form textarea{resize:vertical}
 /* чат */
 .bubble{background:#eaeef5;border:0}
 .bubble.mine{background:#cfeec9;color:#14301a}
+
+/* ===== ТЗ №1: шапка, свежие вакансии, новые объявления ===== */
+.brand{min-width:0;flex:1}
+.bt{min-width:0}
+.bt small{font-size:10px;line-height:1.2;white-space:normal}
+.tools{display:flex;align-items:center;gap:6px;flex:none}
+.tchip{border:1px solid var(--border);background:var(--card);border-radius:999px;padding:6px 9px;font-size:12px;font-weight:700;color:var(--accent);
+  display:flex;align-items:center;gap:3px;max-width:104px}
+.tchip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tbell{width:34px;height:34px;border-radius:50%;border:1px solid var(--border);background:var(--card);display:grid;place-items:center;color:var(--accent)}
+.tbell svg{width:19px;height:19px;fill:none;stroke:currentColor;stroke-width:1.800;stroke-linecap:round;stroke-linejoin:round}
+.t-svc{background:#14a8c8}
+.tiles button{font-size:11.500px;line-height:1.15;min-height:84px;align-content:center}
+#landingBlocks{display:none}
+.landing #landingBlocks{display:block}
+.landing .results-head,.landing #listings,.landing #moreBtn{display:none}
+.blockhead{display:flex;justify-content:space-between;align-items:center;margin:18px 0 8px}
+.blockhead h2{font-size:17px;margin:0}
+.hscroll{display:flex;gap:12px;overflow-x:auto;margin:0 -16px;padding:2px 16px 8px;scroll-snap-type:x proximity;scrollbar-width:none}
+.hscroll::-webkit-scrollbar{display:none}
+.jcard{flex:none;width:236px;background:var(--card);border-radius:16px;overflow:hidden;box-shadow:0 1px 8px #1b254014;scroll-snap-align:start;cursor:pointer}
+.jphoto{position:relative;height:124px;background:var(--soft);display:grid;place-items:center;font-size:40px}
+.jphoto img{width:100%;height:100%;object-fit:cover;display:block}
+.jphoto .promo{position:absolute;top:8px;left:8px;margin:0}
+.jbody{padding:10px 12px 12px}
+.jbody h3{margin:0 0 4px;font-size:15px;line-height:1.25;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.jbody .price{color:var(--accent);margin:4px 0}
+.jbody .pills{margin:6px 0 8px}
+.jbody .more-btn{width:100%;border:0;border-radius:10px;padding:9px;background:var(--soft);color:var(--accent);font-weight:700;font-size:13px}
+.hint-empty{padding:18px;text-align:center;color:var(--hint);font-size:14px;background:var(--card);border-radius:14px;border:1px dashed var(--border);width:100%}
+.retry{margin-top:8px;border:0;background:var(--accent);color:#fff;border-radius:10px;padding:8px 14px}
+.hscroll{scroll-padding-left:16px}
+.searchbar input{font-size:14px;text-overflow:ellipsis}

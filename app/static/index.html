@@ -8,8 +8,13 @@
 <div class="shell">
 
 <header class="topbar">
-  <div class="brand"><div class="logo">🇰🇷</div><div><b>KOREA HUB</b><small>Бот для жизни в Корее</small></div></div>
-  <button class="link" id="loginTop" hidden>Войти</button>
+  <div class="brand"><div class="logo">🇰🇷</div><div class="bt"><b>KOREA HUB</b><small>Всё для жизни в Корее — в одном месте</small></div></div>
+  <div class="tools">
+    <button class="link" id="loginTop" hidden>Войти</button>
+    <button class="tchip" id="cityChip" aria-label="Город">📍 <span id="cityChipText">Город</span></button>
+    <button class="tchip" id="langBtn" aria-label="Язык">RU</button>
+    <button class="tbell" id="bellBtn" aria-label="Уведомления"><svg viewBox="0 0 24 24"><path d="M6 17V11a6 6 0 0 1 12 0v6l2 2H4zM10 21h4"/></svg></button>
+  </div>
 </header>
 
 <main class="content" id="scroll">
@@ -19,7 +24,7 @@
   <div class="hero"><div class="skyline"></div><div class="hero-text"><span>한국에서 나은 삶</span><b>KOREA HUB</b></div></div>
   <div class="sticky">
     <div class="searchbar">
-      <input id="search" type="search" placeholder="Поиск (работа, жильё, товары...)" enterkeyhint="search" autocomplete="off">
+      <input id="search" type="search" placeholder="Поиск вакансий, жилья, товаров и услуг…" enterkeyhint="search" autocomplete="off">
       <button class="icon-btn" id="filterBtn" aria-label="Фильтры">
         <svg viewBox="0 0 24 24"><path d="M4 6h9M19 6h1M4 12h3M13 12h7M4 18h11M21 18h-1"/><circle cx="16" cy="6" r="2.2"/><circle cx="10" cy="12" r="2.2"/><circle cx="18" cy="18" r="2.2"/></svg>
         <span class="badge" id="filterBadge" hidden>0</span>
@@ -41,10 +46,16 @@
     <button class="t-market" data-tile="marketplace"><svg viewBox="0 0 24 24"><path d="M5 8h14l-1 12H6zM9 8a3 3 0 0 1 6 0"/></svg>Барахолка</button>
     <button class="t-dating" data-view="dating"><svg viewBox="0 0 24 24"><path d="M12 20s-8-4.800-8-10.500A4.500 4.500 0 0 1 12 7a4.500 4.500 0 0 1 8 2.500C20 15.200 12 20 12 20z"/></svg>Знакомства</button>
     <button class="t-comm" data-view="community"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2.500"/><path d="M3 20a6 6 0 0 1 12 0M15 15a5 5 0 0 1 6 5"/></svg>Сообщество</button>
+    <button class="t-svc" data-tile="marketplace" data-goods="services"><svg viewBox="0 0 24 24"><path d="M14 6a4 4 0 0 0 4 4l-9 9a2.500 2.500 0 0 1-4-4l9-9zM5 5l3 3"/></svg>Услуги</button>
     <button class="t-car" data-tile="marketplace" data-goods="auto"><svg viewBox="0 0 24 24"><path d="M4 16V12l2-5h12l2 5v4zM4 16v2h3v-2M17 16v2h3v-2M4 12h16"/><circle cx="8" cy="14" r=".6"/><circle cx="16" cy="14" r=".6"/></svg>Автомобили</button>
-    <button class="t-docs" data-section="visas"><svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6zM14 3v5h5M9 12h7M9 16h7"/></svg>Документы</button>
-    <button class="t-med" data-section="medicine"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="4"/><path d="M12 8v8M8 12h8"/></svg>Медицина</button>
-    <button class="t-info" data-view="guide"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.500v.5"/></svg>Полезное</button>
+    <button class="t-docs" data-section="visas"><svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6zM14 3v5h5M9 12h7M9 16h7"/></svg>Виза и документы</button>
+    <button class="t-info" data-view="guide"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.500v.5"/></svg>Полезная информация</button>
+  </div>
+  <div id="landingBlocks">
+    <div class="blockhead"><h2>Свежие вакансии</h2><button class="link" data-tile="job">Все вакансии ›</button></div>
+    <div id="freshJobs" class="hscroll"></div>
+    <div class="blockhead"><h2>Новые объявления</h2></div>
+    <div id="freshAds" class="listings"></div>
   </div>
   <div class="results-head">
     <span id="resultCount" class="rc">Загружаем…</span>
@@ -163,7 +174,7 @@
   <button class="addwrap" id="addBtn" aria-label="Добавить"><span class="addc">
     <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></span>Добавить</button>
   <button data-view="chats">
-    <svg viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.600 7.100L4 20.500l1.100-4.600A8 8 0 1 1 21 12z"/></svg>Чаты</button>
+    <svg viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.600 7.100L4 20.500l1.100-4.600A8 8 0 1 1 21 12z"/></svg>Сообщения</button>
   <button data-view="profile">
     <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>Профиль</button>
 </nav>
@@ -320,6 +331,10 @@
 <label>Сообщение работодателю<textarea name="message" rows="3" maxlength="1000" placeholder="Опыт, когда можете начать"></textarea></label>
 <p class="muted">Работодатель увидит ваш контакт, город и визу из профиля. Telegram ID не передаётся.</p>
 <button class="submit" type="submit">Откликнуться</button></form></div></div>
+
+<div id="notifModal" class="modal hidden"><div class="sheet"><div class="sheet-top"><b>Уведомления</b><button id="closeNotif">✕</button></div>
+<label class="check"><input type="checkbox" id="notifToggle"> Присылать уведомления в Telegram</label>
+<p class="muted">О новых сообщениях, откликах, решениях модератора и новых объявлениях по вашим сохранённым поискам.</p></div></div>
 
 <div id="employerModal" class="modal hidden"><div class="sheet"><div class="sheet-top"><b>Заявка работодателя</b><button id="closeEmployer">✕</button></div>
 <form id="employerForm"><label>Название компании<input name="company_name" required minlength="2" maxlength="160"></label>

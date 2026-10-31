@@ -17,7 +17,7 @@ Employment = Literal["full", "part", "daily", "contract"]
 Schedule = Literal["day", "night", "shift"]
 SalaryPeriod = Literal["month", "day", "hour"]
 HousingType = Literal["apartment", "studio", "room", "dorm", "officetel", "house"]
-GoodsCategory = Literal["phones", "electronics", "furniture", "appliances", "clothes", "kids", "tools", "auto", "other"]
+GoodsCategory = Literal["phones", "electronics", "furniture", "appliances", "clothes", "kids", "tools", "auto", "services", "other"]
 
 VISAS = ["E-9", "E-7", "F-2", "F-4", "F-5", "F-6", "D-2", "D-4", "H-2", "C-4", "G-1"]
 LABELS = {
@@ -29,7 +29,7 @@ LABELS = {
                      ("dorm", "Место в общежитии"), ("officetel", "Офистель"), ("house", "Дом")],
     "goods_category": [("phones", "Телефоны"), ("electronics", "Электроника"), ("furniture", "Мебель"),
                        ("appliances", "Бытовая техника"), ("clothes", "Одежда и обувь"), ("kids", "Детские товары"),
-                       ("tools", "Инструменты"), ("auto", "Авто и мото"), ("other", "Разное")],
+                       ("tools", "Инструменты"), ("auto", "Авто и мото"), ("services", "Услуги"), ("other", "Разное")],
     "condition": [("new", "Новое"), ("used", "Б/у")],
 }
 

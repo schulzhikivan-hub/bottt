@@ -41,7 +41,7 @@ def test_lists_for_forms_come_from_the_server(client):
     assert {"value": "E-9", "label": "E-9"} in data["visas"]
     assert {"value": "night", "label": "Ночная смена"} in data["schedule"]
     assert {"value": "dorm", "label": "Место в общежитии"} in data["housing_type"]
-    assert len(data["goods_category"]) == 9
+    assert len(data["goods_category"]) == 10
 
 
 def test_vacancy_keeps_all_its_details(client):
