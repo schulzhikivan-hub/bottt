@@ -7,7 +7,7 @@ from tests.tg import as_user, make_init_data, TEST_BOT_TOKEN, reset_db, accept_t
 
 PAYLOAD = {"category": "marketplace", "title": "Диван в хорошем состоянии", "city": "Сеул",
            "price": "150 000 ₩", "description": "Самовывоз", "contact": "@seller"}
-ADMIN = {"X-Admin-Key": "test-admin-key", "X-Admin-Name": "Test Admin"}
+ADMIN = {"X-Admin-Session": "test-session-token"}
 
 
 @pytest.fixture()

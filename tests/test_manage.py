@@ -5,7 +5,7 @@ from app.database import engine
 from app.main import app
 from tests.tg import as_user, reset_db, accept_terms
 
-ADMIN = {"X-Admin-Key": "test-admin-key", "X-Admin-Name": "Test Admin"}
+ADMIN = {"X-Admin-Session": "test-session-token"}
 ITEM = {"category": "marketplace", "title": "Стол письменный", "city": "Сеул",
         "price": "50 000 ₩", "description": "Хорошее состояние", "contact": "@seller"}
 
@@ -27,9 +27,9 @@ def publish(client, user=1, category="marketplace"):
     return lid
 
 
-def test_admin_needs_name_header(client):
-    r = client.get("/api/admin/listings", headers={"X-Admin-Key": "test-admin-key"})
-    assert r.status_code == 400
+def test_admin_needs_session(client):
+    r = client.get("/api/admin/listings")
+    assert r.status_code == 401
 
 
 def test_edit_sends_listing_back_to_moderation(client):
@@ -77,7 +77,7 @@ def test_moderation_actions_are_journaled(client):
     lid = client.post("/api/listings", json=ITEM, headers=as_user(1)).json()["id"]
     client.post(f"/api/admin/listings/{lid}/reject?reason=Не+то", headers=ADMIN)
     log = client.get("/api/admin/audit", headers=ADMIN).json()
-    assert log[0]["actor"] == "Test Admin"
+    assert log[0]["actor"] == "999"
     assert log[0]["action"] == "listing.reject"
     assert log[0]["object_id"] == str(lid)
 

@@ -4,7 +4,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select, or_
 from sqlalchemy.orm import Session
 
-from app.audit import admin_actor, log_action
+from app.audit import log_action
+from app.admin_auth import staff, MOD, ADM, SUP
 from app.guard import check_text
 from app.database import get_db
 from app.models import Listing, User, Block, Report
@@ -145,7 +146,7 @@ class ReasonIn(BaseModel):
 
 
 @router.get("/api/admin/users")
-def admin_users(q: str = Query(default="", max_length=40), actor: str = Depends(admin_actor),
+def admin_users(q: str = Query(default="", max_length=40), actor: str = Depends(staff(*MOD)),
                 db: Session = Depends(get_db)):
     stmt = select(User).order_by(User.created_at.desc()).limit(100)
     if q.strip():
@@ -157,7 +158,7 @@ def admin_users(q: str = Query(default="", max_length=40), actor: str = Depends(
 
 
 @router.post("/api/admin/users/{tg_id}/block")
-def admin_block(tg_id: str, payload: ReasonIn, actor: str = Depends(admin_actor), db: Session = Depends(get_db)):
+def admin_block(tg_id: str, payload: ReasonIn, actor: str = Depends(staff(*MOD)), db: Session = Depends(get_db)):
     user = db.get(User, tg_id)
     if user is None:
         raise HTTPException(404, "Пользователь не найден")
@@ -169,7 +170,7 @@ def admin_block(tg_id: str, payload: ReasonIn, actor: str = Depends(admin_actor)
 
 
 @router.post("/api/admin/users/{tg_id}/unblock")
-def admin_unblock(tg_id: str, payload: ReasonIn, actor: str = Depends(admin_actor), db: Session = Depends(get_db)):
+def admin_unblock(tg_id: str, payload: ReasonIn, actor: str = Depends(staff(*MOD)), db: Session = Depends(get_db)):
     user = db.get(User, tg_id)
     if user is None:
         raise HTTPException(404, "Пользователь не найден")
@@ -181,14 +182,14 @@ def admin_unblock(tg_id: str, payload: ReasonIn, actor: str = Depends(admin_acto
 
 
 @router.get("/api/admin/employers")
-def admin_employers(status: str = "pending", actor: str = Depends(admin_actor), db: Session = Depends(get_db)):
+def admin_employers(status: str = "pending", actor: str = Depends(staff(*MOD)), db: Session = Depends(get_db)):
     rows = db.scalars(select(User).where(User.employer_status == status).limit(100)).all()
     return [{"tg_id": u.tg_id, "company_name": u.company_name, "registration_no": u.registration_no,
              "contact_person": u.contact_person, "employer_status": u.employer_status} for u in rows]
 
 
 @router.post("/api/admin/employers/{tg_id}/{decision}")
-def admin_employer_decision(tg_id: str, decision: str, actor: str = Depends(admin_actor),
+def admin_employer_decision(tg_id: str, decision: str, actor: str = Depends(staff(*MOD)),
                             db: Session = Depends(get_db)):
     if decision not in {"approve", "reject"}:
         raise HTTPException(400, "Решение: approve или reject")
@@ -202,7 +203,7 @@ def admin_employer_decision(tg_id: str, decision: str, actor: str = Depends(admi
 
 
 @router.get("/api/admin/audit")
-def admin_audit(limit: int = Query(default=100, ge=1, le=500), actor: str = Depends(admin_actor),
+def admin_audit(limit: int = Query(default=100, ge=1, le=500), actor: str = Depends(staff(*ADM)),
                 db: Session = Depends(get_db)):
     from app.models import AuditLog
     rows = db.scalars(select(AuditLog).order_by(AuditLog.id.desc()).limit(limit)).all()

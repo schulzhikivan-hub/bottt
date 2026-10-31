@@ -56,15 +56,23 @@ def duplicate_note(db: Session, author: str, title: str, description: str, listi
 
 
 # ---- notifications ----
+def send_telegram(tg_id: str, text: str) -> bool:
+    """Send a bot message. Returns False if it could not be delivered (never raises)."""
+    if not settings.bot_token or not tg_id.isdigit():
+        return False
+    try:
+        r = httpx.post(f"https://api.telegram.org/bot{settings.bot_token}/sendMessage",
+                       json={"chat_id": int(tg_id), "text": text[:500]}, timeout=5)
+        return r.status_code == 200
+    except Exception:
+        return False
+
+
 def notify_user(db: Session, tg_id: str, text: str) -> None:
-    """Send a Telegram message from the bot. Failures never break the request."""
-    if not settings.notifications_enabled or not settings.bot_token or not tg_id.isdigit():
+    """Notify a user about an event, respecting their settings and the global switch."""
+    if not settings.notifications_enabled:
         return
     user = db.get(User, tg_id)
     if user is not None and not user.notify_messages:
         return
-    try:
-        httpx.post(f"https://api.telegram.org/bot{settings.bot_token}/sendMessage",
-                   json={"chat_id": int(tg_id), "text": text[:500]}, timeout=5)
-    except Exception:
-        pass
+    send_telegram(tg_id, text)

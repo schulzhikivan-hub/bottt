@@ -21,7 +21,9 @@ from app.schemas import (
     CATEGORIES, MAX_ACTIVE_PER_CATEGORY,
 )
 from app.seed import seed_reference
-from app.audit import admin_actor, log_action
+from app.admin_auth import router as admin_auth_router, bootstrap_admins
+from app.audit import log_action
+from app.admin_auth import staff, MOD, ADM, SUP
 from app.manage import router as manage_router
 from app.guard import rate_limit, check_text, duplicate_note, notify_user
 from app.users import get_or_create_user, writer, is_blocked_pair
@@ -33,10 +35,12 @@ Base.metadata.create_all(bind=engine)
 migrate()
 with SessionLocal() as _db:
     seed_reference(_db)
+    bootstrap_admins(_db)
 
 app = FastAPI(title="KOREA HUB API", version="0.4.0")
 app.include_router(dating_router)
 app.include_router(manage_router)
+app.include_router(admin_auth_router)
 STATIC = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
@@ -433,19 +437,14 @@ def get_article(article_id: int, db: Session = Depends(get_db)):
 
 # ---------- Admin ----------
 
-def require_admin(x_admin_key: str | None):
-    if not x_admin_key or x_admin_key != settings.admin_api_key:
-        raise HTTPException(401, "Admin authentication required")
-
-
 @app.get("/api/admin/listings", response_model=list[ListingOut])
-def pending_listings(actor: str = Depends(admin_actor), db: Session = Depends(get_db)):
+def pending_listings(actor: str = Depends(staff(*MOD)), db: Session = Depends(get_db)):
     return db.scalars(select(Listing).where(Listing.status == "pending").order_by(Listing.id)).all()
 
 
 @app.post("/api/admin/listings/{listing_id}/{decision}")
 def moderate_listing(listing_id: int, decision: str, reason: str = Query(default="", max_length=300),
-                     actor: str = Depends(admin_actor), db: Session = Depends(get_db)):
+                     actor: str = Depends(staff(*MOD)), db: Session = Depends(get_db)):
     """decision: approve | reject (reason required) | needs_fix (comment required)."""
     if decision not in {"approve", "reject", "needs_fix"}:
         raise HTTPException(400, "Решение: approve, reject или needs_fix")
@@ -463,7 +462,7 @@ def moderate_listing(listing_id: int, decision: str, reason: str = Query(default
 
 
 @app.get("/api/admin/reports")
-def admin_reports(status: str = "new", actor: str = Depends(admin_actor),
+def admin_reports(status: str = "new", actor: str = Depends(staff(*MOD)),
                   db: Session = Depends(get_db)):
     rows = db.scalars(select(Report).where(Report.status == status).order_by(Report.id).limit(200)).all()
     return [{"id": r.id, "target_type": r.target_type, "target_id": r.target_id, "reason": r.reason,
@@ -471,7 +470,7 @@ def admin_reports(status: str = "new", actor: str = Depends(admin_actor),
 
 
 @app.post("/api/admin/reports/{report_id}/{decision}")
-def decide_report(report_id: int, decision: str, actor: str = Depends(admin_actor),
+def decide_report(report_id: int, decision: str, actor: str = Depends(staff(*MOD)),
                   db: Session = Depends(get_db)):
     if decision not in {"resolve", "reject"}:
         raise HTTPException(400, "Decision must be resolve or reject")
@@ -500,7 +499,7 @@ def decide_report(report_id: int, decision: str, actor: str = Depends(admin_acto
 
 
 @app.get("/api/admin/pricing")
-def admin_pricing(actor: str = Depends(admin_actor), db: Session = Depends(get_db)):
+def admin_pricing(actor: str = Depends(staff(*ADM)), db: Session = Depends(get_db)):
     payments.ensure_pricing(db)
     return [{"code": p.code, "category": p.category, "kind": p.kind, "title": p.title,
              "stars": p.stars, "duration_days": p.duration_days, "is_active": p.is_active}
@@ -513,7 +512,7 @@ class PricingIn(BaseModel):
 
 
 @app.put("/api/admin/pricing/{code}")
-def admin_set_price(code: str, payload: PricingIn, actor: str = Depends(admin_actor),
+def admin_set_price(code: str, payload: PricingIn, actor: str = Depends(staff(*ADM)),
                     db: Session = Depends(get_db)):
     try:
         p = payments.set_price(db, code, payload.stars, payload.is_active)
@@ -525,7 +524,7 @@ def admin_set_price(code: str, payload: PricingIn, actor: str = Depends(admin_ac
 
 
 @app.get("/api/admin/payments")
-def admin_payments(actor: str = Depends(admin_actor), db: Session = Depends(get_db)):
+def admin_payments(actor: str = Depends(staff(*ADM)), db: Session = Depends(get_db)):
     rows = db.scalars(select(Payment).order_by(desc(Payment.id)).limit(200)).all()
     return [{"id": p.id, "user": p.user_tg_id, "listing_id": p.listing_id, "service": p.service_code,
              "stars": p.stars, "status": p.status, "charge_id": p.telegram_payment_charge_id,
@@ -533,7 +532,7 @@ def admin_payments(actor: str = Depends(admin_actor), db: Session = Depends(get_
 
 
 @app.post("/api/admin/payments/{payment_id}/refund")
-def admin_refund(payment_id: int, actor: str = Depends(admin_actor), db: Session = Depends(get_db)):
+def admin_refund(payment_id: int, actor: str = Depends(staff(*ADM)), db: Session = Depends(get_db)):
     try:
         p = payments.refund(db, payment_id)
     except PaymentError as exc:
@@ -544,7 +543,7 @@ def admin_refund(payment_id: int, actor: str = Depends(admin_actor), db: Session
 
 
 @app.get("/api/admin/stats")
-def admin_stats(actor: str = Depends(admin_actor), db: Session = Depends(get_db)):
+def admin_stats(actor: str = Depends(staff(*ADM)), db: Session = Depends(get_db)):
     current = now()
     paid = db.scalars(select(Payment).where(Payment.status == "paid")).all()
 
@@ -570,7 +569,7 @@ def admin_stats(actor: str = Depends(admin_actor), db: Session = Depends(get_db)
 
 @app.put("/api/admin/groups/{group_id}")
 def admin_group(group_id: int, telegram_link: str = "", members_count: int = 0,
-                actor: str = Depends(admin_actor), db: Session = Depends(get_db)):
+                actor: str = Depends(staff(*ADM)), db: Session = Depends(get_db)):
     g = db.get(Group, group_id)
     if g is None:
         raise HTTPException(404, "Группа не найдена")
@@ -593,7 +592,7 @@ class ArticleIn(BaseModel):
 
 
 @app.put("/api/admin/articles/{article_id}")
-def admin_article(article_id: int, payload: ArticleIn, actor: str = Depends(admin_actor),
+def admin_article(article_id: int, payload: ArticleIn, actor: str = Depends(staff(*ADM)),
                   db: Session = Depends(get_db)):
     a = db.get(Article, article_id)
     if a is None:

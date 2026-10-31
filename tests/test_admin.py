@@ -33,12 +33,12 @@ def test_admin_page_served(client):
 
 def test_admin_api_requires_key(client):
     assert client.get("/api/admin/listings").status_code == 401
-    assert client.get("/api/admin/listings", headers={"X-Admin-Key": "wrong", "X-Admin-Name": "Test"}).status_code == 401
+    assert client.get("/api/admin/listings", headers={"X-Admin-Session": "wrong-token"}).status_code == 401
 
 
 def test_approve_publishes_listing(client):
     listing_id = create(client)
-    headers = {"X-Admin-Key": settings.admin_api_key, "X-Admin-Name": "Test Admin"}
+    headers = {"X-Admin-Session": "test-session-token"}
     pending = client.get("/api/admin/listings", headers=headers).json()
     assert any(x["id"] == listing_id for x in pending)
 
@@ -50,7 +50,7 @@ def test_approve_publishes_listing(client):
 
 def test_reject_hides_listing(client):
     listing_id = create(client)
-    headers = {"X-Admin-Key": settings.admin_api_key, "X-Admin-Name": "Test Admin"}
+    headers = {"X-Admin-Session": "test-session-token"}
     client.post(f"/api/admin/listings/{listing_id}/reject", headers=headers)
     assert all(x["id"] != listing_id for x in client.get("/api/listings").json())
 

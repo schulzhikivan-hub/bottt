@@ -13,7 +13,9 @@ from app.database import get_db
 from app.models import DatingProfile, DatingLike, Conversation, User, Block
 from app.payments import now
 from app.users import writer, is_blocked_pair, get_or_create_user
-from app.audit import admin_actor, log_action
+from app.audit import log_action
+from app.admin_auth import staff, MOD, ADM, SUP
+from app.admin_auth import staff, MOD, ADM, SUP
 
 router = APIRouter()
 MIN_AGE = 18
@@ -174,7 +176,7 @@ def _require_admin(key: str | None):
 
 
 @router.get("/api/admin/dating")
-def admin_dating(status: str = "pending", actor: str = Depends(admin_actor),
+def admin_dating(status: str = "pending", actor: str = Depends(staff(*MOD)),
                  db: Session = Depends(get_db)):
     rows = db.scalars(select(DatingProfile).where(DatingProfile.status == status)
                       .order_by(DatingProfile.id).limit(100)).all()
@@ -184,7 +186,7 @@ def admin_dating(status: str = "pending", actor: str = Depends(admin_actor),
 
 
 @router.get("/api/admin/dating/{profile_id}/photo")
-def admin_photo(profile_id: int, actor: str = Depends(admin_actor),
+def admin_photo(profile_id: int, actor: str = Depends(staff(*MOD)),
                 db: Session = Depends(get_db)):
     profile = db.get(DatingProfile, profile_id)
     if profile is None or not profile.photo_key:
@@ -193,7 +195,7 @@ def admin_photo(profile_id: int, actor: str = Depends(admin_actor),
 
 
 @router.post("/api/admin/dating/{profile_id}/{decision}")
-def decide(profile_id: int, decision: str, actor: str = Depends(admin_actor),
+def decide(profile_id: int, decision: str, actor: str = Depends(staff(*MOD)),
            db: Session = Depends(get_db)):
     if decision not in {"approve", "reject"}:
         raise HTTPException(400, "Decision must be approve or reject")

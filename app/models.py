@@ -191,3 +191,28 @@ class Article(Base):
     source_url: Mapped[str] = mapped_column(String(255), default="")
     checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     published: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+
+
+class Admin(Base):
+    """Staff account. Role: moderator, admin or super_admin. Sign-in is by a code sent to Telegram."""
+    __tablename__ = "admins"
+    tg_id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    role: Mapped[str] = mapped_column(String(20), default="moderator")
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class AdminCode(Base):
+    __tablename__ = "admin_codes"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tg_id: Mapped[str] = mapped_column(String(40), index=True)
+    code_hash: Mapped[str] = mapped_column(String(64))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class AdminSession(Base):
+    __tablename__ = "admin_sessions"
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tg_id: Mapped[str] = mapped_column(String(40), index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

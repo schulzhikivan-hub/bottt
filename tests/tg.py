@@ -6,6 +6,7 @@ import time
 from urllib.parse import urlencode
 
 TEST_BOT_TOKEN = "123456:TEST-TOKEN"
+TEST_ADMIN_SESSION = "test-session-token"
 
 
 def make_init_data(user_id: int, bot_token: str = TEST_BOT_TOKEN, auth_date: float | None = None) -> str:
@@ -35,6 +36,14 @@ def reset_db() -> None:
     Base.metadata.create_all(bind=engine)
     with SessionLocal() as db:
         seed_reference(db)
+        from app.models import Admin, AdminSession
+        from app.admin_auth import _hash
+        from app.payments import now
+        import datetime as dt
+        db.add(Admin(tg_id="999", role="super_admin", active=True, created_at=now()))
+        db.add(AdminSession(token_hash=_hash(TEST_ADMIN_SESSION), tg_id="999",
+                            expires_at=now() + dt.timedelta(hours=1)))
+        db.commit()
 
 
 def accept_terms(client, user_id: int) -> None:

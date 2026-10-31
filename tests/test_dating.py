@@ -6,7 +6,7 @@ from app.database import engine
 from app.main import app
 from tests.tg import as_user, reset_db, accept_terms
 
-ADMIN = {"X-Admin-Key": "test-admin-key", "X-Admin-Name": "Test Admin"}
+ADMIN = {"X-Admin-Session": "test-session-token"}
 JPEG = b"\xff\xd8\xff\xe0" + b"0" * 200
 ADULT = 1990
 MINOR = 2012

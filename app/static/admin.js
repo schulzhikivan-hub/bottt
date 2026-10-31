@@ -3,14 +3,13 @@ const esc = (s = "") => String(s).replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"
 const CAT = {job: "Работа", housing: "Жильё", marketplace: "Барахолка"};
 const REASON_HINT = "Укажите причину (не короче 3 символов):";
 
-function sessionAdmin() { return {key: sessionStorage.getItem("adminKey") || "", name: sessionStorage.getItem("adminName") || ""}; }
+function session() { return sessionStorage.getItem("adminSession") || ""; }
 
 async function api(path, options = {}) {
-  const a = sessionAdmin();
-  const headers = {"X-Admin-Key": a.key, "X-Admin-Name": a.name};
+  const headers = {"X-Admin-Session": session()};
   if (options.body) headers["Content-Type"] = "application/json";
   const r = await fetch(path, {...options, headers});
-  if (r.status === 401) { logout(); throw new Error("Неверный админ-ключ"); }
+  if (r.status === 401) { logout(); throw new Error("Сессия истекла. Войдите снова"); }
   let data = null;
   try { data = await r.json(); } catch (e) { data = null; }
   if (!r.ok) throw new Error(data?.detail || ("Ошибка сервера (" + r.status + ")"));
@@ -25,30 +24,55 @@ function ask(question) {
   return value.trim();
 }
 
-// ---- вход ----
-function login() {
-  const name = $("#name").value.trim(), key = $("#key").value.trim();
-  if (!name || !key) { $("#loginError").textContent = "Заполните оба поля"; return; }
-  sessionStorage.setItem("adminKey", key);
-  sessionStorage.setItem("adminName", name);
+// ---- вход: код приходит в Telegram от бота ----
+let pendingTg = "";
+$("#sendCode").onclick = async () => {
+  const tg = $("#tgId").value.trim();
+  if (!/^\d{3,20}$/.test(tg)) { $("#loginError").textContent = "Введите числовой Telegram ID"; return; }
+  try {
+    await fetch("/api/admin/auth/request", {method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({tg_id: tg})});
+    pendingTg = tg;
+    $("#stepTg").hidden = true; $("#stepCode").hidden = false;
+    $("#loginError").textContent = "Если код не пришёл, откройте бота и нажмите /start";
+  } catch (e) { $("#loginError").textContent = "Нет связи с сервером"; }
+};
+$("#backToTg").onclick = () => { $("#stepTg").hidden = false; $("#stepCode").hidden = true; $("#loginError").textContent = ""; };
+$("#enter").onclick = async () => {
+  const code = $("#code").value.trim();
+  try {
+    const r = await fetch("/api/admin/auth/verify", {method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({tg_id: pendingTg, code})});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail || "Код неверный");
+    sessionStorage.setItem("adminSession", data.token);
+    sessionStorage.setItem("adminRole", data.role);
+    startApp();
+  } catch (e) { $("#loginError").textContent = e.message; }
+};
+function startApp() {
   $("#login").classList.add("hidden");
   $("#app").classList.remove("hidden");
   $("#logout").hidden = false;
+  $("#who").textContent = (sessionStorage.getItem("adminRole") || "") + " · ID " + pendingTg;
+  if (sessionStorage.getItem("adminRole") === "super_admin") $("#tabAdmins").hidden = false;
   show("dash");
 }
-function logout() {
+async function logout() {
+  try { await fetch("/api/admin/auth/logout", {method: "POST", headers: {"X-Admin-Session": session()}}); } catch (e) {}
   sessionStorage.clear();
   $("#app").classList.add("hidden");
   $("#login").classList.remove("hidden");
+  $("#stepTg").hidden = false; $("#stepCode").hidden = true;
   $("#logout").hidden = true;
+  $("#tabAdmins").hidden = true;
 }
-$("#enter").onclick = login;
 $("#logout").onclick = logout;
 
 // ---- вкладки ----
 const LOADERS = {dash: loadDash, listings: loadListings, dating: loadDating, reports: loadReports,
                  users: loadUsers, employers: loadEmployers, payments: loadPayments,
-                 pricing: loadPricing, audit: loadAudit};
+                 pricing: loadPricing, audit: loadAudit, admins: loadAdmins};
 function show(tab) {
   document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
   document.querySelectorAll("main section").forEach((s) => s.classList.toggle("hidden", s.id !== "tab-" + tab));
@@ -118,8 +142,7 @@ async function loadDating() {
     </div>`).join("") : '<div class="card muted">Анкет на проверке нет.</div>';
   for (const img of box.querySelectorAll("img[data-photo]")) {
     if (img.hidden) continue;
-    const a = sessionAdmin();
-    const r = await fetch(`/api/admin/dating/${img.dataset.photo}/photo`, {headers: {"X-Admin-Key": a.key, "X-Admin-Name": a.name}});
+    const r = await fetch(`/api/admin/dating/${img.dataset.photo}/photo`, {headers: {"X-Admin-Session": session()}});
     if (r.ok) img.src = URL.createObjectURL(await r.blob());
   }
 }
@@ -249,10 +272,41 @@ async function loadAudit() {
     </table>` : '<div class="card muted">Журнал пуст.</div>';
 }
 
+// Сотрудники (только суперадминистратор)
+async function loadAdmins() {
+  const rows = await api("/api/admin/admins");
+  $("#tab-admins").innerHTML = `
+    <p class="muted">Роли: moderator — модерация; admin — + цены, платежи, статистика, журнал; super_admin — + сотрудники.</p>
+    <table><tr><th>Telegram ID</th><th>Роль</th><th>Доступ</th><th></th></tr>
+    ${rows.map((a) => `<tr data-staff="${esc(a.tg_id)}"><td>${esc(a.tg_id)}</td>
+      <td><select data-role>${["moderator", "admin", "super_admin"].map((r) =>
+        `<option value="${r}" ${r === a.role ? "selected" : ""}>${r}</option>`).join("")}</select></td>
+      <td><input type="checkbox" data-active ${a.active ? "checked" : ""}></td>
+      <td><button class="act" data-staff-save>Сохранить</button></td></tr>`).join("")}
+    </table>
+    <p><input id="newStaffId" inputmode="numeric" placeholder="Telegram ID сотрудника">
+    <button class="act" id="addStaff">Добавить / изменить</button></p>`;
+}
+$("#tab-admins").addEventListener("click", async (e) => {
+  const row = e.target.closest("[data-staff]");
+  try {
+    if (e.target.closest("[data-staff-save]")) {
+      await api(`/api/admin/admins/${row.dataset.staff}`, {method: "PUT", body: JSON.stringify({
+        role: row.querySelector("[data-role]").value, active: row.querySelector("[data-active]").checked})});
+      say("Сохранено (запись в журнале)");
+      loadAdmins();
+    }
+    if (e.target.id === "addStaff") {
+      const id = $("#newStaffId").value.trim();
+      if (!/^\d{3,20}$/.test(id)) { say("Введите числовой Telegram ID"); return; }
+      await api(`/api/admin/admins/${id}`, {method: "PUT", body: JSON.stringify({role: "moderator", active: true})});
+      loadAdmins();
+    }
+  } catch (err) { say(err.message); }
+});
+
 // Восстановление входа в той же вкладке
-if (sessionStorage.getItem("adminKey")) {
-  $("#login").classList.add("hidden");
-  $("#app").classList.remove("hidden");
-  $("#logout").hidden = false;
-  show("dash");
+if (session()) {
+  pendingTg = "";
+  startApp();
 }

@@ -24,13 +24,21 @@ td,th{padding:8px;border-bottom:1px solid #eef1f6;text-align:left;font-size:13px
 #login{max-width:420px;margin:40px auto}
 </style></head>
 <body>
-<header><b>KOREA HUB — админ-панель</b><button class="act gray" id="logout" hidden>Выйти</button></header>
+<header><b>KOREA HUB — админ-панель</b><span><span id="who" class="muted"></span> <button class="act gray" id="logout" hidden>Выйти</button></span></header>
 
 <div id="login" class="card">
-  <p>Вход для администраторов. Имя латиницей (например, Ivan), ключ из ADMIN_API_KEY. Всё хранится только в этой вкладке браузера.</p>
-  <p><input id="name" placeholder="Имя (латиница)" style="width:100%"></p>
-  <p><input id="key" type="password" placeholder="Админ-ключ" style="width:100%"></p>
-  <p><button class="act" id="enter">Войти</button> <span class="muted" id="loginError"></span></p>
+  <h3>Вход в админ-панель</h3>
+  <div id="stepTg">
+    <p>Введите ваш Telegram ID (число). Код придёт в Telegram от бота KOREA HUB. Сначала откройте бота и нажмите /start.</p>
+    <p><input id="tgId" inputmode="numeric" placeholder="Telegram ID" style="width:100%"></p>
+    <p><button class="act" id="sendCode">Получить код</button></p>
+  </div>
+  <div id="stepCode" hidden>
+    <p>Код отправлен в Telegram. Введите его (действует 5 минут):</p>
+    <p><input id="code" inputmode="numeric" maxlength="6" placeholder="6 цифр" style="width:100%"></p>
+    <p><button class="act" id="enter">Войти</button> <button class="act gray" id="backToTg">Назад</button></p>
+  </div>
+  <p class="muted" id="loginError"></p>
 </div>
 
 <div id="app" class="hidden">
@@ -44,6 +52,7 @@ td,th{padding:8px;border-bottom:1px solid #eef1f6;text-align:left;font-size:13px
     <button data-tab="payments">Платежи</button>
     <button data-tab="pricing">Цены</button>
     <button data-tab="audit">Журнал</button>
+    <button data-tab="admins" id="tabAdmins" hidden>Сотрудники</button>
   </nav>
   <main>
     <p class="muted" id="status"></p>
@@ -59,6 +68,7 @@ td,th{padding:8px;border-bottom:1px solid #eef1f6;text-align:left;font-size:13px
     <section id="tab-payments" class="hidden"></section>
     <section id="tab-pricing" class="hidden"></section>
     <section id="tab-audit" class="hidden"></section>
+    <section id="tab-admins" class="hidden"></section>
   </main>
 </div>
 <script src="/static/admin.js"></script>
