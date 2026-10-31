@@ -1115,6 +1115,9 @@ function applyTelegramTheme() {
   const t = tg?.themeParams || {};
   const st = document.documentElement.style;
   const set = (name, value) => { if (value) st.setProperty(name, value); };
+  // Тема Telegram: тёмная схема даёт тёмный фон, даже если цвета не переданы
+  document.documentElement.dataset.scheme = tg?.colorScheme === "dark" ? "dark" : (tg?.colorScheme === "light" ? "light" : "");
+  try { tg?.setBackgroundColor?.(t.secondary_bg_color || t.bg_color || (tg?.colorScheme === "dark" ? "#0e1621" : "#f3f6fa")); } catch (e) { /* старая версия */ }
   set("--bg", t.secondary_bg_color || t.bg_color);
   set("--card", t.section_bg_color || t.bg_color);
   set("--text", t.text_color);
