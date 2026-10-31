@@ -216,3 +216,23 @@ class AdminSession(Base):
     token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
     tg_id: Mapped[str] = mapped_column(String(40), index=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class LoginRequest(Base):
+    """Browser sign-in through the bot: the site shows a link, the user confirms it in Telegram."""
+    __tablename__ = "login_requests"
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    status: Mapped[str] = mapped_column(String(12), default="pending")  # pending, confirmed, rejected, used
+    tg_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    ip: Mapped[str] = mapped_column(String(60), default="")
+    agent: Mapped[str] = mapped_column(String(120), default="")
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class WebSession(Base):
+    """Session of a user who signed in on the website (outside the Mini App)."""
+    __tablename__ = "web_sessions"
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    tg_id: Mapped[str] = mapped_column(String(40), index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

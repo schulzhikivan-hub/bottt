@@ -4,7 +4,7 @@
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <link rel="stylesheet" href="/static/style.css"><link rel="stylesheet" href="/static/extra.css"></head>
 <body><div class="app">
-<header><div class="brand"><div class="logo">🇰🇷</div><div><b>KOREA HUB</b><small>Всё для жизни в Корее</small></div></div></header>
+<header><div class="brand"><div class="logo">🇰🇷</div><div><b>KOREA HUB</b><small>Всё для жизни в Корее</small></div></div><button class="link" id="loginTop" hidden>Войти</button></header>
 
 <section id="view-home">
   <div class="welcome"><span class="eyebrow">СООБЩЕСТВО ИНОСТРАНЦЕВ</span><h1>Твоя жизнь<br>в Южной Корее</h1><p>Работа, жильё, покупки — в одном месте.</p></div>
@@ -55,6 +55,7 @@
     <button class="wide" data-menu="employer">🏢 Статус работодателя</button>
     <button class="wide" data-menu="blocks">🚫 Заблокированные</button>
     <button class="wide" data-menu="help">❓ Помощь и правила</button>
+    <button class="wide" data-menu="logout" id="logoutItem" hidden>🚪 Выйти</button>
     <button class="wide" data-menu="export">📄 Выгрузить мои данные</button>
     <button class="wide danger" data-menu="delete">Удалить аккаунт</button>
   </div>
@@ -134,6 +135,12 @@
 <label>Контактное лицо<input name="contact_person" required minlength="2" maxlength="80"></label>
 <p class="muted">Заявку проверит модератор. После одобрения в профиле появится отметка работодателя.</p>
 <button class="submit" type="submit">Отправить заявку</button></form></div></div>
+
+<div id="webLogin" class="modal hidden"><div class="sheet"><div class="sheet-top"><b>Вход через Telegram</b><button id="closeWebLogin">✕</button></div>
+<p>Нажмите кнопку, откроется Telegram. Там нажмите «Это я, войти» — сайт войдёт сам.</p>
+<button class="submit" id="webLoginBtn" type="button">Войти через Telegram</button>
+<p class="muted" id="webLoginInfo"></p>
+<p><a id="webLoginLink" href="#" hidden target="_blank" rel="noopener">Открыть Telegram вручную</a></p></div></div>
 
 <div id="toast" class="toast"></div>
 <script src="/static/app.js"></script></body></html>

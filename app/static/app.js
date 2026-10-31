@@ -19,15 +19,50 @@ let chatTimer = null;
 let me = null;
 
 // Все запросы подписываются данными Telegram: сервер проверяет подпись.
+// Внутри Telegram вход автоматический (подпись initData). На сайте — сессия после входа через бота.
+const inTelegram = Boolean(tg?.initData);
 async function api(path, options = {}) {
-  const headers = {"X-Telegram-Init-Data": tg?.initData || ""};
+  const headers = {};
+  if (inTelegram) headers["X-Telegram-Init-Data"] = tg.initData;
+  else if (localStorage.getItem("webSession")) headers["X-Web-Session"] = localStorage.getItem("webSession");
   if (options.body) headers["Content-Type"] = "application/json";
   const r = await fetch(path, {...options, headers: {...headers, ...(options.headers || {})}});
   let data = null;
   try { data = await r.json(); } catch (e) { data = null; }
+  if (r.status === 401 && !inTelegram && !options.quiet) showWebLogin();
   if (!r.ok) throw new Error(data?.detail || "Ошибка сервера (" + r.status + ")");
   return data;
 }
+
+// ---- вход на сайте через Telegram (в Mini App не нужен) ----
+let loginPoll = null;
+function showWebLogin() { if (!inTelegram) $("#webLogin").classList.remove("hidden"); }
+async function startWebLogin() {
+  const info = $("#webLoginInfo");
+  info.textContent = "Готовим вход…";
+  try {
+    const r = await api("/api/auth/start", {method: "POST", quiet: true});
+    const link = $("#webLoginLink");
+    link.href = r.url; link.hidden = false;
+    window.open(r.url, "_blank");
+    info.textContent = "Подтвердите вход в Telegram кнопкой «Это я, войти». Страница обновится сама.";
+    clearInterval(loginPoll);
+    const started = Date.now();
+    loginPoll = setInterval(async () => {
+      if (Date.now() - started > 300000) { clearInterval(loginPoll); info.textContent = "Время вышло. Нажмите кнопку ещё раз."; return; }
+      try {
+        const p = await api(`/api/auth/poll/${r.token}`, {quiet: true});
+        if (p.status === "ok") { clearInterval(loginPoll); localStorage.setItem("webSession", p.session); location.reload(); }
+        else if (p.status === "rejected") { clearInterval(loginPoll); info.textContent = "Вход отклонён в Telegram."; }
+        else if (p.status === "expired") { clearInterval(loginPoll); info.textContent = "Ссылка устарела. Нажмите кнопку ещё раз."; }
+      } catch (e) { /* связь пропала на секунду, пробуем снова */ }
+    }, 2000);
+  } catch (e) { info.textContent = e.message; }
+}
+$("#webLoginBtn").onclick = startWebLogin;
+$("#closeWebLogin").onclick = () => { clearInterval(loginPoll); $("#webLogin").classList.add("hidden"); };
+$("#loginTop").onclick = showWebLogin;
+
 function toast(msg) {
   const t = $("#toast"); t.textContent = msg; t.style.display = "block";
   setTimeout(() => (t.style.display = "none"), 3000);
@@ -59,7 +94,7 @@ async function loadMe() {
 }
 
 async function requireConsent() {
-  await loadMe();
+  try { await loadMe(); } catch (e) { return false; }  // без входа api() сам показал окно входа
   if (!me.consent) {
     $("#consent").classList.remove("hidden");
     return false;
@@ -197,6 +232,12 @@ async function openMenu(key) {
       <p>3. Оплата услуг — в звёздах Telegram (⭐). Возврат — через поддержку.</p>
       <p>4. Жалобы на объявления и людей — кнопка «Пожаловаться» в карточке.</p>
       <p>Вопросы: команда /help в боте.</p></article>`;
+  }
+  if (key === "logout") {
+    await api("/api/auth/logout", {method: "POST", quiet: true});
+    localStorage.removeItem("webSession");
+    location.reload();
+    return;
   }
   if (key === "export") return exportMyData();
   if (key === "delete") return deleteMyAccount();
@@ -593,5 +634,9 @@ document.addEventListener("click", async (e) => {
   } catch (err) { toast(err.message); }
 });
 
-loadMe().then(() => { if (!me.consent) $("#consent").classList.remove("hidden"); }).catch(() => {});
+// Без входа сайт можно смотреть. Когда нужно действие, предложим войти через Telegram.
+if (!inTelegram) $("#logoutItem").hidden = !localStorage.getItem("webSession");
+api("/api/me", {quiet: true})
+  .then((user) => { me = user; if (!me.consent) $("#consent").classList.remove("hidden"); })
+  .catch(() => { if (!inTelegram) $("#loginTop").hidden = false; });
 if (!openFromMenu()) loadListings();

@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     admin_ids: str = ""
     upload_dir: str = "uploads"
     notifications_enabled: bool = True
+    bot_username: str = ""
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 settings = Settings()

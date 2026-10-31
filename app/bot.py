@@ -4,14 +4,14 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart, Command, CommandObject
 from aiogram.types import (
     Message, PreCheckoutQuery, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo,
-    MenuButtonWebApp,
+    MenuButtonWebApp, CallbackQuery,
 )
 from sqlalchemy import select
 
-from app import payments
+from app import payments, webauth
 from app.config import settings
 from app.database import SessionLocal
-from app.models import Listing
+from app.models import Listing, Admin
 
 WELCOME = "🇰🇷 Добро пожаловать в KOREA HUB!\nРабота, жильё и объявления для жизни в Корее."
 HELP_TEXT = (
@@ -59,13 +59,26 @@ MENU_SECTIONS = [
 ]
 
 
-def menu_markup() -> InlineKeyboardMarkup:
+def is_staff(tg_id: int) -> bool:
+    with SessionLocal() as db:
+        admin = db.get(Admin, str(tg_id))
+        return admin is not None and admin.active
+
+
+def admin_button() -> list[InlineKeyboardButton]:
+    base = settings.webapp_url.rstrip("/")
+    return [InlineKeyboardButton(text="🛠 Админ-панель", web_app=WebAppInfo(url=f"{base}/admin"))]
+
+
+def menu_markup(staff: bool = False) -> InlineKeyboardMarkup:
     base = settings.webapp_url.rstrip("/")
     rows = []
     for i in range(0, len(MENU_SECTIONS), 2):
         row = [InlineKeyboardButton(text=label, web_app=WebAppInfo(url=f"{base}/?section={key}"))
                for label, key in MENU_SECTIONS[i:i + 2]]
         rows.append(row)
+    if staff:
+        rows.append(admin_button())
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -84,9 +97,59 @@ def moderate(listing_id: int, decision: str, reason: str = "") -> tuple[Listing 
 
 
 def register(dp: Dispatcher, bot: Bot) -> None:
+    @dp.message(CommandStart(deep_link=True))
+    async def start_deeplink(message: Message, command: CommandObject):
+        arg = command.args or ""
+        if not arg.startswith("login_"):
+            await message.answer(WELCOME + "\nВыберите нужный раздел:",
+                                 reply_markup=menu_markup(is_staff(message.from_user.id)))
+            return
+        token = arg[len("login_"):]
+        with SessionLocal() as db:
+            row = webauth.login_request(db, token)
+            details = None if row is None else (row.ip or "неизвестно", row.agent or "неизвестно")
+        if details is None:
+            await message.answer("Ссылка для входа устарела. Нажмите «Войти через Telegram» на сайте ещё раз.")
+            return
+        markup = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="✅ Это я, войти", callback_data=f"lc:{token}"),
+            InlineKeyboardButton(text="❌ Это не я", callback_data=f"ln:{token}"),
+        ]])
+        await message.answer(
+            "Кто-то хочет войти на сайт KOREA HUB от вашего имени.\n"
+            f"IP: {details[0]}\nБраузер: {details[1]}\n\n"
+            "Подтверждайте, только если это вы только что нажали «Войти через Telegram».",
+            reply_markup=markup)
+
+    @dp.callback_query(F.data.startswith("lc:") | F.data.startswith("ln:"))
+    async def login_decision(query: CallbackQuery):
+        action, _, token = query.data.partition(":")
+        with SessionLocal() as db:
+            if action == "lc":
+                ok = webauth.confirm_login(db, token, str(query.from_user.id))
+            else:
+                ok = webauth.reject_login(db, token)
+        if action == "lc" and ok:
+            text = "Вход подтверждён ✅ Вернитесь на сайт, он откроется сам."
+        elif action == "ln" and ok:
+            text = "Вход отклонён. Если это были не вы, ничего делать не нужно."
+        else:
+            text = "Ссылка устарела. Нажмите «Войти через Telegram» на сайте ещё раз."
+        await query.message.edit_text(text)
+        await query.answer()
+
     @dp.message(CommandStart())
     async def start(message: Message):
-        await message.answer(WELCOME + "\nВыберите нужный раздел:", reply_markup=menu_markup())
+        await message.answer(WELCOME + "\nВыберите нужный раздел:",
+                             reply_markup=menu_markup(is_staff(message.from_user.id)))
+
+    @dp.message(Command("admin"))
+    async def admin_cmd(message: Message):
+        if not is_staff(message.from_user.id):
+            await message.answer("Команда доступна только сотрудникам.")
+            return
+        await message.answer("Админ-панель откроется внутри Telegram, вход автоматический.",
+                             reply_markup=InlineKeyboardMarkup(inline_keyboard=[admin_button()]))
 
     @dp.message(Command("help"))
     async def help_cmd(message: Message):
@@ -246,7 +309,7 @@ async def main():
     dp = Dispatcher()
     register(dp, bot)
     asyncio.create_task(expiry_loop(bot))
-    await dp.start_polling(bot, allowed_updates=["message", "pre_checkout_query"])
+    await dp.start_polling(bot, allowed_updates=["message", "pre_checkout_query", "callback_query"])
 
 
 if __name__ == "__main__":

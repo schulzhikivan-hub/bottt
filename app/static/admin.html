@@ -1,6 +1,7 @@
 <!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>KOREA HUB — админ-панель</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
 *{box-sizing:border-box}
 body{font-family:system-ui,sans-serif;margin:0;background:#f4f6fa;color:#1b2430}
@@ -28,16 +29,10 @@ td,th{padding:8px;border-bottom:1px solid #eef1f6;text-align:left;font-size:13px
 
 <div id="login" class="card">
   <h3>Вход в админ-панель</h3>
-  <div id="stepTg">
-    <p>Введите ваш Telegram ID (число). Код придёт в Telegram от бота KOREA HUB. Сначала откройте бота и нажмите /start.</p>
-    <p><input id="tgId" inputmode="numeric" placeholder="Telegram ID" style="width:100%"></p>
-    <p><button class="act" id="sendCode">Получить код</button></p>
-  </div>
-  <div id="stepCode" hidden>
-    <p>Код отправлен в Telegram. Введите его (действует 5 минут):</p>
-    <p><input id="code" inputmode="numeric" maxlength="6" placeholder="6 цифр" style="width:100%"></p>
-    <p><button class="act" id="enter">Войти</button> <button class="act gray" id="backToTg">Назад</button></p>
-  </div>
+  <p id="loginHint">Нажмите кнопку: откроется Telegram, подтвердите вход кнопкой «Это я, войти».
+  Если вы открыли панель кнопкой в боте, вход произойдёт сам.</p>
+  <p><button class="act" id="webLoginBtn">Войти через Telegram</button>
+  <a id="webLoginLink" href="#" hidden target="_blank" rel="noopener">Открыть Telegram вручную</a></p>
   <p class="muted" id="loginError"></p>
 </div>
 

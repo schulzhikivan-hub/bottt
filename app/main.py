@@ -22,6 +22,7 @@ from app.schemas import (
 )
 from app.seed import seed_reference
 from app.admin_auth import router as admin_auth_router, bootstrap_admins
+from app.webauth import router as webauth_router
 from app.audit import log_action
 from app.admin_auth import staff, MOD, ADM, SUP
 from app.manage import router as manage_router
@@ -41,6 +42,7 @@ app = FastAPI(title="KOREA HUB API", version="0.4.0")
 app.include_router(dating_router)
 app.include_router(manage_router)
 app.include_router(admin_auth_router)
+app.include_router(webauth_router)
 STATIC = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 

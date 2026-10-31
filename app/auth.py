@@ -11,9 +11,14 @@ import json
 import time
 from urllib.parse import parse_qsl
 
-from fastapi import Header, HTTPException
+from datetime import datetime, timezone
+
+from fastapi import Depends, Header, HTTPException
+from sqlalchemy.orm import Session
 
 from app.config import settings
+from app.database import get_db
+from app.models import WebSession
 
 MAX_AGE_SECONDS = 24 * 60 * 60
 
@@ -47,10 +52,24 @@ def validate_init_data(init_data: str, bot_token: str, now: float | None = None)
     return user
 
 
-def current_user_id(x_telegram_init_data: str | None = Header(default=None)) -> str:
-    """FastAPI dependency: the verified Telegram user ID as a string."""
-    try:
-        user = validate_init_data(x_telegram_init_data or "", settings.bot_token)
-    except (ValueError, json.JSONDecodeError):
-        raise HTTPException(401, "Откройте приложение из Telegram")
-    return str(user["id"])
+def current_user_id(x_telegram_init_data: str | None = Header(default=None),
+                    x_web_session: str | None = Header(default=None),
+                    db: Session = Depends(get_db)) -> str:
+    """FastAPI dependency: the verified Telegram user ID as a string.
+
+    Two ways to prove who you are:
+    - inside the Mini App: the signed initData from Telegram (automatic);
+    - on the website: a session issued after confirming the sign-in in the bot.
+    """
+    if x_telegram_init_data:
+        try:
+            user = validate_init_data(x_telegram_init_data, settings.bot_token)
+        except (ValueError, json.JSONDecodeError):
+            raise HTTPException(401, "Откройте приложение из Telegram или войдите через Telegram")
+        return str(user["id"])
+    if x_web_session:
+        row = db.get(WebSession, hashlib.sha256(x_web_session.encode()).hexdigest())
+        if row is not None and row.expires_at.replace(tzinfo=row.expires_at.tzinfo or timezone.utc) > datetime.now(timezone.utc):
+            return row.tg_id
+        raise HTTPException(401, "Сессия истекла. Войдите через Telegram")
+    raise HTTPException(401, "Войдите через Telegram")

@@ -24,37 +24,60 @@ function ask(question) {
   return value.trim();
 }
 
-// ---- вход: код приходит в Telegram от бота ----
-let pendingTg = "";
-$("#sendCode").onclick = async () => {
-  const tg = $("#tgId").value.trim();
-  if (!/^\d{3,20}$/.test(tg)) { $("#loginError").textContent = "Введите числовой Telegram ID"; return; }
+// ---- вход: автоматически из Telegram или кнопкой на сайте ----
+const tgApp = window.Telegram?.WebApp;
+tgApp?.ready(); tgApp?.expand();
+let loginPoll = null;
+
+function saveAdmin(data) {
+  sessionStorage.setItem("adminSession", data.token || data.admin_session);
+  sessionStorage.setItem("adminRole", data.role);
+  sessionStorage.setItem("adminId", data.tg_id);
+}
+
+async function autoLogin() {
+  // Панель открыта кнопкой в боте: Telegram сам подтверждает, кто вы
   try {
-    await fetch("/api/admin/auth/request", {method: "POST", headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({tg_id: tg})});
-    pendingTg = tg;
-    $("#stepTg").hidden = true; $("#stepCode").hidden = false;
-    $("#loginError").textContent = "Если код не пришёл, откройте бота и нажмите /start";
-  } catch (e) { $("#loginError").textContent = "Нет связи с сервером"; }
-};
-$("#backToTg").onclick = () => { $("#stepTg").hidden = false; $("#stepCode").hidden = true; $("#loginError").textContent = ""; };
-$("#enter").onclick = async () => {
-  const code = $("#code").value.trim();
-  try {
-    const r = await fetch("/api/admin/auth/verify", {method: "POST", headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({tg_id: pendingTg, code})});
+    const r = await fetch("/api/admin/auth/telegram", {method: "POST", headers: {"X-Telegram-Init-Data": tgApp.initData}});
     const data = await r.json();
-    if (!r.ok) throw new Error(data.detail || "Код неверный");
-    sessionStorage.setItem("adminSession", data.token);
-    sessionStorage.setItem("adminRole", data.role);
+    if (!r.ok) throw new Error(data.detail || "Нет доступа");
+    saveAdmin(data);
     startApp();
+  } catch (e) { $("#loginError").textContent = e.message; $("#webLoginBtn").hidden = true; }
+}
+
+$("#webLoginBtn").onclick = async () => {
+  $("#loginError").textContent = "Готовим вход…";
+  try {
+    const r = await fetch("/api/auth/start", {method: "POST"});
+    const start = await r.json();
+    if (!r.ok) throw new Error(start.detail || "Не удалось начать вход");
+    const link = $("#webLoginLink"); link.href = start.url; link.hidden = false;
+    window.open(start.url, "_blank");
+    $("#loginError").textContent = "Подтвердите вход в Telegram. Страница обновится сама.";
+    clearInterval(loginPoll);
+    const started = Date.now();
+    loginPoll = setInterval(async () => {
+      if (Date.now() - started > 300000) { clearInterval(loginPoll); $("#loginError").textContent = "Время вышло. Нажмите кнопку ещё раз."; return; }
+      try {
+        const p = await (await fetch(`/api/auth/poll/${start.token}`)).json();
+        if (p.status === "ok") {
+          clearInterval(loginPoll);
+          if (!p.admin_session) { $("#loginError").textContent = "У вашего аккаунта нет доступа к админ-панели."; return; }
+          saveAdmin({admin_session: p.admin_session, role: p.role, tg_id: p.tg_id});
+          startApp();
+        } else if (p.status === "rejected") { clearInterval(loginPoll); $("#loginError").textContent = "Вход отклонён в Telegram."; }
+        else if (p.status === "expired") { clearInterval(loginPoll); $("#loginError").textContent = "Ссылка устарела. Нажмите кнопку ещё раз."; }
+      } catch (e) { /* пробуем снова */ }
+    }, 2000);
   } catch (e) { $("#loginError").textContent = e.message; }
 };
+
 function startApp() {
   $("#login").classList.add("hidden");
   $("#app").classList.remove("hidden");
   $("#logout").hidden = false;
-  $("#who").textContent = (sessionStorage.getItem("adminRole") || "") + " · ID " + pendingTg;
+  $("#who").textContent = (sessionStorage.getItem("adminRole") || "") + " · ID " + (sessionStorage.getItem("adminId") || "");
   if (sessionStorage.getItem("adminRole") === "super_admin") $("#tabAdmins").hidden = false;
   show("dash");
 }
@@ -63,9 +86,9 @@ async function logout() {
   sessionStorage.clear();
   $("#app").classList.add("hidden");
   $("#login").classList.remove("hidden");
-  $("#stepTg").hidden = false; $("#stepCode").hidden = true;
   $("#logout").hidden = true;
   $("#tabAdmins").hidden = true;
+  $("#webLoginBtn").hidden = false;
 }
 $("#logout").onclick = logout;
 
@@ -305,8 +328,6 @@ $("#tab-admins").addEventListener("click", async (e) => {
   } catch (err) { say(err.message); }
 });
 
-// Восстановление входа в той же вкладке
-if (session()) {
-  pendingTg = "";
-  startApp();
-}
+// Старт: есть сессия — открываем; открыто из Telegram — входим сами; иначе показываем кнопку
+if (session()) startApp();
+else if (tgApp?.initData) autoLogin();
