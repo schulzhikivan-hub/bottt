@@ -72,6 +72,7 @@
     <span id="resultCount" class="rc">Загружаем…</span>
     <select id="sortSelect" aria-label="Сортировка">
       <option value="new">Сначала новые</option>
+      <option value="relevance">По совпадению</option>
       <option value="price_asc">Сначала дешёвые</option>
       <option value="price_desc">Сначала дорогие</option>
     </select>
@@ -263,7 +264,7 @@
   <button class="addwrap" id="addBtn" aria-label="Добавить"><span class="addc">
     <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></span>Добавить</button>
   <button data-view="chats">
-    <svg viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.600 7.100L4 20.500l1.100-4.600A8 8 0 1 1 21 12z"/></svg>Сообщения</button>
+    <svg viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.600 7.100L4 20.500l1.100-4.600A8 8 0 1 1 21 12z"/></svg>Сообщения<em id="navChats" class="navbadge" hidden>0</em></button>
   <button data-view="profile">
     <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>Профиль</button>
 </nav>

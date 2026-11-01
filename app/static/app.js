@@ -587,7 +587,13 @@ document.addEventListener("click", async (e) => {
     try { await api("/api/me/searches", {method: "POST", body: JSON.stringify(body)}); toast("Сообщим в Telegram, когда появится"); } catch (err) { toast(err.message); }
   }
 });
-function reloadCatalog() { homeLoaded = false; updateFilterUi(); loadCatalog(); $("#scroll").scrollTop = 0; }
+let userSort = false;      // человек сам выбрал порядок: тогда не переключаем его сами
+function autoSort() {
+  if (userSort) return;
+  if (filters.q && filters.sort === "new") filters.sort = "relevance";          // со словом в поиске важнее всего подходящее
+  else if (!filters.q && filters.sort === "relevance") filters.sort = "new";
+}
+function reloadCatalog() { autoSort(); homeLoaded = false; updateFilterUi(); loadCatalog(); $("#scroll").scrollTop = 0; }
 
 let searchTimer = null;
 const HISTORY_KEY = "khSearchHistory";
@@ -642,7 +648,7 @@ document.querySelectorAll("[data-tile]").forEach((t) => t.addEventListener("clic
   if (t.dataset.goods) filters.goods_category = t.dataset.goods;
   reloadCatalog();
 }));
-$("#sortSelect").onchange = () => { filters.sort = $("#sortSelect").value; reloadCatalog(); };
+$("#sortSelect").onchange = () => { filters.sort = $("#sortSelect").value; userSort = true; reloadCatalog(); };
 $("#moreBtn").onclick = () => loadCatalog(true);
 
 // ---------- города и районы Южной Кореи ----------
@@ -3348,3 +3354,16 @@ $("#saveTplBtn").onclick = async () => {
     toast("Шаблон сохранён: он будет в окне «Добавить»");
   } catch (err) { toast(err.message); }
 };
+
+// ---------- значок непрочитанных сообщений на нижней панели ----------
+async function refreshNavBadge() {
+  if (isGuest()) { $("#navChats").hidden = true; return; }
+  try {
+    const r = await api("/api/me/unread", {quiet: true});
+    $("#navChats").textContent = r.messages > 99 ? "99+" : r.messages;
+    $("#navChats").hidden = !r.messages;
+  } catch (e) { /* без значка */ }
+}
+setTimeout(refreshNavBadge, 2500);
+setInterval(refreshNavBadge, 60000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshNavBadge(); });

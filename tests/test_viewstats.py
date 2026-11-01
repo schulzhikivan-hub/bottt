@@ -68,3 +68,22 @@ def test_quick_price_change_rules_and_history(client):
     h = client.get(f"/api/listings/{lid}/history", headers=as_user(1)).json()
     assert [e["what"] for e in h].count("Изменена цена") == 3 and h[-1]["what"] == "Объявление создано"
     assert client.get(f"/api/listings/{lid}/history", headers=as_user(2)).status_code == 404
+
+
+def test_unread_badge_counts_only_unread_messages_of_visible_chats(client):
+    lid = make(client)
+    cid = client.post(f"/api/listings/{lid}/conversation", headers=as_user(2)).json()["id"]
+    client.post(f"/api/conversations/{cid}/messages", json={"text": "Здравствуйте"}, headers=as_user(2))
+    client.post(f"/api/conversations/{cid}/messages", json={"text": "Ещё вопрос"}, headers=as_user(2))
+    assert client.get("/api/me/unread", headers=as_user(1)).json() == {"messages": 2}
+    assert client.get("/api/me/unread", headers=as_user(2)).json() == {"messages": 0}          # my own messages are not «unread»
+    client.get(f"/api/conversations/{cid}/messages", headers=as_user(1))                       # opening the chat reads them
+    assert client.get("/api/me/unread", headers=as_user(1)).json() == {"messages": 0}
+
+
+def test_search_relevance_puts_title_matches_first_and_finds_by_company_name(client):
+    a = make(client, title="Повар", description="кухня и ещё слово сварщик")
+    b = make(client, title="Сварщик на завод", description="завод")
+    r = client.get("/api/catalog?q=сварщик&sort=relevance").json()["items"]
+    assert [x["id"] for x in r][:2] == [b, a]                                                 # in the title beats in the text
+    assert client.get("/api/catalog?q=сварщик&sort=relevance&limit=1&offset=1").json()["items"][0]["id"] == a

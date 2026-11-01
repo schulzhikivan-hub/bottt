@@ -195,3 +195,18 @@ def history(listing_id: int, user_id: str = Depends(writer), db: Session = Depen
         events.append({"at": r.created_at.isoformat(), "what": HISTORY_LABELS[r.action], "details": r.details if r.action in SHOW_DETAILS else ""})
     events.sort(key=lambda e: e["at"], reverse=True)
     return events
+
+
+@router.get("/api/me/unread")
+def unread_messages(user_id: str = Depends(writer), db: Session = Depends(get_db)):
+    """How many messages wait for me (for the badge on «Сообщения»); a person's own side and the company side they work on."""
+    from app.models import Message
+    team = select(company.CompanyMember.company_id).where(company.CompanyMember.tg_id == user_id, company.CompanyMember.role.in_(company.WRITE))
+    mine = select(Conversation.id).where((Conversation.buyer_tg_id == user_id) | (Conversation.seller_tg_id == user_id) |
+                                         Conversation.listing_id.in_(select(Listing.id).where(Listing.company_id.in_(team))))
+    from app.models import ConvHide
+    rows = db.execute(select(Message.conversation_id, func.count(), func.max(Message.created_at)).where(
+        Message.conversation_id.in_(mine), Message.sender_tg_id != user_id, Message.read_at.is_(None)).group_by(Message.conversation_id)).all()
+    hides = {h.conv_id: h.at for h in db.scalars(select(ConvHide).where(ConvHide.user_tg_id == user_id)).all()}
+    n = sum(c for cid, c, last in rows if cid not in hides or aware(last) > aware(hides[cid]))      # a chat I hid does not light up
+    return {"messages": int(n)}

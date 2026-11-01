@@ -73,6 +73,13 @@ def _promo_rank(pin_only: bool = False):
             .correlate(Listing).scalar_subquery())
 
 
+def _company_ids_named(db: Session, words: set[str]) -> list[int]:
+    """Verified companies whose name contains the word (so «самсунг» also finds the vacancies of that company)."""
+    from app.company import Company
+    names = db.execute(select(Company.id, Company.name).where(Company.status == "verified")).all()
+    return [cid for cid, name in names if any(w and w in (name or "").lower() for w in words)]
+
+
 def search(db: Session, *, q: str = "", category: str | None = None, city: str | None = None,
            region: str | None = None, district_id: int | None = None,
            price_min: int | None = None, price_max: int | None = None, sort: str = "new",
@@ -100,7 +107,9 @@ def search(db: Session, *, q: str = "", category: str | None = None, city: str |
         alts = set(searchfix.variants(word))
         for syn in searchdict.synonyms_of(word):                      # words the owner declared equal («квартира» = «студия»)
             alts |= set(searchfix.variants(syn))
-        conditions.append(or_(*[Listing.search_text.like(_like(v), escape="\\") for v in alts]))
+        hit = or_(*[Listing.search_text.like(_like(v), escape="\\") for v in alts])
+        companies = _company_ids_named(db, alts)
+        conditions.append(or_(hit, Listing.company_id.in_(companies)) if companies else hit)
     if price_min is not None:
         conditions.append(Listing.price_amount >= price_min)
     if price_max is not None:
@@ -152,6 +161,16 @@ def search(db: Session, *, q: str = "", category: str | None = None, city: str |
                           employment=employment, schedule=schedule, housing_type=housing_type, deposit_max=deposit_max,
                           area_min=area_min, pets_allowed=pets_allowed, furnished=furnished, goods_category=goods_category,
                           year_min=year_min, year_max=year_max, mileage_max=mileage_max, limit=limit, offset=offset, _fuzzy=False)
+    if sort == "relevance" and q.strip():
+        pool = db.scalars(select(Listing).where(*conditions)
+                          .order_by(_promo_rank().desc(), _penalty().asc(), Listing.id.desc()).limit(300)).all()
+        words = searchdict.clean_words(q.lower().split())[:MAX_WORDS]
+
+        def score(x: Listing) -> int:
+            title = (x.title or "").lower()
+            return sum((3 if w in title else 0) + (1 if w in (x.search_text or "") else 0) for w in words)
+        ranked = sorted(pool, key=lambda x: -score(x))            # stable: paid and newer stay first among equals
+        return ranked[offset:offset + limit], total
     if sort == "price_asc":
         order = [Listing.price_amount.asc().nulls_last(), Listing.id.desc()]
     elif sort == "price_desc":
@@ -229,7 +248,7 @@ def catalog(q: str = Query(default="", max_length=100), category: str | None = N
             city: str | None = Query(default=None, max_length=80),
             region: str | None = Query(default=None, max_length=20), district_id: int | None = None,
             price_min: int | None = Query(default=None, ge=0), price_max: int | None = Query(default=None, ge=0),
-            sort: Literal["new", "price_asc", "price_desc"] = "new",
+            sort: Literal["new", "relevance", "price_asc", "price_desc"] = "new",
             housing_provided: bool | None = None, meals_provided: bool | None = None,
             condition: Literal["new", "used"] | None = None,
             rooms_min: int | None = Query(default=None, ge=0, le=20),
@@ -254,7 +273,7 @@ def catalog(q: str = Query(default="", max_length=100), category: str | None = N
                          goods_category=goods_category, year_min=year_min, year_max=year_max,
                          mileage_max=mileage_max, limit=limit, offset=offset)
     items = with_promo(db, rows)
-    if sort == "new":
+    if sort in {"new", "relevance"}:
         # «2 из 5», 30% страницы, не больше двух закреплённых: одни правила для всех списков (app/policy.py)
         items = policy.arrange(items, lambda o: "promo" if o.promo_free else (o.promo if o.promo in {"pin", "vip", "bump"} else ""))
     out = {"items": items, "total": total, "has_more": offset + len(rows) < total}
