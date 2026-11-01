@@ -1338,7 +1338,12 @@ async function loadSearchTest() {
   $("#main").innerHTML = `<div class="card"><p class="muted">Введите запрос так, как его вводит человек. «Как видят люди» показывает настоящую выдачу и причину каждого места. «Как видит админ» дополнительно покажет, что не показано и почему.</p>
     <div class="row"><input id="stQ" placeholder="Запрос, например: повар" style="flex:1;min-width:200px">
     <select id="stMode"><option value="people" ${stestMode === "people" ? "selected" : ""}>Как видят люди</option><option value="admin" ${stestMode === "admin" ? "selected" : ""}>Как видит админ</option></select>
-    <button class="act" id="stGo">Проверить</button></div><div id="stOut"></div></div>`;
+    <button class="act" id="stGo">Проверить</button></div><div id="stOut"></div></div>
+    ${["admin", "super_admin"].includes(role()) ? `<div class="card"><h3>Синонимы и стоп-слова</h3><p class="muted">Синонимы: одна группа в строке, через «=» или запятую: <code>квартира = 원룸, студия</code>. Запрос на любое слово группы находит и остальные. Стоп-слова пропускаются в запросе: <code>в, на, и</code>.</p>
+      <label>Синонимы<textarea id="sdSyn" rows="5" placeholder="квартира = 원룸, студия"></textarea></label><label>Стоп-слова (через запятую)<input id="sdStop" style="width:100%"></label>
+      <button class="act" id="sdSave">Сохранить</button> <span class="muted">Действует сразу, проверьте выше.</span></div>` : ""}`;
+  if ($("#sdSyn")) api("/api/admin/search-dict").then((d) => { $("#sdSyn").value = d.synonyms; $("#sdStop").value = d.stopwords; }).catch(() => {});
+  if ($("#sdSave")) $("#sdSave").onclick = async () => { try { await api("/api/admin/search-dict", {method: "PUT", body: JSON.stringify({synonyms: $("#sdSyn").value, stopwords: $("#sdStop").value})}); say("Сохранено"); } catch (err) { say(err.message); } };
   const go = async () => {
     stestMode = $("#stMode").value;
     const r = await api(`/api/admin/search-test?q=${encodeURIComponent($("#stQ").value)}&mode=${stestMode}`);

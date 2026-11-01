@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select, func, case, or_
 from sqlalchemy.orm import Session
 
-from app import applications, fields, payments, photos, policy, searchfix
+from app import applications, fields, payments, photos, policy, rules, searchdict, searchfix
 from app.payments import now
 from app import guard
 from app.database import get_db
@@ -47,6 +47,19 @@ def _like(word: str) -> str:
     return f"%{escaped}%"
 
 
+def _penalty():
+    """1 for a listing that several different people complained about (and nobody has decided yet): it sinks in its own group."""
+    from sqlalchemy import String, cast, literal
+    from app.models import Report
+    n = rules.val("search.penalty_from")
+    if not n:
+        return literal(0)
+    count = (select(func.count(func.distinct(Report.reporter_tg_id)))
+             .where(Report.target_type == "listing", Report.target_id == cast(Listing.id, String), Report.status == "new")
+             .correlate(Listing).scalar_subquery())
+    return case((count >= n, 1), else_=0)
+
+
 def _promo_rank(pin_only: bool = False):
     """Lift of paid placements in the list. A placement that a promotion gave free gets no lift (only a mark).
     For sorting by price only pinning counts: paid services must not break «cheapest first»."""
@@ -83,8 +96,10 @@ def search(db: Session, *, q: str = "", category: str | None = None, city: str |
         conditions.append(Listing.city_key.like(_like(city.strip().lower()), escape="\\"))
     # Every word must be found in the title, description or city (case is ignored); a word may also be read as
     # another keyboard layout, transliteration or with a different ending (app/searchfix.py)
-    for word in q.lower().split()[:MAX_WORDS]:
-        alts = searchfix.variants(word)
+    for word in searchdict.clean_words(q.lower().split())[:MAX_WORDS]:
+        alts = set(searchfix.variants(word))
+        for syn in searchdict.synonyms_of(word):                      # words the owner declared equal («квартира» = «студия»)
+            alts |= set(searchfix.variants(syn))
         conditions.append(or_(*[Listing.search_text.like(_like(v), escape="\\") for v in alts]))
     if price_min is not None:
         conditions.append(Listing.price_amount >= price_min)
@@ -144,7 +159,7 @@ def search(db: Session, *, q: str = "", category: str | None = None, city: str |
     else:
         order = [Listing.id.desc()]
     rows = db.scalars(select(Listing).where(*conditions)
-                      .order_by(_promo_rank(pin_only=sort in {"price_asc", "price_desc"}).desc(), *order).limit(limit).offset(offset)).all()
+                      .order_by(_promo_rank(pin_only=sort in {"price_asc", "price_desc"}).desc(), _penalty().asc(), *order).limit(limit).offset(offset)).all()
     return list(rows), total
 
 

@@ -75,3 +75,29 @@ def test_staff_gives_and_takes_back_stars_with_history_cap_and_journal(client):
     with SessionLocal() as db:
         from app.models import AuditLog
         assert [a.details for a in db.query(AuditLog).filter_by(action="user.stars").order_by(AuditLog.id)] == ["100 компенсация", "-40 ошибка"]
+
+
+def test_synonyms_and_stop_words_are_edited_in_the_panel(client):
+    from app import searchdict
+    lid = make(client, title="Studio near subway", category="housing")
+    other = make(client, title="Flat on the hill", category="housing")
+    assert [x["id"] for x in client.get("/api/catalog", params={"q": "apartment"}).json()["items"]] == []
+    client.put("/api/admin/search-dict", json={"synonyms": "apartment = studio, flat\\nработа = job", "stopwords": "the, in"}, headers=ADMIN)
+    searchdict.reset()
+    found = {x["id"] for x in client.get("/api/catalog", params={"q": "apartment"}).json()["items"]}
+    assert found == {lid, other}                                                         # «apartment» now means studio or flat
+    assert {x["id"] for x in client.get("/api/catalog", params={"q": "in studio"}).json()["items"]} == {lid}   # «in» is skipped
+    assert client.get("/api/admin/search-dict", headers=ADMIN).json()["stopwords"] == "the, in"
+    assert client.get("/api/admin/search-dict").status_code == 401
+    client.put("/api/admin/search-dict", json={"synonyms": "", "stopwords": ""}, headers=ADMIN)
+    searchdict.reset()
+
+
+def test_complaints_push_a_listing_down_inside_its_group(client):
+    first = make(client, title="Cook one", category="job", user=1)
+    second = make(client, title="Cook two", category="job", user=2)       # newer: normally first
+    assert [x["id"] for x in client.get("/api/catalog", params={"q": "cook"}).json()["items"]] == [second, first]
+    for u in (1, 3):
+        client.post("/api/reports", json={"target_type": "listing", "target_id": str(second), "reason": "fake"}, headers=as_user(u))
+    ids = [x["id"] for x in client.get("/api/catalog", params={"q": "cook"}).json()["items"]]
+    assert ids == [first, second]                                          # two different people complained: it sinks
