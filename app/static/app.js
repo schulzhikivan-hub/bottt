@@ -1971,6 +1971,9 @@ async function loadDating() {
   await loadGeo();
   const reg = $("#dRegion");
   if (!reg.options.length) reg.innerHTML = '<option value="">Вся Корея</option>' + (geoData || []).map((r) => `<option value="${r.code}">${esc(r.name)}</option>`).join("");
+  const guest = isGuest();                      // гость может смотреть ленту, остальное закрыто
+  $("#dTabs").hidden = guest; $("#myDatingBtn").hidden = guest;
+  if (guest) datingTab = "all";
   const params = new URLSearchParams({mode: datingTab});
   if (datingGender) params.set("gender", datingGender);
   const age = $("#dAge").value;
@@ -1981,9 +1984,9 @@ async function loadDating() {
   document.querySelectorAll("#dTabs [data-dtab]").forEach((b) => b.classList.toggle("active", b.dataset.dtab === datingTab));
   const n = Object.values(datingFilters).filter(Boolean).length;
   $("#dMoreN").textContent = n ? `(${n})` : "";
-  api("/api/dating/counts", {quiet: true}).then((c) => { $("#dnToMe").textContent = c.to_me ? `(${c.to_me})` : ""; $("#dnFromMe").textContent = c.from_me ? `(${c.from_me})` : ""; $("#dnMutual").textContent = c.mutual ? `(${c.mutual})` : ""; }).catch(() => {});
+  if (!guest) api("/api/dating/counts", {quiet: true}).then((c) => { $("#dnToMe").textContent = c.to_me ? `(${c.to_me})` : ""; $("#dnFromMe").textContent = c.from_me ? `(${c.from_me})` : ""; $("#dnMutual").textContent = c.mutual ? `(${c.mutual})` : ""; }).catch(() => {});
   try {
-    const items = await api("/api/dating?" + params);
+    const items = await api("/api/dating?" + params, {quiet: true});
     window.__dating = Object.fromEntries(items.map((p) => [p.id, p]));
     const empty = {to_me: "Пока никто не поставил симпатию. Заполните анкету и загрузите фото: так вас найдут быстрее.",
       from_me: "Вы пока никому не симпатизировали. Откройте «Все» и нажмите ♡.", mutual: "Взаимных симпатий пока нет. Они появятся, когда человек ответит вам тем же.",
@@ -1996,6 +1999,7 @@ async function loadDating() {
         <div class="dinfo"><b>${p.name ? esc(p.name) + ", " : ""}${p.age}${p.name ? "" : " лет"}${p.verified ? " ✔" : ""}</b><span>📍 ${esc(p.city)}${p.age_confirmed ? "" : " · возраст не подтверждён"}</span></div>
       </article>`).join("")
       : `<div class="empty">${empty}${datingTab === "all" && (datingActive || n || datingGender) ? '<br><button class="link" id="dReset">Сбросить фильтры</button>' : ""}</div>`;
+    if (guest && items.length) box.insertAdjacentHTML("afterbegin", '<div class="guestnote">Анкеты можно смотреть без входа. Чтобы поставить симпатию, написать и создать свою анкету, <button class="link" data-guest-login>войдите через Telegram</button>.</div>');
   } catch (e) { box.innerHTML = `<div class="empty">${esc(e.message)}<br><button class="link" id="dRetry">Повторить</button></div>`; }
 }
 document.addEventListener("click", (e) => {
@@ -2109,9 +2113,23 @@ function dCompleteness(m) {
 }
 // «Как меня видят»: та же карточка, что у других людей, но без кнопок «нравится» и «пожаловаться»
 function previewMyProfile(m) {
-  window.__dating = window.__dating || {};
-  window.__dating[m.id] = m;
-  openDatingSheet(m.id, {preview: true});
+  // Не окно поверх экрана, а страница с большой кнопкой «Назад»: из неё всегда можно выйти
+  const body = $("#subBody");
+  SUB_TITLES.dpreview = "Как меня видят";
+  $("#subTitle").textContent = SUB_TITLES.dpreview;
+  body.innerHTML = `<div class="dprev">
+    <button class="dprev-back" id="dPrevBack" type="button">← Назад к моей анкете</button>
+    <p class="dsnote">👁 Так вашу анкету видят другие люди. Контактов в ней нет.</p>
+    <article class="dprev-card">
+      ${m.has_photo ? `<img src="${esc(m.photo_url)}?v=${Date.now() % 100000}" alt="">` : '<div class="dprev-nophoto">👤</div>'}
+      <div class="dprev-body"><h2>${esc(m.name || "Без имени")}, ${m.age}${m.age_confirmed ? " ✔" : ""}</h2>
+        <p class="muted">📍 ${esc(m.city || "—")}${m.age_confirmed ? " · анкета подтверждена" : ""}</p>
+        <div class="dtags">${dTags(m)}</div>
+        <p class="dsbio">${esc(m.bio || "О себе ничего не написано")}</p>
+        <div class="actions"><button type="button" disabled>♡ Нравится</button><button type="button" class="secondary" disabled>⚑ Пожаловаться</button></div>
+      </div></article></div>`;
+  $("#dPrevBack").onclick = () => showDatingCabinet();
+  $("#scroll").scrollTo({top: 0});
 }
 async function showDatingCabinet() {
   SUB_TITLES.dcabinet = "Моя анкета";

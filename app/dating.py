@@ -397,13 +397,21 @@ def _lift(rows: list[DatingProfile], mode: str, inc: dict) -> list[DatingProfile
 
 
 @router.get("/api/dating")
-def browse(gender: str | None = None, city: str | None = None, user_id: str = Depends(writer),
+def browse(gender: str | None = None, city: str | None = None, user_id: str | None = Depends(optional_user_id),
            db: Session = Depends(get_db), age_min: int | None = None, age_max: int | None = None,
            region: str | None = None, active: bool = False, mode: str = "all", seeking: str | None = None,
            goal: str | None = None, visa: str | None = None, height_min: int | None = None, height_max: int | None = None,
            verified: bool = False, vip: bool = False, private: bool = False, with_photo: bool = True):
     if mode not in MODES:
         raise HTTPException(400, "Неизвестная вкладка")
+    if user_id is None:                                  # a visitor without sign-in: may look at the feed, nothing more
+        if mode != "all":
+            raise HTTPException(401, "Войдите через Telegram")
+        user_id = ""
+    else:
+        user = get_or_create_user(db, user_id)
+        if user.deleted_at is not None or user.blocked:
+            raise HTTPException(403, "Аккаунт недоступен")
     f = dict(gender=gender, city=city, age_min=age_min, age_max=age_max, region=region, active=active, seeking=seeking, goal=goal,
              visa=visa, height_min=height_min, height_max=height_max, verified=verified, vip=vip, private=private, with_photo=with_photo)
     out, inc, mutual = _directions(db, user_id)

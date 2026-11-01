@@ -656,3 +656,13 @@ button.dcab-tile:active{transform:scale(.97)}
 .fsec label{display:grid;gap:4px;font-size:14px}
 .fsec .geo{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .fsec small{display:inline;font-size:12px}
+
+.dprev{display:grid;gap:12px}
+.dprev-back{position:sticky;top:0;z-index:3;border:0;border-radius:14px;padding:13px 14px;background:var(--accent);color:var(--accent-text);font-weight:700;font-size:15px;text-align:left}
+.dprev-card{background:var(--card);border:1px solid var(--border);border-radius:20px;overflow:hidden}
+.dprev-card img{width:100%;max-height:60vh;object-fit:cover;display:block}
+.dprev-nophoto{height:220px;display:grid;place-items:center;font-size:80px;background:var(--soft)}
+.dprev-body{padding:14px;display:grid;gap:8px}.dprev-body h2{margin:0;font-size:20px}.dprev-body p{margin:0}
+.guestnote{grid-column:1/-1;background:var(--soft);color:var(--accent);border-radius:12px;padding:10px 12px;font-size:13px}
+.dsheet{max-height:92vh;overflow-y:auto}
+.dsheet .sheet-top{position:sticky;top:0;background:var(--card);z-index:2;padding-bottom:6px}

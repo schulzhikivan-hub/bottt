@@ -203,3 +203,12 @@ def test_detail_records_views_and_admin_gets_conversion_stats(client):
     client.post(f"/api/dating/{p1}/like", headers=as_user(2))
     stats = client.get("/api/admin/dating-stats", headers=ADMIN).json()
     assert stats["sympathies"] == 2 and stats["mutual_pairs"] == 1 and stats["talking_pairs"] == 0
+
+
+def test_a_visitor_without_sign_in_may_look_at_the_feed_only(client):
+    pid = publish(client, 1)
+    feed = client.get("/api/dating")
+    assert feed.status_code == 200 and [x["id"] for x in feed.json()] == [pid]
+    assert client.get("/api/dating?mode=mutual").status_code == 401        # nothing personal for a guest
+    assert client.post(f"/api/dating/{pid}/like").status_code == 401        # nothing to do
+    assert client.get("/api/dating/me").status_code == 401
