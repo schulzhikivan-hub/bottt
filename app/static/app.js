@@ -222,6 +222,8 @@ function showView(name, opts = {}) {
   if (name === "guide") loadGuide();
   if (name === "dating") loadDating();
   box.scrollTop = opts.restore ? (scrollPos[name] || 0) : 0;
+  clearTimeout(showView.navTimer);
+  showView.navTimer = setTimeout(() => { if (typeof refreshNavBadge === "function") refreshNavBadge(); }, 900);      // прочитал чат: значок гаснет сразу
 }
 function goBack() {
   const open = typeof modalOpen === "function" ? modalOpen() : null;
