@@ -284,7 +284,8 @@
 <button class="wide" data-add="car">🚗 Автомобиль</button>
 <button class="wide" data-add="service">🛠️ Услуга</button>
 <button class="wide" data-add="dating">💗 Анкета знакомств</button>
-</div></div></div>
+</div>
+<div id="tplBox" hidden><h4 class="grp">Из шаблона</h4><div class="menu-list" id="tplList"></div></div></div></div>
 
 <div id="modal" class="modal page hidden"><div class="sheet"><div class="sheet-top"><button id="closeModal" aria-label="Назад">←</button><b id="modalTitle">Новое объявление</b><span></span></div>
 <form id="listingForm" novalidate>
@@ -376,6 +377,7 @@
 <h3 class="dsub">Так увидят ваше объявление</h3>
 <div id="listingPreview" class="preview"></div>
 <div id="listingScore" class="score"></div>
+<button type="button" class="ghostbtn" id="saveTplBtn">📑 Сохранить как шаблон</button>
 <label class="check"><input type="checkbox" id="rulesOk"> Подтверждаю: всё правда, предоплат и переводов на карту не прошу</label>
 <p class="muted" id="afterInfo">Модератор проверит объявление, обычно в течение суток. Оно будет показано 30 дней, потом его можно продлить.</p>
 <button class="submit" type="submit" id="sendBtn">Опубликовать</button>

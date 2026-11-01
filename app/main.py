@@ -32,7 +32,7 @@ from app.guard import rate_limit, check_text, duplicate_note, notify_user
 from app import admin_ops as ops
 from app import catalog
 from app import photos, applications, searches, inbox, promos, adminx, observe, site
-from app import geo, reviews, resumes, referrals, support, extras, adminplus, adminview, datingsvc, ads, rules, adminreports, account, refunds, blocks, reportsflow, batches, security, duty, searchdict, searchlog, views, adminsys, adminmanage, adminedit, listingtools, exchange, pipeline
+from app import geo, reviews, resumes, referrals, support, extras, adminplus, adminview, datingsvc, ads, rules, adminreports, account, refunds, blocks, reportsflow, batches, security, duty, searchdict, searchlog, views, adminsys, adminmanage, adminedit, listingtools, exchange, pipeline, listingtemplates
 from app import fields as listing_fields
 from app.users import get_or_create_user, writer, is_blocked_pair
 from app.models import Admin, AuditLog, ConvHide, DatingProfile, TypingMark
@@ -94,6 +94,7 @@ app.include_router(adminedit.router)
 app.include_router(listingtools.router)
 app.include_router(exchange.router)
 app.include_router(pipeline.router)
+app.include_router(listingtemplates.router)
 app.include_router(listing_fields.router)
 STATIC = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC), name="static")

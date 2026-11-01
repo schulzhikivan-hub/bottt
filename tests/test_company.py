@@ -280,3 +280,19 @@ def test_hiring_funnel_stage_and_private_note(client):
     assert client.put(f"/api/company/{cid}/applications/{app_id}/note", json={"note": "x"}, headers=as_user(3)).status_code == 404   # not in the team
     mine = client.get("/api/me/applications", headers=as_user(3)).json()
     assert "Звонить" not in str(mine)                                      # the applicant never sees the employer's note
+
+
+def test_templates_personal_and_company(client):
+    cid = verified_company(client)
+    team_member(client, cid, 2, "recruiter")
+    body = {"category": "job", "title": "Повар", "description": "Полный день", "price_amount": 2500000, "region_code": "seoul", "evil": "x"}
+    r = client.post("/api/me/templates", json={"name": "Повар, полный день", "data": body}, headers=as_user(3))
+    assert r.status_code == 201 and "evil" not in r.json()["data"]
+    assert [t["name"] for t in client.get("/api/me/templates", headers=as_user(3)).json()] == ["Повар, полный день"]
+    assert client.get("/api/me/templates", headers=as_user(4)).json() == []                      # private
+    c = client.post("/api/me/templates", json={"name": "Для команды", "data": body, "company_id": cid}, headers=as_user(1)).json()
+    assert [t["name"] for t in client.get("/api/me/templates", headers=as_user(2)).json()] == ["Для команды"]   # the team sees it
+    assert client.post("/api/me/templates", json={"name": "Чужой", "data": body, "company_id": cid}, headers=as_user(4)).status_code == 403
+    assert client.delete(f"/api/me/templates/{c['id']}", headers=as_user(2)).status_code == 404       # a recruiter does not delete the team's
+    assert client.delete(f"/api/me/templates/{c['id']}", headers=as_user(1)).status_code == 200
+    assert client.post("/api/me/templates", json={"name": "Без раздела", "data": {"title": "x"}}, headers=as_user(3)).status_code == 400

@@ -1834,6 +1834,7 @@ function showPostAs() {
   box.hidden = !postAsCompany;
   box.innerHTML = postAsCompany ? `<b>🏢 От компании «${esc(postAsCompany.name)}»</b><span>Объявление появится на странице компании, а не в вашем личном профиле. Откликам и сообщениям ответит команда.</span>` : "";
 }
+let pendingTemplate = null;
 async function openAdd(kind) {
   if (kind === "dating") return $("#myDatingBtn").onclick();
   if (me?.blocked) { toast("Аккаунт ограничен" + (me.block_reason ? ": " + me.block_reason : "")); return; }
@@ -1852,6 +1853,7 @@ async function openAdd(kind) {
   // Незаконченный черновик на этом устройстве
   let saved = null;
   try { saved = JSON.parse(localStorage.getItem(draftKey()) || "null"); } catch (e) { saved = null; }
+  if (pendingTemplate) saved = null;
   if (postAsCompany) saved = null;
   else if (!saved) {
     try { const sd = await api("/api/me/wizard-draft", {quiet: true}); if (sd?.data && (sd.data.title || sd.data.description)) saved = sd; } catch (e) { /* без черновика */ }
@@ -1859,6 +1861,7 @@ async function openAdd(kind) {
   $("#addSheet").classList.add("hidden");
   $("#modal").classList.remove("hidden");
   showStep(1);
+  if (pendingTemplate) { fillForm(pendingTemplate); updateFormBlocks(); pendingTemplate = null; toast("Шаблон подставлен: проверьте и дополните. Фото добавьте заново"); return; }
   if (saved?.data && (await confirmDialog("Продолжить незаконченное объявление?"))) {
     fillForm(saved.data);
     updateFormBlocks();
@@ -1969,7 +1972,7 @@ $("#draftBtn").onclick = () => saveListing(false);
 $("#doneMine").onclick = () => { $("#doneSheet").classList.add("hidden"); showView("profile"); showView("mine", {push: true}); };
 $("#doneMore").onclick = () => { postAsCompany = null; $("#doneSheet").classList.add("hidden"); $("#addSheet").classList.remove("hidden"); };
 $("#closeModal").onclick = () => { postAsCompany = null; $("#modal").classList.add("hidden"); };
-$("#addBtn").onclick = async () => { postAsCompany = null; if (await requireConsent()) $("#addSheet").classList.remove("hidden"); };
+$("#addBtn").onclick = async () => { postAsCompany = null; if (await requireConsent()) { $("#addSheet").classList.remove("hidden"); loadTemplates(); } };
 $("#closeAdd").onclick = () => { postAsCompany = null; $("#addSheet").classList.add("hidden"); };
 document.querySelectorAll("[data-add]").forEach((b) => b.onclick = () => openAdd(b.dataset.add));
 
@@ -2608,7 +2611,7 @@ async function renderCoPane(ov) {
         <article class="dcard2"><h3>Объявления</h3><p>Активных: <b>${ov.listings.active}</b> · на проверке: <b>${ov.listings.pending}</b> · остальные: <b>${ov.listings.other}</b></p>
         <p class="muted">Откликов всего: ${ov.applications.total}. В команде ${ov.members} из ${ov.limits.members}.</p>
         <div class="actions"><button class="secondary" data-cotab-go="listings">Все объявления</button><button class="secondary" data-cotab-go="apps">Отклики</button></div></article>`;
-      if ($("#coPost")) $("#coPost").onclick = async () => { postAsCompany = {id: ov.id, name: ov.name}; $("#addSheet").classList.remove("hidden"); };
+      if ($("#coPost")) $("#coPost").onclick = async () => { postAsCompany = {id: ov.id, name: ov.name}; $("#addSheet").classList.remove("hidden"); loadTemplates(); };
       if ($("#coPublic")) $("#coPublic").onclick = () => showPublicCompany(ov.id);
     }
     if (coState.tab === "listings") {
@@ -3314,3 +3317,34 @@ document.addEventListener("click", async (e) => {
     }
   } catch (err) { toast(err.message); }
 });
+
+// ---------- шаблоны: сохранить заполненное и начинать новое одним касанием ----------
+let tplItems = [];
+async function loadTemplates() {
+  try { tplItems = await api("/api/me/templates", {quiet: true}); } catch (e) { tplItems = []; }
+  $("#tplBox").hidden = tplItems.length === 0;
+  $("#tplList").innerHTML = tplItems.map((t) => `<div class="wide tplrow"><button type="button" data-tpl="${t.id}">${{job: "💼", housing: "🏠"}[t.category] || "🛍️"} ${esc(t.name)}${t.company_id ? " · 🏢" : ""}</button><button type="button" class="link" data-tpldel="${t.id}" aria-label="Удалить шаблон">✕</button></div>`).join("");
+}
+document.addEventListener("click", async (e) => {
+  const use = e.target.closest("[data-tpl]"), del = e.target.closest("[data-tpldel]");
+  try {
+    if (use) {
+      const t = tplItems.find((x) => String(x.id) === use.dataset.tpl);
+      if (!t) return;
+      pendingTemplate = t.data;
+      if (t.company_id) { const co = (await api("/api/company/mine", {quiet: true}).catch(() => [])).find((c) => c.id === t.company_id); if (co) postAsCompany = {id: co.id, name: co.name}; }
+      await openAdd(kindOfItem(t.data));
+    }
+    if (del && (await confirmDialog("Удалить шаблон?"))) { await api(`/api/me/templates/${del.dataset.tpldel}`, {method: "DELETE"}); loadTemplates(); }
+  } catch (err) { toast(err.message); }
+});
+$("#saveTplBtn").onclick = async () => {
+  try {
+    const data = listingPayload($("#listingForm"));
+    if (!data.title && !data.description) { toast("Сначала заполните объявление"); return; }
+    const name = await askText("Название шаблона", "Например: Повар, полный день");
+    if (!name) return;
+    await api("/api/me/templates", {method: "POST", body: JSON.stringify({name, data, company_id: postAsCompany ? postAsCompany.id : null})});
+    toast("Шаблон сохранён: он будет в окне «Добавить»");
+  } catch (err) { toast(err.message); }
+};
