@@ -226,6 +226,8 @@ class Placement(Base):
     payment_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     notified_end: Mapped[bool] = mapped_column(Boolean, default=False)
     reminded: Mapped[bool] = mapped_column(Boolean, default=False)  # "ends tomorrow" notice sent
+    promo: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())   # given free by a promotion: no lift in ranking
+    frozen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)   # the clock is stopped since this moment
 
 
 class Payment(Base):

@@ -92,9 +92,9 @@ def test_photo_served_only_when_published(client):
 def test_mutual_like_opens_chat_only_between_them(client):
     p1 = publish(client, 1)
     p2 = publish(client, 2)
-    assert client.post(f"/api/dating/{p2}/like", headers=as_user(1)).json() == {"match": False}
+    assert client.post(f"/api/dating/{p2}/like", headers=as_user(1)).json() == {"mutual": False}
     r = client.post(f"/api/dating/{p1}/like", headers=as_user(2)).json()
-    assert r["match"] is True
+    assert r["mutual"] is True
     conv = r["conversation_id"]
     sent = client.post(f"/api/conversations/{conv}/messages", json={"text": "Привет"}, headers=as_user(1))
     assert sent.status_code == 201

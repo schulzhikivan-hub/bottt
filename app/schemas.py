@@ -83,6 +83,7 @@ class ListingOut(BaseModel):
     author: dict = {}  # public trust signals on the listing page
     applications: dict | None = None  # owner only: {total, new}
     promo: str | None = None  # active paid placement: pin, vip, bump, highlight
+    promo_free: bool = False  # the placement was given free by a promotion: a mark, but no lift in the list
     created_at: datetime | None = None
 
 
@@ -118,7 +119,7 @@ class ConversationOut(BaseModel):
     last_text: str
     last_at: datetime | None
     unread: int = 0
-    kind: str = "listing"             # listing | match
+    kind: str = "listing"             # listing | mutual (a chat of two people who like each other)
     role: str = "buyer"               # buyer: I wrote to the author; seller: someone wrote to me
     other_name: str = ""
     other_initial: str = ""

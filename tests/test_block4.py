@@ -77,7 +77,7 @@ def test_likes_me_screen(client):
     assert "owner" not in str(r) and "tg" not in str(r).lower()
     # like back from that screen -> mutual, chat appears, the person leaves the "liked me" list
     back = client.post(f"/api/dating/{p2}/like", headers=as_user(1)).json()
-    assert back["match"] is True
+    assert back["mutual"] is True
     assert client.get("/api/dating/likes-me", headers=as_user(1)).json()["count"] == 1
     # a blocked person is not shown
     client.post("/api/users/3/block", headers=as_user(1))

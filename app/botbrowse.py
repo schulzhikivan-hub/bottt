@@ -345,7 +345,7 @@ def act(db: Session, user_id: int, data: str) -> View:
                 return View("", alert=e.detail)
             profile = db.get(DatingProfile, int(arg))
             view = dating_view(db, user_id, st)  # the liked profile disappears from the feed
-            if result.get("match"):
+            if result.get("mutual"):
                 view.alert = "Взаимная симпатия! Теперь можно писать друг другу."
                 view.rows.insert(0, [app_btn("💬 Открыть чат в приложении")])
                 if profile is not None:

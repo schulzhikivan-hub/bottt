@@ -851,13 +851,13 @@ function relTime(iso) {
 let convTab = "all", convItems = [];
 function drawConversations() {
   const box = $("#conversations");
-  const rows = convItems.filter((c) => convTab === "all" ? true : convTab === "unread" ? c.unread > 0 : convTab === "match" ? c.kind === "match" : c.kind === "listing" && c.role === convTab);
+  const rows = convItems.filter((c) => convTab === "all" ? true : convTab === "unread" ? c.unread > 0 : convTab === "match" ? c.kind === "mutual" : c.kind === "listing" && c.role === convTab);
   document.querySelectorAll("#chatTabs [data-ctab]").forEach((b) => b.classList.toggle("active", b.dataset.ctab === convTab));
   box.innerHTML = rows.length ? rows.map((c) => `
     <article class="convrow ${c.unread ? "unread" : ""}" data-chat="${c.id}" data-title="${esc(c.other_name)}">
-      <div class="thumb2 ${c.listing_status && c.listing_status !== "approved" ? "cdead" : ""}">${c.listing_cover ? `<img src="${esc(c.listing_cover)}" alt="" loading="lazy">` : c.kind === "match" ? "💗" : (CAT_ICON[c.listing_category] || "📄")}<span class="mini">${esc(c.other_initial)}</span></div>
+      <div class="thumb2 ${c.listing_status && c.listing_status !== "approved" ? "cdead" : ""}">${c.listing_cover ? `<img src="${esc(c.listing_cover)}" alt="" loading="lazy">` : c.kind === "mutual" ? "💗" : (CAT_ICON[c.listing_category] || "📄")}<span class="mini">${esc(c.other_initial)}</span></div>
       <div class="cbody"><span class="cname">${esc(c.other_name)}</span>
-        <span class="cad">${c.kind === "match" ? "Знакомство" : esc(c.listing_title)}${c.listing_price ? ` <span class="cprice">· ${esc(c.listing_price)}</span>` : ""}${c.listing_status && c.listing_status !== "approved" && c.kind === "listing" ? ' <span class="cprice">· снято</span>' : ""}</span>
+        <span class="cad">${c.kind === "mutual" ? "Знакомство" : esc(c.listing_title)}${c.listing_price ? ` <span class="cprice">· ${esc(c.listing_price)}</span>` : ""}${c.listing_status && c.listing_status !== "approved" && c.kind === "listing" ? ' <span class="cprice">· снято</span>' : ""}</span>
         <span class="clast">${c.last_mine ? "Вы: " : ""}${esc(c.last_text || "Нет сообщений")}</span></div>
       <div class="cside"><span class="ctime">${esc(relTime(c.last_at))}</span>${c.unread ? `<span class="cbadge">${c.unread}</span>` : ""}</div>
     </article>`).join("")
@@ -884,7 +884,7 @@ async function openChat(id, title) {
   chatTimer = setInterval(loadMessages, 5000);
   chatStatusTimer = setInterval(loadChatStatus, 3500);
   syncSendButtons();
-  drawQuickReplies("match", "buyer");   // пока не пришли данные чата: без подсказок
+  drawQuickReplies("mutual", "buyer");   // пока не пришли данные чата: без подсказок
 }
 let chatStatusTimer = null, lastTypingPing = 0;
 // Кто пишет и по какому объявлению: имя, карточка объявления с фото и ценой (как на Авито)
@@ -903,7 +903,7 @@ async function fillChatHeader(id) {
       $("#chatAdPrice").textContent = (c.role === "seller" ? "Ваше объявление · " : "") + (c.listing_status && c.listing_status !== "approved" ? "снято с публикации" : c.listing_price);
       $("#chatAdImg").hidden = !c.listing_cover; $("#chatAdPh").hidden = !!c.listing_cover;
       if (c.listing_cover) $("#chatAdImg").src = c.listing_cover; else $("#chatAdPh").textContent = CAT_ICON[c.listing_category] || "📄";
-    } else if (c.kind === "match") { $("#chatSub").dataset.kind = "match"; }
+    } else if (c.kind === "mutual") { $("#chatSub").dataset.kind = "mutual"; }
   } catch (e) { /* шапка не критична */ }
 }
 $("#chatAd").addEventListener("click", (e) => { e.preventDefault(); const id = $("#chatAd").dataset.open; if (id) openDetail(+id); });
@@ -926,7 +926,7 @@ const QUICK_BUYER = ["Здравствуйте! Ещё актуально?", "К
 const QUICK_SELLER = ["Да, актуально", "Здравствуйте! Чем помочь?", "Приезжайте, адрес пришлю", "Цена окончательная", "Уже продано, извините"];
 let quickSet = QUICK_BUYER;
 function drawQuickReplies(kind = "listing", role = "buyer") {
-  quickSet = kind === "match" ? [] : role === "seller" ? QUICK_SELLER : QUICK_BUYER;
+  quickSet = kind === "mutual" ? [] : role === "seller" ? QUICK_SELLER : QUICK_BUYER;
   $("#quickReplies").hidden = quickSet.length === 0;
   $("#quickReplies").innerHTML = quickSet.map((t) => `<button type="button" data-quick="${esc(t)}">${esc(t)}</button>`).join("");
 }
@@ -1888,7 +1888,7 @@ $("#dsLike").onclick = async () => {
   try {
     const r = await api(`/api/dating/${dsCurrent.id}/like`, {method: "POST"});
     $("#dsheet").classList.add("hidden");
-    if (r.match) { toast("Взаимная симпатия! Можно писать"); openChat(r.conversation_id, dsCurrent.name || "Знакомство"); }
+    if (r.mutual) { toast("Взаимная симпатия! Можно писать"); openChat(r.conversation_id, dsCurrent.name || "Знакомство"); }
     else { toast("Отправлено"); document.querySelector(`[data-profile="${dsCurrent.id}"]`)?.remove(); }
   } catch (err) { toast(err.message); }
 };
@@ -2037,7 +2037,7 @@ document.addEventListener("click", async (e) => {
       if (btn.dataset.act === "like") {
         if (!(await requireConsent())) return;
         const r = await api(`/api/dating/${owner.dataset.profile}/like`, {method: "POST"});
-        if (r.match) { toast("Взаимная симпатия! Можно писать"); openChat(r.conversation_id, "Знакомство"); }
+        if (r.mutual) { toast("Взаимная симпатия! Можно писать"); openChat(r.conversation_id, "Знакомство"); }
         else { owner.remove(); toast("Отправлено"); }
       }
       if (btn.dataset.act === "dreport") {

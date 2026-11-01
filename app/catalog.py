@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select, func, case, or_
 from sqlalchemy.orm import Session
 
-from app import applications, fields, payments, photos, searchfix
+from app import applications, fields, payments, photos, policy, searchfix
 from app.payments import now
 from app import guard
 from app.database import get_db
@@ -47,11 +47,16 @@ def _like(word: str) -> str:
     return f"%{escaped}%"
 
 
-def _promo_rank():
-    rank = case((Placement.kind == "pin", 4), (Placement.kind == "vip", 3),
-                (Placement.kind == "bump", 2), (Placement.kind == "highlight", 1), else_=0)
+def _promo_rank(pin_only: bool = False):
+    """Lift of paid placements in the list. A placement that a promotion gave free gets no lift (only a mark).
+    For sorting by price only pinning counts: paid services must not break «cheapest first»."""
+    if pin_only:
+        rank = case((Placement.kind == "pin", 1), else_=0)
+    else:
+        rank = case((Placement.kind == "pin", 4), (Placement.kind == "vip", 3),
+                    (Placement.kind == "bump", 2), (Placement.kind == "highlight", 1), else_=0)
     return (select(func.coalesce(func.max(rank), 0))
-            .where(Placement.listing_id == Listing.id, Placement.status == "active")
+            .where(Placement.listing_id == Listing.id, Placement.status == "active", Placement.promo.is_(False))
             .correlate(Listing).scalar_subquery())
 
 
@@ -139,14 +144,15 @@ def search(db: Session, *, q: str = "", category: str | None = None, city: str |
     else:
         order = [Listing.id.desc()]
     rows = db.scalars(select(Listing).where(*conditions)
-                      .order_by(_promo_rank().desc(), *order).limit(limit).offset(offset)).all()
+                      .order_by(_promo_rank(pin_only=sort in {"price_asc", "price_desc"}).desc(), *order).limit(limit).offset(offset)).all()
     return list(rows), total
 
 
 def with_promo(db: Session, rows: list[Listing], owner: bool = False) -> list[ListingOut]:
     """Output for the app. Public: only what is shown. Owner: everything, incl. waiting photos and notes."""
     ids = [x.id for x in rows]
-    placed = payments.active_placements(db, ids)
+    info = payments.active_placement_info(db, ids)
+    placed = {k: v[0] for k, v in info.items()}
     shots = photos.photos_map(db, ids, owner=owner)
     applied = applications.counts(db, ids) if owner else {}
     running: dict[int, list[dict]] = {}
@@ -157,7 +163,7 @@ def with_promo(db: Session, rows: list[Listing], owner: bool = False) -> list[Li
     out = []
     for x in rows:
         pics = shots.get(x.id, [])
-        update = {"promo": placed.get(x.id), "photos": pics,
+        update = {"promo": placed.get(x.id), "promo_free": bool(info.get(x.id, ("", False))[1]), "photos": pics,
                   "cover": next((p["thumb"] for p in pics if p["status"] != "pending"), None)}
         if not owner:
             update.update(note="", has_edit=False, expires_at=None)
@@ -198,7 +204,11 @@ def catalog(q: str = Query(default="", max_length=100), category: str | None = N
                          area_min=area_min, pets_allowed=pets_allowed, furnished=furnished,
                          goods_category=goods_category, year_min=year_min, year_max=year_max,
                          mileage_max=mileage_max, limit=limit, offset=offset)
-    out = {"items": with_promo(db, rows), "total": total, "has_more": offset + len(rows) < total}
+    items = with_promo(db, rows)
+    if sort == "new" or q.strip():
+        # «2 из 5», 30% страницы, не больше двух закреплённых: одни правила для всех списков (app/policy.py)
+        items = policy.arrange(items, lambda o: "promo" if o.promo_free else (o.promo if o.promo in {"pin", "vip", "bump"} else ""))
+    out = {"items": items, "total": total, "has_more": offset + len(rows) < total}
     if info.get("corrected"):
         out["corrected"] = info["corrected"]      # the app says «показано по запросу …»
     return out

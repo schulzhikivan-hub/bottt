@@ -463,7 +463,7 @@ def conversation_card(db: Session, conv: Conversation, user_id: str, last: Messa
         id=conv.id, listing_id=conv.listing_id,
         listing_title=("Знакомство" if conv.match_key else (listing.title if listing else "Объявление удалено")),
         last_text=preview, last_at=last.created_at if last else None, unread=unread,
-        kind="match" if conv.match_key else "listing", role="buyer" if conv.buyer_tg_id == user_id else "seller",
+        kind="mutual" if conv.match_key else "listing", role="buyer" if conv.buyer_tg_id == user_id else "seller",
         other_name=name, other_initial=(name[:1] or "?").upper(), listing_cover=cover, listing_price=price,
         listing_category=listing.category if listing else "", listing_status=listing.status if listing else "",
         last_mine=bool(last and last.sender_tg_id == user_id))

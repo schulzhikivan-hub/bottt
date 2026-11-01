@@ -102,6 +102,8 @@ def migrate() -> None:
         conn.execute(text("ALTER TABLE applications ADD COLUMN IF NOT EXISTS name VARCHAR(40) DEFAULT ''"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS consent_version VARCHAR(40) DEFAULT ''"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS blocked_until TIMESTAMPTZ"))
+        conn.execute(text("ALTER TABLE placements ADD COLUMN IF NOT EXISTS promo BOOLEAN NOT NULL DEFAULT FALSE"))
+        conn.execute(text("ALTER TABLE placements ADD COLUMN IF NOT EXISTS frozen_at TIMESTAMPTZ"))
         conn.execute(text("ALTER TABLE broadcasts ADD COLUMN IF NOT EXISTS audience_kind VARCHAR(12) NOT NULL DEFAULT 'all'"))
         conn.execute(text("ALTER TABLE broadcasts ADD COLUMN IF NOT EXISTS send_at TIMESTAMPTZ"))
         conn.execute(text("ALTER TABLE admin_sessions ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ"))

@@ -86,6 +86,18 @@ def active_placements(db: Session, listing_ids: list[int]) -> dict[int, str]:
     return result
 
 
+def active_placement_info(db: Session, listing_ids: list[int]) -> dict[int, tuple[str, bool]]:
+    """{listing_id: (highest kind, was it given free by a promotion)} for placements that are running."""
+    if not listing_ids:
+        return {}
+    result: dict[int, tuple[str, bool]] = {}
+    for row in db.scalars(select(Placement).where(Placement.listing_id.in_(listing_ids), Placement.status == "active")).all():
+        cur = result.get(row.listing_id)
+        if cur is None or KIND_PRIORITY[row.kind] > KIND_PRIORITY[cur[0]]:
+            result[row.listing_id] = (row.kind, bool(row.promo))
+    return result
+
+
 KIND_TEXT = {
     "bump": "Объявление поднимается на первое место в ленте на 24 часа",
     "vip": "Метка VIP и показ выше обычных объявлений",

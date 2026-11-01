@@ -243,7 +243,7 @@ def like(profile_id: int, user_id: str = Depends(writer), db: Session = Depends(
     mutual = db.scalar(select(DatingLike).where(DatingLike.from_tg == target.owner_tg_id,
                                                 DatingLike.to_tg == user_id))
     if mutual is None:
-        return {"match": False}
+        return {"mutual": False}
     a, b = sorted([user_id, target.owner_tg_id])
     key = f"{a}:{b}"
     conv = db.scalar(select(Conversation).where(Conversation.match_key == key))
@@ -252,7 +252,7 @@ def like(profile_id: int, user_id: str = Depends(writer), db: Session = Depends(
         db.add(conv)
         db.commit()
         db.refresh(conv)
-    return {"match": True, "conversation_id": conv.id}
+    return {"mutual": True, "conversation_id": conv.id}
 
 
 # ---- moderation (administrators) ----
