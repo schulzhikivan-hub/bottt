@@ -2,7 +2,7 @@
 
 Support works inside the app: a person writes a request, staff answers in the admin panel, the answer arrives in the
 notifications and in the request itself. Nobody has to publish a personal Telegram nick."""
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -11,7 +11,8 @@ from app import guard
 from app.admin_auth import ADM, MOD, SUPPORT, staff
 from app.audit import log_action
 from app.database import get_db
-from app.models import AuditLog, Faq, Listing, Setting, Ticket, TicketMessage
+from app.auth import optional_user_id
+from app.models import AuditLog, ClientError, Faq, Listing, Setting, Ticket, TicketMessage
 from app.payments import now
 from app.users import writer
 
@@ -325,3 +326,32 @@ def staff_stats(days: int = Query(default=30, ge=1, le=90), actor: str = Depends
         else:
             d["other"] += n
     return sorted(per.values(), key=lambda x: -(x["decisions"] + x["replies"]))
+
+
+# ---------- errors reported by the app itself ----------
+class ClientErrorIn(BaseModel):
+    where: str = Field(default="", max_length=120)
+    status: int = 0
+    message: str = Field(default="", max_length=300)
+    request_id: str = Field(default="", max_length=40)
+
+
+@router.post("/api/client-log", status_code=204)
+def client_log(payload: ClientErrorIn, request: Request, viewer: str | None = Depends(optional_user_id),
+               db: Session = Depends(get_db)):
+    """The app sends here what it showed as an error. Limited per person (or per address for guests)."""
+    who = viewer or (request.client.host if request.client else "guest")
+    try:
+        guard.rate_limit(who, "client_log", 30, 3600)
+    except HTTPException:
+        return
+    db.add(ClientError(user_tg_id=viewer or "", where=payload.where, status=payload.status, message=payload.message,
+                       request_id=payload.request_id, agent=(request.headers.get("user-agent") or "")[:160]))
+    db.commit()
+
+
+@router.get("/api/admin/client-errors")
+def admin_client_errors(actor: str = Depends(staff(*ADM)), db: Session = Depends(get_db)):
+    rows = db.scalars(select(ClientError).order_by(ClientError.id.desc()).limit(150)).all()
+    return [{"id": r.id, "user": r.user_tg_id, "where": r.where, "status": r.status, "message": r.message,
+             "request_id": r.request_id, "agent": r.agent, "at": r.created_at.isoformat()} for r in rows]

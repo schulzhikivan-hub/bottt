@@ -112,9 +112,26 @@ def edit(db: Session, item: Listing, changes: dict) -> None:
         item.note = ""
 
 
+RENEW_WINDOW_DAYS = 30   # renewing is possible when this many days or fewer are left (or after the end)
+MAX_AHEAD_DAYS = 60      # a listing is never published for more than this many days ahead
+
+
+def renew_available_from(item: Listing):
+    """None when renewing is possible now, otherwise the moment from which it becomes possible."""
+    if item.status != "approved" or item.expires_at is None:
+        return None
+    opens = aware(item.expires_at) - dt.timedelta(days=RENEW_WINDOW_DAYS)
+    return opens if opens > now() else None
+
+
 def renew(item: Listing) -> None:
+    """Add the normal lifetime to what is left (so no days are lost), at most MAX_AHEAD_DAYS from now.
+    An ended listing starts again from today."""
+    current = aware(item.expires_at) if item.expires_at else now()
+    base = current if (item.status == "approved" and current > now()) else now()
+    extended = base + dt.timedelta(days=settings.listing_ttl_days)
+    item.expires_at = min(extended, now() + dt.timedelta(days=MAX_AHEAD_DAYS))
     item.status = "approved"
-    item.expires_at = now() + dt.timedelta(days=settings.listing_ttl_days)
     item.expiry_notified = False
     item.expiry_notified_1d = False
 

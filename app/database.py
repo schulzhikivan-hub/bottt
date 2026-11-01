@@ -101,6 +101,7 @@ def migrate() -> None:
         conn.execute(text("ALTER TABLE applications ADD COLUMN IF NOT EXISTS reply VARCHAR(500) DEFAULT ''"))
         conn.execute(text("ALTER TABLE applications ADD COLUMN IF NOT EXISTS name VARCHAR(40) DEFAULT ''"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS consent_version VARCHAR(40) DEFAULT ''"))
+        conn.execute(text("ALTER TABLE saved_searches ADD COLUMN IF NOT EXISTS paused BOOLEAN NOT NULL DEFAULT FALSE"))
         conn.execute(text("ALTER TABLE messages ADD COLUMN IF NOT EXISTS file_key VARCHAR(40)"))
         conn.execute(text("ALTER TABLE messages ADD COLUMN IF NOT EXISTS file_name VARCHAR(80) NOT NULL DEFAULT ''"))
         conn.execute(text("ALTER TABLE messages ADD COLUMN IF NOT EXISTS file_kind VARCHAR(8) NOT NULL DEFAULT ''"))

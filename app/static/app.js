@@ -61,9 +61,29 @@ async function api(path, options = {}) {
   let data = null;
   try { data = await r.json(); } catch (e) { data = null; }
   if (r.status === 401 && !inTelegram && !options.quiet) showWebLogin();
-  if (!r.ok) throw new Error(data?.detail || "Ошибка сервера (" + r.status + ")");
+  if (!r.ok) {
+    const rid = r.headers.get("x-request-id") || "";
+    let msg = typeof data?.detail === "string" ? data.detail : "";
+    if (!msg && Array.isArray(data?.detail)) msg = "Проверьте поля: " + data.detail.map((d) => d.msg).filter(Boolean).slice(0, 2).join("; ");
+    if (r.status >= 500 || !msg) {
+      reportError(path, r.status, msg || "Ошибка сервера", rid);
+      msg = `Ошибка сервера (${r.status}). Код для поддержки: ${rid || "—"}`;
+    }
+    throw new Error(msg);
+  }
   return data;
 }
+// Приложение само сообщает серверу об ошибке: скриншоты и пересказ не нужны
+const reported = new Set();
+function reportError(where, status, message, rid = "") {
+  const key = where + status + message;
+  if (reported.has(key) || reported.size > 20) return;
+  reported.add(key);
+  try { fetch("/api/client-log", {method: "POST", headers: {...authHeaders(), "Content-Type": "application/json"},
+    body: JSON.stringify({where: String(where).slice(0, 120), status, message: String(message).slice(0, 300), request_id: rid})}).catch(() => {}); } catch (e) { /* не критично */ }
+}
+window.addEventListener("error", (e) => reportError("js:" + (e.filename || "").split("/").pop() + ":" + e.lineno, 0, e.message || "error"));
+window.addEventListener("unhandledrejection", (e) => reportError("promise", 0, String(e.reason?.message || e.reason || "rejected")));
 
 const applyTextSize = () => { document.body.classList.remove("fs1", "fs2"); const n = localStorage.getItem("fs"); if (n) document.body.classList.add("fs" + n); };
 applyTextSize();
@@ -76,9 +96,19 @@ function toast(msg) {
 const fmtDate = (s) => (s ? new Date(s.replace(" ", "T")).toLocaleString("ru-RU") : "");
 const fmtKRW = (n) => new Intl.NumberFormat("ru-RU").format(n) + " ₩";
 
-function confirmDialog(message) {
-  if (tg?.showConfirm) return new Promise((resolve) => tg.showConfirm(message, resolve));
-  return Promise.resolve(confirm(message));
+// Своё окно подтверждения: системные окна Telegram бывают заняты или недоступны и тогда дают ошибку
+function confirmDialog(message, yes = "Да") {
+  return new Promise((resolve) => {
+    $("#confirmText").textContent = message;
+    $("#confirmYes").textContent = yes;
+    const sheet = $("#confirmSheet");
+    const done = (v) => { sheet.classList.add("hidden"); resolve(v); };
+    $("#confirmYes").onclick = () => done(true);
+    $("#confirmNo").onclick = () => done(false);
+    sheet.onclick = (e) => { if (e.target === sheet) done(false); };
+    sheet.classList.remove("hidden");
+    $("#confirmNo").focus();
+  });
 }
 
 // Окно выбора причины жалобы (системное prompt() в Telegram может не открыться)
@@ -275,7 +305,7 @@ const DEFAULT_FILTERS = {q: "", category: "", region_code: "", district_id: "", 
 const SECTION_FILTERS = ["housing_provided", "meals_provided", "condition", "rooms_min", "visa", "schedule", "employment",
                          "housing_type", "deposit_max", "area_min", "pets_allowed", "furnished", "goods_category", "year_min", "year_max", "mileage_max"];
 let filters = {...DEFAULT_FILTERS};
-const page = {offset: 0, loading: false};
+const page = {offset: 0, loading: false, run: 0};
 
 function catalogParams(offset) {
   const p = new URLSearchParams({limit: "20", offset: String(offset)});
@@ -393,7 +423,7 @@ async function loadLanding() {
 }
 async function loadCatalog(append = false) {
   if (!append && $("#view-home").classList.contains("landing")) return loadLanding();
-  if (page.loading) return;
+  const myRun = ++page.run;
   page.loading = true;
   const box = $("#listings");
   if (!append) {
@@ -403,20 +433,32 @@ async function loadCatalog(append = false) {
   }
   try {
     const r = await api("/api/catalog?" + catalogParams(page.offset), {quiet: true});
+    if (myRun !== page.run) return;      // за это время запрос изменили: показываем только свежий ответ
     const html = r.items.map(listingCard).join("");
     if (append) box.insertAdjacentHTML("beforeend", html);
     else box.innerHTML = html || `<div class="empty">${activeFilterCount() || filters.q || filters.category
-      ? "Ничего не нашли. Измените запрос или сбросьте фильтры." : "Пока нет объявлений. Добавьте первое кнопкой «+»."}</div>`;
+      ? 'Ничего не нашли. Проверьте написание или сбросьте фильтры.<br><button class="link" id="emptyReset">Сбросить фильтры</button> · <button class="link" id="emptyWatch">Сообщить, когда появится</button>'
+      : "Пока нет объявлений. Добавьте первое кнопкой «+»."}</div>`;
     page.offset += r.items.length;
     $("#resultCount").textContent = !r.total ? "Ничего не найдено"
-      : $("#view-home").classList.contains("landing") ? "Популярные объявления" : `Найдено: ${r.total}`;
+      : $("#view-home").classList.contains("landing") ? "Популярные объявления"
+      : r.corrected ? `Показано по запросу «${r.corrected}» (найдено: ${r.total})` : `Найдено: ${r.total}`;
     $("#moreBtn").hidden = !r.has_more;
     homeLoaded = true;
   } catch (e) {
-    if (!append) box.innerHTML = `<div class="empty">Не удалось загрузить: ${esc(e.message)}</div>`;
+    if (!append && myRun === page.run) box.innerHTML = `<div class="empty">Не удалось загрузить: ${esc(e.message)}<br><button class="link" id="retryCatalog">Повторить</button></div>`;
   }
-  page.loading = false;
+  if (myRun === page.run) page.loading = false;
 }
+document.addEventListener("click", async (e) => {
+  if (e.target.id === "retryCatalog") reloadCatalog();
+  if (e.target.id === "emptyReset") { filters = {...DEFAULT_FILTERS}; $("#search").value = ""; reloadCatalog(); }
+  if (e.target.id === "emptyWatch") {
+    if (!(await requireConsent())) return;
+    const body = {q: filters.q || undefined, category: filters.category || undefined, region: filters.region_code || undefined};
+    try { await api("/api/me/searches", {method: "POST", body: JSON.stringify(body)}); toast("Сообщим в Telegram, когда появится"); } catch (err) { toast(err.message); }
+  }
+});
 function reloadCatalog() { homeLoaded = false; updateFilterUi(); loadCatalog(); $("#scroll").scrollTop = 0; }
 
 let searchTimer = null;
@@ -1198,9 +1240,12 @@ async function openMenu(key) {
   }
   if (key === "searches") {
     const rows = await api("/api/me/searches");
+    window.__searches = Object.fromEntries(rows.map((x) => [x.id, x]));
     body.innerHTML = rows.length ? rows.map((x) => `<article class="listing"><h3>${esc(x.name)}</h3>
-      <p class="muted">Пришлём уведомление в Telegram, когда появится новое подходящее объявление</p>
-      <div class="actions"><button data-delsearch="${x.id}" class="secondary">Не следить</button></div></article>`).join("")
+      <p class="muted">${x.paused ? "⏸ На паузе: уведомлений нет" : "Пришлём уведомление в Telegram, когда появится новое подходящее объявление"}</p>
+      <div class="actions"><button data-opensearch="${x.id}">Смотреть сейчас</button>
+        <button data-pausesearch="${x.id}" data-on="${x.paused ? "" : "1"}" class="secondary">${x.paused ? "▶ Включить" : "⏸ Пауза"}</button>
+        <button data-delsearch="${x.id}" class="secondary">Не следить</button></div></article>`).join("")
       : '<div class="empty">Нет сохранённых поисков.<br>На главной откройте «Фильтры» и нажмите «Следить за этим поиском».</div>';
   }
   if (key === "settings") {
@@ -1885,6 +1930,21 @@ document.addEventListener("click", async (e) => {
     catch (err) { toast(err.message); }
     return;
   }
+  const os = e.target.closest("[data-opensearch]");
+  if (os) {
+    const sp = window.__searches?.[os.dataset.opensearch]?.params || {};
+    const {region, ...rest} = sp;
+    filters = {...DEFAULT_FILTERS, ...rest, region_code: region || ""};
+    $("#search").value = filters.q || "";
+    homeLoaded = false; showView("home"); reloadCatalog();
+    return;
+  }
+  const ps = e.target.closest("[data-pausesearch]");
+  if (ps) {
+    try { await api(`/api/me/searches/${ps.dataset.pausesearch}/pause`, {method: "POST", body: JSON.stringify({on: ps.dataset.on === "1"})}); openMenu("searches"); }
+    catch (err) { toast(err.message); }
+    return;
+  }
   const del = e.target.closest("[data-delsearch]");
   if (del) {
     try { await api(`/api/me/searches/${del.dataset.delsearch}`, {method: "DELETE"}); openMenu("searches"); }
@@ -1985,8 +2045,9 @@ document.addEventListener("click", async (e) => {
       if (act === "applicants") { await showApplicants(id); return; }
       if (act === "promo") { await openServices(id, item.category); return; }
       if (act === "archive" && !(await confirmDialog("Удалить объявление? Его не будет видно другим."))) return;
-      await api(`/api/listings/${id}/${{close: "close", sold: "sold", reopen: "reopen", archive: "archive", renew: "renew", submit: "submit"}[act]}`, {method: "POST"});
-      toast("Готово");
+      const done = await api(`/api/listings/${id}/${{close: "close", sold: "sold", reopen: "reopen", archive: "archive", renew: "renew", submit: "submit"}[act]}`, {method: "POST"});
+      toast(act === "renew" && done?.expires_at ? "Продлено до " + new Date(done.expires_at).toLocaleDateString("ru-RU")
+        : act === "archive" ? "Объявление удалено" : "Готово");
       homeLoaded = false;
       loadProfile();
     } catch (err) { toast(err.message); }

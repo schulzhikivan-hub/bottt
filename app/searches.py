@@ -62,7 +62,10 @@ def save_search(payload: SearchIn, user_id: str = Depends(writer), db: Session =
     params = _params(payload)
     if not params:
         raise HTTPException(400, "Задайте слово или фильтр, за которым следить")
-    count = db.scalar(select(func.count()).select_from(SavedSearch).where(SavedSearch.user_tg_id == user_id)) or 0
+    mine = db.scalars(select(SavedSearch).where(SavedSearch.user_tg_id == user_id)).all()
+    if any(r.params == params for r in mine):
+        raise HTTPException(409, "Такой поиск уже сохранён")
+    count = len(mine)
     if count >= MAX_SEARCHES:
         raise HTTPException(409, f"Не больше {MAX_SEARCHES} сохранённых поисков")
     row = SavedSearch(user_tg_id=user_id, name=_title(payload, params), params=params, last_checked_at=now())
@@ -74,7 +77,22 @@ def save_search(payload: SearchIn, user_id: str = Depends(writer), db: Session =
 @router.get("/api/me/searches")
 def my_searches(user_id: str = Depends(writer), db: Session = Depends(get_db)):
     rows = db.scalars(select(SavedSearch).where(SavedSearch.user_tg_id == user_id).order_by(SavedSearch.id.desc())).all()
-    return [{"id": r.id, "name": r.name, "params": r.params} for r in rows]
+    return [{"id": r.id, "name": r.name, "params": r.params, "paused": r.paused} for r in rows]
+
+
+class PauseIn(BaseModel):
+    on: bool
+
+
+@router.post("/api/me/searches/{search_id}/pause")
+def pause_search(search_id: int, payload: PauseIn, user_id: str = Depends(writer), db: Session = Depends(get_db)):
+    row = db.get(SavedSearch, search_id)
+    if row is None or row.user_tg_id != user_id:
+        raise HTTPException(404, "Поиск не найден")
+    row.paused = payload.on
+    row.last_checked_at = now()        # what appeared during the pause is not reported afterwards
+    db.commit()
+    return {"id": row.id, "paused": row.paused}
 
 
 @router.delete("/api/me/searches/{search_id}")
@@ -96,6 +114,8 @@ def new_matches(db: Session) -> list[tuple[str, str]]:
     messages = []
     digests: dict[str, list[str]] = {}
     for row in db.scalars(select(SavedSearch)).all():
+        if row.paused:
+            continue
         user = db.get(User, row.user_tg_id)
         if user is None or user.blocked or user.deleted_at is not None:
             row.last_checked_at = now()
@@ -105,7 +125,7 @@ def new_matches(db: Session) -> list[tuple[str, str]]:
         if digest and now() - since < DIGEST_EVERY:
             continue                                  # not yet time: keep «since» so nothing is lost
         row.last_checked_at = now()
-        items, _ = catalog.search(db, limit=50, **row.params)
+        items, _ = catalog.search(db, limit=50, _fuzzy=False, **row.params)   # alerts only for exact matches
         fresh = [x for x in items if x.published_at and aware(x.published_at) > since
                  and x.author_telegram_id != row.user_tg_id]
         if not fresh:

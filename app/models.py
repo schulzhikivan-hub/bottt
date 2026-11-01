@@ -386,6 +386,7 @@ class SavedSearch(Base):
     name: Mapped[str] = mapped_column(String(80), default="")
     params: Mapped[dict] = mapped_column(JSON, default=dict)
     last_checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    paused: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())   # no alerts while paused
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
@@ -572,3 +573,16 @@ class WizardDraft(Base):
     data: Mapped[dict] = mapped_column(JSON, default=dict)
     step: Mapped[int] = mapped_column(Integer, default=0)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class ClientError(Base):
+    """What went wrong on a person's phone: the app reports it itself, so nobody has to send screenshots."""
+    __tablename__ = "client_errors"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_tg_id: Mapped[str] = mapped_column(String(40), default="", index=True)
+    where: Mapped[str] = mapped_column(String(120), default="")
+    status: Mapped[int] = mapped_column(Integer, default=0)
+    message: Mapped[str] = mapped_column(String(300), default="")
+    request_id: Mapped[str] = mapped_column(String(40), default="")
+    agent: Mapped[str] = mapped_column(String(160), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, index=True)

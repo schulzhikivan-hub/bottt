@@ -14,6 +14,7 @@ from app.catalog import drop_irrelevant
 from app.fields import (VisaCode, Employment, Schedule, SalaryPeriod, HousingType, GoodsCategory)
 from app import admin_ops as ops
 from app import geo
+from app.payments import aware
 from app.database import get_db
 from app.models import Listing, User, Block, Report
 from app.schemas import CATEGORIES, ListingOut
@@ -137,6 +138,10 @@ def renew_listing(listing_id: int, user_id: str = Depends(writer), db: Session =
     item = _own_listing(db, listing_id, user_id)
     if item.status not in {"approved", "expired"}:
         raise HTTPException(409, "Продлить можно опубликованное или завершившееся объявление")
+    opens = lifecycle.renew_available_from(item)
+    if opens is not None:
+        raise HTTPException(409, f"Объявление опубликовано до {aware(item.expires_at).strftime('%d.%m.%Y')}. "
+                                 f"Продлить можно с {opens.strftime('%d.%m.%Y')}: за 30 дней до окончания")
     lifecycle.renew(item)
     db.commit()
     db.refresh(item)

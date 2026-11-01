@@ -102,6 +102,7 @@ const TABS = [
   {key: "payments", label: "💳 Платежи", roles: ADM, title: "Платежи и промокоды"},
   {key: "pricing", label: "💰 Цены", roles: ADM, title: "Цены услуг"},
   {sep: "Система", roles: ADM},
+  {key: "errors", label: "🐞 Ошибки в приложении", roles: ADM, title: "Ошибки, которые видели пользователи"},
   {key: "audit", label: "📜 Журнал", roles: ADM, title: "Журнал действий"},
   {key: "settings", label: "⚙️ Выгрузки", roles: ADM, title: "Выгрузки"},
   {key: "admins", label: "🧑‍💼 Сотрудники", roles: SUP, title: "Сотрудники"},
@@ -699,6 +700,13 @@ $("#main").addEventListener("click", async (e) => {
 });
 
 // ---- журнал ----
+async function loadErrors() {
+  const rows = await api("/api/admin/client-errors");
+  $("#main").innerHTML = rows.length ? `<p class="muted">Приложение само присылает сюда ошибки. «Код» совпадает с тем, что человек видит на экране.</p>
+    <table><tr><th>Время</th><th>Пользователь</th><th>Где</th><th>Статус</th><th>Сообщение</th><th>Код</th><th>Телефон</th></tr>
+    ${rows.map((r) => `<tr><td>${esc(fmt(r.at))}</td><td>${esc(r.user || "гость")}</td><td>${esc(r.where)}</td><td>${r.status || ""}</td><td>${esc(r.message)}</td><td>${esc(r.request_id)}</td><td>${esc(r.agent)}</td></tr>`).join("")}</table>`
+    : '<div class="card muted">Ошибок пока нет.</div>';
+}
 async function loadAudit() {
   const rows = await api("/api/admin/audit?limit=200");
   $("#main").innerHTML = rows.length ? `<table><tr><th>Время</th><th>Кто</th><th>Действие</th><th>Объект</th><th>Детали</th></tr>
@@ -755,7 +763,7 @@ $("#main").addEventListener("click", async (e) => {
 
 const LOADERS = {dash: loadDash, listings: loadListings, jobs: loadSection, housing: loadSection, market: loadSection, dating: loadDating,
                  employers: loadEmployers, reports: loadReports, reviews: loadReviews, resumes: loadResumes, support: loadSupport, texts: loadTexts, users: loadUsers, community: loadCommunity, guide: loadGuide,
-                 marketing: loadMarketing, payments: loadPayments, pricing: loadPricing, audit: loadAudit, settings: loadSettings, admins: loadAdmins};
+                 marketing: loadMarketing, payments: loadPayments, pricing: loadPricing, audit: loadAudit, errors: loadErrors, settings: loadSettings, admins: loadAdmins};
 
 // Старт: есть сессия — открываем; открыто из Telegram — входим сами; иначе показываем кнопку
 if (session()) startApp();

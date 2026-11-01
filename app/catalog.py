@@ -65,7 +65,7 @@ def search(db: Session, *, q: str = "", category: str | None = None, city: str |
            pets_allowed: bool | None = None, furnished: bool | None = None,
            goods_category: str | None = None,
            year_min: int | None = None, year_max: int | None = None, mileage_max: int | None = None,
-           limit: int = 20, offset: int = 0, _fuzzy: bool = True) -> tuple[list[Listing], int]:
+           limit: int = 20, offset: int = 0, _fuzzy: bool = True, _info: dict | None = None) -> tuple[list[Listing], int]:
     """Published listings matching every condition. Paid placements come first on every page."""
     conditions = [Listing.status == "approved", or_(Listing.expires_at.is_(None), Listing.expires_at > now())]
     if category:
@@ -124,6 +124,8 @@ def search(db: Session, *, q: str = "", category: str | None = None, city: str |
         vocab = searchfix.vocabulary(db)
         fixed = [searchfix.correct(w, vocab) or w for w in q.lower().split()[:MAX_WORDS]]
         if fixed != q.lower().split()[:MAX_WORDS]:
+            if _info is not None:
+                _info["corrected"] = " ".join(fixed)
             return search(db, q=" ".join(fixed), category=category, city=city, region=region, district_id=district_id,
                           price_min=price_min, price_max=price_max, sort=sort, housing_provided=housing_provided,
                           meals_provided=meals_provided, condition=condition, rooms_min=rooms_min, visa=visa,
@@ -187,15 +189,19 @@ def catalog(q: str = Query(default="", max_length=100), category: str | None = N
             db: Session = Depends(get_db)):
     if category and category not in CATEGORIES:
         raise HTTPException(400, "Неизвестная категория")
+    info: dict = {}
     rows, total = search(db, q=q, category=category, city=city, region=region, district_id=district_id,
-                         price_min=price_min, price_max=price_max,
+                         price_min=price_min, price_max=price_max, _info=info,
                          sort=sort, housing_provided=housing_provided, meals_provided=meals_provided,
                          condition=condition, rooms_min=rooms_min, visa=visa, employment=employment,
                          schedule=schedule, housing_type=housing_type, deposit_max=deposit_max,
                          area_min=area_min, pets_allowed=pets_allowed, furnished=furnished,
                          goods_category=goods_category, year_min=year_min, year_max=year_max,
                          mileage_max=mileage_max, limit=limit, offset=offset)
-    return {"items": with_promo(db, rows), "total": total, "has_more": offset + len(rows) < total}
+    out = {"items": with_promo(db, rows), "total": total, "has_more": offset + len(rows) < total}
+    if info.get("corrected"):
+        out["corrected"] = info["corrected"]      # the app says «показано по запросу …»
+    return out
 
 
 @router.get("/api/cities")
