@@ -786,3 +786,11 @@ img.co-ava{object-fit:cover}
 
 .cocover{width:100%;height:auto;max-height:180px;object-fit:cover;border-radius:14px;margin-bottom:8px;display:block}
 .msglink{color:var(--accent);font-weight:600;text-decoration:underline}
+
+/* кабинет компании: ничего не шире экрана */
+.dcab{min-width:0;max-width:100%;overflow-x:hidden}
+#coPane{min-width:0;max-width:100%}
+#coPane textarea,#coPane select,#coPane input:not([type=checkbox]):not([type=file]){max-width:100%;box-sizing:border-box}
+#coPane textarea[data-conote]{width:100%;margin:6px 0;font:inherit;border:1px solid var(--border);border-radius:12px;padding:10px 12px;background:var(--card)}
+.wrapchips{flex-wrap:wrap !important;overflow-x:visible !important}
+#coPane .actions{flex-wrap:wrap}

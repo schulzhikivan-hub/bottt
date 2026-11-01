@@ -2687,7 +2687,7 @@ async function renderCoPane(ov) {
       const flt = coState.stage || "all";
       const cnt = (k) => rows.filter((a) => a.stage === k).length;
       const shown = rows.filter((a) => flt === "all" || a.stage === flt);
-      pane.innerHTML = `<div class="chips">${[["all", "Все", rows.length], ...Object.entries(ST).map(([k, t]) => [k, t, cnt(k)])].map(([k, t, n]) => `<button class="chip ${k === flt ? "active" : ""}" data-costage-f="${k}">${t} ${n}</button>`).join("")}</div>
+      pane.innerHTML = `<div class="chips wrapchips">${[["all", "Все", rows.length], ...Object.entries(ST).map(([k, t]) => [k, t, cnt(k)])].map(([k, t, n]) => `<button class="chip ${k === flt ? "active" : ""}" data-costage-f="${k}">${t} ${n}</button>`).join("")}</div>
         <div class="actions"><button class="secondary" data-cocsv>⬇ Выгрузить в CSV</button></div>` + (shown.length ? shown.map((a) => `<article class="dcard2" data-coapp="${a.id}"><div class="dcard2-head"><h3 style="margin:0">${esc(a.name || "Соискатель")}</h3><span class="muted">${esc(CO_APP[a.status] || a.status)}</span></div>
         <p class="muted">на «${esc(a.listing_title)}» · ${esc(fmtDate(a.created_at))}</p><p><b>${esc(a.contact)}</b>${a.visa ? " · виза " + esc(a.visa) : ""}${a.city ? " · " + esc(a.city) : ""}</p>
         ${a.message ? `<p>${esc(a.message)}</p>` : ""}${a.reply ? `<p class="muted">Ответ: ${esc(a.reply)}</p>` : ""}
