@@ -32,7 +32,7 @@ from app.guard import rate_limit, check_text, duplicate_note, notify_user
 from app import admin_ops as ops
 from app import catalog
 from app import photos, applications, searches, inbox, promos, adminx, observe, site
-from app import geo
+from app import geo, reviews, resumes
 from app import fields as listing_fields
 from app.users import get_or_create_user, writer, is_blocked_pair
 from app.models import DatingProfile
@@ -63,6 +63,8 @@ app.include_router(promos.router)
 app.include_router(adminx.router)
 app.include_router(site.router)
 app.include_router(geo.router)
+app.include_router(reviews.router)
+app.include_router(resumes.router)
 app.include_router(listing_fields.router)
 STATIC = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
@@ -77,7 +79,7 @@ def _run(operation, *args):
 
 REPORT_REASONS = {"fraud", "fake", "spam", "offensive", "inappropriate", "rights", "minor", "profile"}
 REPORTS_TO_HIDE = 3  # distinct reporters that hide a listing until a moderator decides
-REPORT_TARGETS = {"listing", "user", "message", "dating"}
+REPORT_TARGETS = {"listing", "user", "message", "dating", "review"}
 
 
 @app.get("/")
@@ -169,6 +171,9 @@ def export_me(user_id: str = Depends(current_user_id), db: Session = Depends(get
         "payments": [{"id": x.id, "service": x.service_code, "stars": x.stars, "status": x.status,
                       "paid_at": str(x.paid_at) if x.paid_at else None} for x in payments_rows],
         "messages_sent": [{"text": x.text, "at": str(x.created_at)} for x in messages],
+        "resume": resumes.public_export(db, user_id),
+        "reviews_written": [{"listing_id": x.listing_id, "rating": x.rating, "text": x.text}
+                            for x in db.scalars(select(reviews.Review).where(reviews.Review.reviewer_tg_id == user_id)).all()],
     }
 
 
@@ -187,6 +192,11 @@ def delete_me(user_id: str = Depends(current_user_id), db: Session = Depends(get
         db.delete(fav)
     for msg in db.scalars(select(Message).where(Message.sender_tg_id == user_id)).all():
         msg.text = "[удалено]"
+    cv = db.get(resumes.Resume, user_id)
+    if cv is not None:
+        db.delete(cv)
+    for rv in db.scalars(select(reviews.Review).where(reviews.Review.reviewer_tg_id == user_id)).all():
+        db.delete(rv)       # the account is gone, so are the opinions it wrote
     db.commit()
     return {"deleted": True}
 
@@ -252,6 +262,11 @@ def create_report(payload: ReportIn, user_id: str = Depends(writer), db: Session
         profile = db.get(DatingProfile, int(payload.target_id)) if payload.target_id.isdigit() else None
         if profile is None or profile.owner_tg_id == user_id:
             raise HTTPException(400, "Нельзя пожаловаться на эту анкету")
+    if payload.target_type == "review":
+        from app.models import Review
+        row = db.get(Review, int(payload.target_id)) if payload.target_id.isdigit() else None
+        if row is None or row.reviewer_tg_id == user_id:
+            raise HTTPException(400, "Нельзя пожаловаться на этот отзыв")
     if payload.target_type == "user" and payload.target_id == user_id:
         raise HTTPException(400, "Нельзя пожаловаться на себя")
     existing = db.scalar(select(Report).where(

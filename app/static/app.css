@@ -497,3 +497,11 @@ button.pchip{color:var(--accent);font-weight:600}
 
 .hero.photo{background:linear-gradient(180deg,#0b2d73cc 0%,#1b4b9b66 60%,#0b2d7399 100%),url(/static/banner.jpg) center/cover}
 .hero.photo .skyline{display:none}
+
+.stars{display:flex;gap:6px;margin:6px 0 12px}
+.stars button{border:0;background:var(--bg);border-radius:10px;font-size:26px;line-height:1;padding:8px 10px;color:#c9ced8}
+.stars button.on{color:#f5a623}
+.rating{color:#f5a623;font-weight:700}
+.review{border-top:1px solid var(--line,#e6e9ef);padding:10px 0}
+.review p{margin:4px 0 0}
+.similar{margin-top:18px}

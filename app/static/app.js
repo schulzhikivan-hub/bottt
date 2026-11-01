@@ -550,6 +550,7 @@ function authorBlock(x) {
   if (a.verified) parts.push(`<b class="badge-ok">✔ Проверенный работодатель${a.company ? ": " + esc(a.company) : ""}</b>`);
   else if (a.since) parts.push("<b>Автор</b>");
   if (a.active) parts.push(`<button class="alink" data-author="${x.id}">Все объявления автора: ${a.active}</button>`);
+  if (a.reviews) parts.push(`<b class="rating">★ ${a.rating}</b> (${a.reviews} отзыв.)`);
   if (a.since) parts.push(`На сайте с ${a.since}`);
   return parts.length ? `<p class="author">${parts.join(" · ")}</p>` : "";
 }
@@ -610,9 +611,35 @@ async function openDetail(id, push = true) {
       <button class="linkbtn" data-act="report">⚑ Пожаловаться</button>
     </article>`;
     showView("detail", {push});
+    loadReviewButton(x.id);
     loadSimilar(x.id);
   } catch (e) { toast(e.message); }
 }
+// Кнопка «Оставить отзыв» только тем, кто переписывался с автором по этому объявлению
+async function loadReviewButton(id) {
+  try {
+    const st = await api(`/api/listings/${id}/review-state`, {quiet: true});
+    const art = $("#detailBody").querySelector("article");
+    if (!art || art.dataset.id !== String(id)) return;
+    if (st.can) art.querySelector(".cta")?.insertAdjacentHTML("afterend", `<button class="linkbtn" data-review="${id}">★ Оставить отзыв об авторе</button>`);
+    else if (st.mine) art.querySelector(".cta")?.insertAdjacentHTML("afterend", `<p class="muted">Ваш отзыв: ${"★".repeat(st.mine.rating)} <button class="linkbtn" data-delreview="${st.mine.id}">Удалить</button></p>`);
+  } catch (e) { /* гость или без права — кнопки не будет */ }
+}
+let reviewFor = null, reviewRating = 0;
+function drawStars() {
+  $("#reviewStars").innerHTML = [1, 2, 3, 4, 5].map((n) => `<button type="button" role="radio" aria-checked="${n === reviewRating}" class="${n <= reviewRating ? "on" : ""}" data-star="${n}">★</button>`).join("");
+}
+$("#reviewStars").onclick = (e) => { const b = e.target.closest("[data-star]"); if (b) { reviewRating = +b.dataset.star; drawStars(); } };
+$("#closeReview").onclick = () => $("#reviewSheet").classList.add("hidden");
+$("#reviewOk").onclick = async () => {
+  if (!reviewRating) { toast("Поставьте оценку"); return; }
+  try {
+    await api("/api/reviews", {method: "POST", body: JSON.stringify({listing_id: reviewFor, rating: reviewRating, text: $("#reviewText").value.trim()})});
+    $("#reviewSheet").classList.add("hidden");
+    toast("Спасибо за отзыв!");
+    openDetail(reviewFor, false);
+  } catch (err) { toast(err.message); }
+};
 // «Похожие объявления»: подгружаются после основной карточки, ошибка не мешает читать объявление
 async function loadSimilar(id) {
   try {
@@ -862,8 +889,79 @@ async function showReceipt(id) {
   };
 }
 const SUB_TITLES = {author: "Объявления автора", applications: "Мои отклики", searches: "Мои поиски", settings: "Настройки", employer: "Статус работодателя",
-                    payments: "История платежей", blocks: "Заблокированные", help: "Помощь и правила"};
+                    resume: "Моё резюме", cvsearch: "Поиск сотрудников", payments: "История платежей", blocks: "Заблокированные", help: "Помощь и правила"};
 let currentSubKey = "";
+const CV_STATUS = {pending: "На проверке у модератора", approved: "Опубликовано: работодатели могут найти", rejected: "Отклонено", hidden: "Скрыто"};
+// ---------- «Ищу работу»: своё резюме ----------
+async function renderMyResume(body) {
+  await loadFields();
+  const cv = await api("/api/me/resume");
+  const v = cv || {};
+  body.innerHTML = `<article class="listing">
+    <p class="muted">Имя и контакты не показываются. Работодатель может только пригласить вас в чат по своей вакансии, а отвечать или нет — решаете вы.</p>
+    ${cv ? `<p><b>${esc(CV_STATUS[cv.status] || cv.status)}</b>${cv.note ? ": " + esc(cv.note) : ""}</p>` : ""}
+    <form id="cvForm" class="form">
+      <label>Кем хотите работать<input name="position" required minlength="3" maxlength="80" value="${esc(v.position || "")}"></label>
+      <label>Город<input name="city" required minlength="2" maxlength="100" value="${esc(v.city || me?.city || "")}"></label>
+      <label>Виза<select name="visa"><option value="">Не указана</option>${fieldDefs.visas.map((x) => `<option value="${x.value}" ${v.visa === x.value ? "selected" : ""}>${x.label}</option>`).join("")}</select></label>
+      <label>Опыт<textarea name="experience" rows="2" maxlength="300">${esc(v.experience || "")}</textarea></label>
+      <label>О себе (без телефонов и ссылок)<textarea name="about" rows="3" maxlength="700">${esc(v.about || "")}</textarea></label>
+      <label>Зарплата от, ₩ в месяц<input name="salary_from" type="number" min="0" step="10000" value="${v.salary_from ?? ""}"></label>
+      <button class="submit" type="submit">${cv ? "Сохранить (уйдёт на проверку)" : "Отправить на проверку"}</button>
+    </form>
+    ${cv ? '<div class="actions"><button class="secondary" id="cvHide">Скрыть</button><button class="secondary" id="cvDel">Удалить</button></div>' : ""}</article>`;
+  $("#cvForm").onsubmit = async (e) => {
+    e.preventDefault();
+    const f = e.target;
+    const salary = f.salary_from.value;
+    try {
+      await api("/api/me/resume", {method: "PUT", body: JSON.stringify({position: f.position.value.trim(), city: f.city.value.trim(), visa: f.visa.value,
+        experience: f.experience.value.trim(), about: f.about.value.trim(), salary_from: salary === "" ? null : +salary})});
+      toast("Резюме отправлено на проверку");
+      renderMyResume(body);
+    } catch (err) { toast(err.message); }
+  };
+  $("#cvHide") && ($("#cvHide").onclick = async () => { try { await api("/api/me/resume/hide", {method: "POST"}); renderMyResume(body); } catch (err) { toast(err.message); } });
+  $("#cvDel") && ($("#cvDel").onclick = async () => {
+    if (!(await confirmDialog("Удалить резюме?"))) return;
+    try { await api("/api/me/resume", {method: "DELETE"}); renderMyResume(body); } catch (err) { toast(err.message); }
+  });
+}
+// ---------- поиск сотрудников (работодатель с опубликованной вакансией) ----------
+async function renderCvSearch(body) {
+  body.innerHTML = `<form id="cvSearch" class="toolbar"><input name="q" placeholder="Профессия или слово" maxlength="60"><input name="city" placeholder="Город" maxlength="100"><button type="submit">Найти</button></form><div id="cvList"></div>`;
+  const run = async () => {
+    const f = $("#cvSearch");
+    const qs = new URLSearchParams({q: f.q.value.trim(), city: f.city.value.trim()});
+    try {
+      const rows = await api("/api/resumes?" + qs);
+      $("#cvList").innerHTML = rows.length ? rows.map((r) => `<article class="listing"><h3>${esc(r.position)}</h3>
+        <div class="meta">📍 ${esc(r.city)}${r.visa ? " · 🛂 " + esc(r.visa) : ""}${r.salary_from ? " · от " + r.salary_from.toLocaleString("ru-RU") + " ₩" : ""}</div>
+        ${r.experience ? `<p>${esc(r.experience)}</p>` : ""}${r.about ? `<p class="muted">${esc(r.about)}</p>` : ""}
+        <div class="actions"><button data-invite="${esc(r.id)}">Пригласить на вакансию</button></div></article>`).join("")
+        : '<div class="empty">Подходящих резюме пока нет.</div>';
+    } catch (err) { $("#cvList").innerHTML = `<div class="empty">${esc(err.message)}</div>`; }
+  };
+  $("#cvSearch").onsubmit = (e) => { e.preventDefault(); run(); };
+  run();
+}
+document.addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-invite]");
+  if (!b) return;
+  try {
+    const mine = (await api("/api/me/listings")).filter((x) => x.category === "job" && x.status === "approved");
+    if (!mine.length) { toast("Нужна опубликованная вакансия"); return; }
+    let pick = mine[0];
+    if (mine.length > 1) {
+      const n = await askText("Номер вакансии: " + mine.map((x, i) => `${i + 1} — ${x.title}`).join("; "), "1");
+      if (!n) return;
+      pick = mine[Math.max(0, Math.min(mine.length - 1, (parseInt(n, 10) || 1) - 1))];
+    }
+    const r = await api(`/api/resumes/${b.dataset.invite}/invite`, {method: "POST", body: JSON.stringify({listing_id: pick.id})});
+    toast("Приглашение отправлено");
+    b.disabled = true;
+  } catch (err) { toast(err.message); }
+});
 // Раздел кабинета открывается отдельной страницей со стрелкой «назад», а не под длинным списком
 function openSub(key) {
   currentSubKey = key;
@@ -965,6 +1063,8 @@ async function openMenu(key) {
     body.innerHTML = `<article class="listing"><p>${esc(text)}</p>
       ${(st === "none" || st === "rejected") ? '<div class="actions"><button data-own="employer-apply">Подать заявку</button></div>' : ""}</article>`;
   }
+  if (key === "resume") await renderMyResume(body);
+  if (key === "cvsearch") await renderCvSearch(body);
   if (key === "blocks") {
     const rows = await api("/api/me/blocks");
     body.innerHTML = rows.length ? rows.map((r) => `
@@ -1533,13 +1633,37 @@ document.addEventListener("click", async (e) => {
   }
   const rc = e.target.closest("[data-receipt]");
   if (rc) { try { await showReceipt(rc.dataset.receipt); } catch (err) { toast(err.message); } return; }
+  const rr = e.target.closest("[data-reportreview]");
+  if (rr) {
+    if (!(await requireConsent())) return;
+    const reason = await askReason();
+    if (!reason) return;
+    try { await api("/api/reports", {method: "POST", body: JSON.stringify({target_type: "review", target_id: rr.dataset.reportreview, reason})}); toast("Жалоба отправлена. Спасибо!"); }
+    catch (err) { toast(err.message); }
+    return;
+  }
+  const rv = e.target.closest("[data-review]");
+  if (rv) {
+    if (!(await requireConsent())) return;
+    reviewFor = +rv.dataset.review; reviewRating = 0; $("#reviewText").value = ""; drawStars();
+    $("#reviewSheet").classList.remove("hidden");
+    return;
+  }
+  const dr = e.target.closest("[data-delreview]");
+  if (dr) {
+    if (!(await confirmDialog("Удалить ваш отзыв?"))) return;
+    try { await api(`/api/reviews/${dr.dataset.delreview}`, {method: "DELETE"}); toast("Отзыв удалён"); const id = $("#detailBody article")?.dataset.id; if (id) openDetail(+id, false); }
+    catch (err) { toast(err.message); }
+    return;
+  }
   const au = e.target.closest("[data-author]");
   if (au) {
     try {
-      const r = await api(`/api/authors/${au.dataset.author}`);
+      const [r, rev] = await Promise.all([api(`/api/authors/${au.dataset.author}`), api(`/api/authors/${au.dataset.author}/reviews`, {quiet: true}).catch(() => null)]);
       openSub("author");
       const c = r.card;
-      $("#subBody").innerHTML = `<p class="author">${c.verified ? `<b class="badge-ok">✔ Проверенный работодатель${c.company ? ": " + esc(c.company) : ""}</b> · ` : ""}На сайте с ${c.since || "—"} · Активных: ${c.active}</p>` +
+      $("#subBody").innerHTML = `<p class="author">${c.verified ? `<b class="badge-ok">✔ Проверенный работодатель${c.company ? ": " + esc(c.company) : ""}</b> · ` : ""}На сайте с ${c.since || "—"} · Активных: ${c.active}${rev?.reviews ? ` · <b class="rating">★ ${rev.rating}</b> (${rev.reviews})` : ""}</p>` +
+        (rev?.items?.length ? `<h3 class="dsub">Отзывы</h3>` + rev.items.map((v) => `<div class="review"><b class="rating">${"★".repeat(v.rating)}</b> ${esc(v.name)} · ${esc(v.at)}${v.text ? `<p>${esc(v.text)}</p>` : ""}<button class="linkbtn" data-reportreview="${v.id}">⚑</button></div>`).join("") : "") +
         r.items.map(listingCard).join("");
     } catch (err) { toast(err.message); }
     return;

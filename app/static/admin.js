@@ -88,6 +88,8 @@ const TABS = [
   {key: "market", label: "🛍 Барахолка", roles: MOD, title: "Барахолка, авто, услуги", cat: "marketplace"},
   {key: "dating", label: "💗 Знакомства", roles: MOD, title: "Анкеты знакомств"},
   {key: "employers", label: "🏢 Работодатели", roles: MOD, title: "Заявки работодателей"},
+  {key: "resumes", label: "🧑‍💼 Резюме", roles: MOD, title: "Резюме соискателей"},
+  {key: "reviews", label: "⭐ Отзывы", roles: MOD, title: "Отзывы"},
   {key: "reports", label: "🚩 Жалобы", roles: SUPPORT, title: "Жалобы"},
   {key: "users", label: "👥 Пользователи", roles: SUPPORT, title: "Пользователи"},
   {sep: "Контент", roles: ADM},
@@ -376,6 +378,39 @@ $("#main").addEventListener("click", async (e) => {
   } catch (err) { say(err.message); }
 });
 
+// ---- резюме ----
+async function loadResumes() {
+  const rows = await api("/api/admin/resumes?status=pending");
+  $("#main").innerHTML = rows.length ? rows.map((r) => `<div class="card" data-owner="${esc(r.owner)}"><b>${esc(r.position)}</b> · ${esc(r.city)} · виза ${esc(r.visa || "—")} · от ${r.salary_from ?? "—"} ₩
+    <div class="meta">пользователь ${esc(r.owner)} · ${esc(r.updated || "")}</div><p>${esc(r.experience)}</p><p>${esc(r.about)}</p>
+    <button class="act ok" data-cv="approve">Опубликовать</button><button class="act no" data-cv="reject">Отклонить</button></div>`).join("") : '<div class="card muted">Новых резюме нет.</div>';
+}
+$("#main").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-cv]");
+  if (!b) return;
+  const owner = b.closest("[data-owner]").dataset.owner;
+  try {
+    let q = "";
+    if (b.dataset.cv === "reject") { const why = ask("Причина отказа (её увидит человек)"); if (!why) return; q = "?reason=" + encodeURIComponent(why); }
+    await post(`/api/admin/resumes/${owner}/${b.dataset.cv}${q}`);
+    reload();
+  } catch (err) { say(err.message); }
+});
+
+// ---- отзывы ----
+async function loadReviews() {
+  const [shown, hidden] = await Promise.all([api("/api/admin/reviews?status=published"), api("/api/admin/reviews?status=hidden")]);
+  const row = (r, act, label) => `<div class="card" data-revid="${r.id}"><b>${"★".repeat(r.rating)}</b> · объявление #${r.listing_id} · автор ${esc(r.target)} · от ${esc(r.reviewer)}
+    <div class="meta">${esc(r.created_at)}</div><p>${esc(r.text || "(без текста)")}</p><button class="act ${act === "hide" ? "no" : "ok"}" data-rev="${act}">${label}</button></div>`;
+  $("#main").innerHTML = `<h3>Опубликованы</h3>` + (shown.length ? shown.map((r) => row(r, "hide", "Скрыть")).join("") : '<div class="card muted">Пока нет.</div>') +
+    `<h3>Скрытые</h3>` + (hidden.length ? hidden.map((r) => row(r, "show", "Вернуть")).join("") : '<div class="card muted">Нет.</div>');
+}
+$("#main").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-rev]");
+  if (!b) return;
+  try { await post(`/api/admin/reviews/${b.closest("[data-revid]").dataset.revid}/${b.dataset.rev}`); reload(); } catch (err) { say(err.message); }
+});
+
 // ---- пользователи ----
 async function loadUsers() {
   $("#main").innerHTML = `<div class="toolbar"><input id="userQuery" placeholder="ID пользователя"><button class="act" id="userSearch">Найти</button></div><div id="usersList"></div>`;
@@ -619,7 +654,7 @@ $("#main").addEventListener("click", async (e) => {
 });
 
 const LOADERS = {dash: loadDash, listings: loadListings, jobs: loadSection, housing: loadSection, market: loadSection, dating: loadDating,
-                 employers: loadEmployers, reports: loadReports, users: loadUsers, community: loadCommunity, guide: loadGuide,
+                 employers: loadEmployers, reports: loadReports, reviews: loadReviews, resumes: loadResumes, users: loadUsers, community: loadCommunity, guide: loadGuide,
                  marketing: loadMarketing, payments: loadPayments, pricing: loadPricing, audit: loadAudit, settings: loadSettings, admins: loadAdmins};
 
 // Старт: есть сессия — открываем; открыто из Telegram — входим сами; иначе показываем кнопку

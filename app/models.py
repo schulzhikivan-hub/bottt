@@ -458,3 +458,35 @@ class ReferralSource(Base):
     tg_id: Mapped[str] = mapped_column(String(40), primary_key=True)
     source: Mapped[str] = mapped_column(String(40), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class Review(Base):
+    """A rating of a listing's author, written by someone who really talked to them about that listing."""
+    __tablename__ = "reviews"
+    __table_args__ = (UniqueConstraint("reviewer_tg_id", "listing_id", name="uq_review"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    listing_id: Mapped[int] = mapped_column(Integer, index=True)
+    target_tg_id: Mapped[str] = mapped_column(String(40), index=True)
+    reviewer_tg_id: Mapped[str] = mapped_column(String(40), index=True)
+    rating: Mapped[int] = mapped_column(Integer)
+    text: Mapped[str] = mapped_column(String(500), default="")
+    status: Mapped[str] = mapped_column(String(12), default="published", index=True)  # published | hidden
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class Resume(Base):
+    """«Ищу работу»: a job seeker's card. Public only after moderation; contacts are never shown,
+    an employer reaches the person through an invitation to a chat about the employer's own vacancy."""
+    __tablename__ = "resumes"
+    owner_tg_id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    position: Mapped[str] = mapped_column(String(80))
+    city: Mapped[str] = mapped_column(String(100), index=True)
+    region_code: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)
+    visa: Mapped[str] = mapped_column(String(8), default="")
+    experience: Mapped[str] = mapped_column(String(300), default="")
+    about: Mapped[str] = mapped_column(String(700), default="")
+    salary_from: Mapped[int | None] = mapped_column(Integer, nullable=True)   # ₩ per month
+    status: Mapped[str] = mapped_column(String(12), default="pending", index=True)  # pending | approved | rejected | hidden
+    note: Mapped[str] = mapped_column(String(300), default="")
+    search_text: Mapped[str] = mapped_column(String(1200), default="")   # lower-cased in Python: SQL lower() skips Cyrillic on SQLite
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

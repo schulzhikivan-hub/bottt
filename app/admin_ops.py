@@ -99,6 +99,11 @@ def decide_report(db: Session, actor: str, report_id: int, decision: str) -> Rep
             profile = db.get(DatingProfile, int(report.target_id))
             if profile:
                 profile.status = "rejected"
+        if report.target_type == "review" and report.target_id.isdigit():
+            from app.models import Review
+            review = db.get(Review, int(report.target_id))
+            if review:
+                review.status = "hidden"
         if report.target_type == "user":
             user = db.get(User, report.target_id)
             if user:
@@ -125,11 +130,19 @@ def hide_user_listings(db: Session, tg_id: str) -> list[Listing]:
     items = list(db.scalars(select(Listing).where(Listing.author_telegram_id == tg_id, Listing.status == "approved")).all())
     for item in items:
         item.status, item.note = "hidden", BLOCK_NOTE
+    from app.models import Resume
+    cv = db.get(Resume, tg_id)       # the resume of a blocked person is hidden too
+    if cv is not None and cv.status == "approved":
+        cv.status, cv.note = "hidden", BLOCK_NOTE
     return items
 
 
 def restore_user_listings(db: Session, tg_id: str) -> int:
     count = 0
+    from app.models import Resume
+    cv = db.get(Resume, tg_id)
+    if cv is not None and cv.status == "hidden" and cv.note == BLOCK_NOTE:
+        cv.status, cv.note = "approved", ""
     for item in db.scalars(select(Listing).where(Listing.author_telegram_id == tg_id, Listing.status == "hidden",
                                                  Listing.note == BLOCK_NOTE)).all():
         expired = item.expires_at is not None and aware(item.expires_at) <= now()
