@@ -762,3 +762,9 @@ img.co-ava{object-fit:cover}
 .navbadge[hidden]{display:none}
 /* один вид цены везде */
 .hcard .price,.hcard[data-cat] .price,.ocard .price,.ohead .price{color:var(--accent)}
+
+/* поля и кнопки без своего класса выглядели как «голый» браузер: один вид для всех экранов-разделов */
+#subBody input:not([class]):not([type=checkbox]):not([type=radio]):not([type=file]):not([type=range]),
+#setName,#meTopupN,#coTopupN,#coCode{font:inherit;color:var(--text);background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px 14px;box-sizing:border-box;max-width:100%}
+#subBody > form input:not([class]),#subBody > div > form input:not([class]){width:100%;margin-bottom:8px}
+#subBody button[type=submit]:not([class]){font:inherit;font-weight:700;border:0;border-radius:12px;background:var(--accent);color:#fff;padding:12px 18px;margin-top:4px}
