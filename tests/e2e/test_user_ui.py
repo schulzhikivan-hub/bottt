@@ -77,6 +77,7 @@ def base(tmp_path_factory):
     with httpx.Client(base_url=url, timeout=20) as c:
         for uid in (1, 2):
             assert c.post("/api/me/consent", json={"accept": True}, headers=as_user(uid)).status_code == 200
+        c.post("/api/me/account/skip", headers=as_user(1))               # a returning visitor has already answered «заполню позже»
         for i, (cat, title, price) in enumerate([("job", "Повар в корейское кафе", 2500000), ("housing", "Студия у метро, без залога", 600000),
                                                   ("marketplace", "Велосипед почти новый", 150000)]):
             r = c.post("/api/listings", json={"category": cat, "title": title, "city": "Сеул", "description": "Подробное описание объявления " * 4,
