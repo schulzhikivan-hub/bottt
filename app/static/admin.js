@@ -417,10 +417,11 @@ async function loadUsers() {
   const run = async () => {
     const rows = await api("/api/admin/users?q=" + encodeURIComponent($("#userQuery").value.trim()));
     $("#usersList").innerHTML = rows.length ? rows.map((u) => `
-      <div class="card" data-uid="${esc(u.tg_id)}"><b>ID ${esc(u.tg_id)}</b> · ${esc(u.city)} · согласие: ${u.consent ? "да" : "нет"}
+      <div class="card" data-uid="${esc(u.tg_id)}"><b>ID ${esc(u.tg_id)}</b> · ${esc(u.city)} · согласие: ${u.consent ? "да" : "нет"}${u.trusted ? " · ✔ проверенный автор" : ""}
         ${u.deleted ? " · аккаунт удалён" : ""}${u.blocked ? " · <b>заблокирован</b>" : ""}${u.block_reason ? `<div class="meta">Причина: ${esc(u.block_reason)}</div>` : ""}
         <div data-act-box></div>
         <button class="act gray" data-ux="activity">Активность</button>
+        <button class="act gray" data-ux="${u.trusted ? "untrust" : "trust"}">${u.trusted ? "Снять отметку «проверен»" : "Отметить «проверенный автор»"}</button>
         ${u.blocked ? '<button class="act ok" data-ux="unblock">Разблокировать</button>' : '<button class="act no" data-ux="block">Заблокировать</button>'}</div>`).join("")
       : '<div class="card muted">Никого не нашли.</div>';
   };
@@ -438,6 +439,11 @@ $("#main").addEventListener("click", async (e) => {
       const fmtObj = (o) => Object.entries(o).map(([k, v]) => `${esc(STATUS_RU[k] || k)}: ${v}`).join(", ") || "нет";
       card.querySelector("[data-act-box]").innerHTML = `<div class="meta">Объявления: ${fmtObj(a.listings)}<br>Отклики: ${a.applications_total} (${fmtObj(a.applications)})<br>
         Жалоб на него: ${a.reports_against} · жалоб подано: ${a.reports_made}<br>Следит за поисками: ${a.saved_searches.length ? a.saved_searches.map((s) => esc(s.name) + " " + esc(JSON.stringify(s.filters))).join("; ") : "нет"}</div>`;
+      return;
+    }
+    if (btn.dataset.ux === "trust" || btn.dataset.ux === "untrust") {
+      await post(`/api/admin/users/${id}/trust/${btn.dataset.ux === "trust" ? "on" : "off"}`);
+      reload();
       return;
     }
     const reason = ask(btn.dataset.ux === "block" ? "Причина блокировки (пользователь её не увидит):" : "Причина разблокировки:");

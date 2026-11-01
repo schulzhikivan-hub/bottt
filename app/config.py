@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     max_photos: int = 10
     listing_ttl_days: int = 30
     new_account_minutes: int = 10    # a newer account may publish only one listing per hour (set 0 to switch off)
+    krw_rub: float = 0.0             # rubles for 1 won (e.g. 0.065); 0 = do not show the ruble equivalent
+    krw_usd: float = 0.0             # dollars for 1 won (e.g. 0.00072); 0 = do not show
     log_level: str = "INFO"
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

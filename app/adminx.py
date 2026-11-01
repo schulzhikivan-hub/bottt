@@ -39,7 +39,7 @@ def listing_flags(db: Session, item: Listing) -> list[str]:
     """Things a moderator should look at twice: the same text or the same photo under other accounts."""
     from app.models import AuditLog
     out = []
-    note = guard.duplicate_note(db, item.author_telegram_id, item.title, item.description or "", item.id)
+    note = guard.duplicate_note(db, item.author_telegram_id, item.title, item.description or "", item.id, item.contact or "")
     if note:
         out.append(note)
     last = db.scalars(select(AuditLog).where(AuditLog.action == "photo.duplicate_suspected",

@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select, func, case, or_
 from sqlalchemy.orm import Session
 
-from app import applications, fields, payments, photos
+from app import applications, fields, payments, photos, searchfix
 from app.payments import now
 from app import guard
 from app.database import get_db
@@ -65,7 +65,7 @@ def search(db: Session, *, q: str = "", category: str | None = None, city: str |
            pets_allowed: bool | None = None, furnished: bool | None = None,
            goods_category: str | None = None,
            year_min: int | None = None, year_max: int | None = None, mileage_max: int | None = None,
-           limit: int = 20, offset: int = 0) -> tuple[list[Listing], int]:
+           limit: int = 20, offset: int = 0, _fuzzy: bool = True) -> tuple[list[Listing], int]:
     """Published listings matching every condition. Paid placements come first on every page."""
     conditions = [Listing.status == "approved", or_(Listing.expires_at.is_(None), Listing.expires_at > now())]
     if category:
@@ -76,9 +76,11 @@ def search(db: Session, *, q: str = "", category: str | None = None, city: str |
         conditions.append(Listing.district_id == district_id)
     if city and city.strip():
         conditions.append(Listing.city_key.like(_like(city.strip().lower()), escape="\\"))
-    # Every word must be found in the title, description or city (case is ignored)
+    # Every word must be found in the title, description or city (case is ignored); a word may also be read as
+    # another keyboard layout, transliteration or with a different ending (app/searchfix.py)
     for word in q.lower().split()[:MAX_WORDS]:
-        conditions.append(Listing.search_text.like(_like(word), escape="\\"))
+        alts = searchfix.variants(word)
+        conditions.append(or_(*[Listing.search_text.like(_like(v), escape="\\") for v in alts]))
     if price_min is not None:
         conditions.append(Listing.price_amount >= price_min)
     if price_max is not None:
@@ -117,6 +119,17 @@ def search(db: Session, *, q: str = "", category: str | None = None, city: str |
         conditions.append(Listing.mileage_km <= mileage_max)
 
     total = db.scalar(select(func.count()).select_from(Listing).where(*conditions)) or 0
+    if total == 0 and q.strip() and _fuzzy:
+        # nothing found: try to fix typos using the words that really occur in published listings
+        vocab = searchfix.vocabulary(db)
+        fixed = [searchfix.correct(w, vocab) or w for w in q.lower().split()[:MAX_WORDS]]
+        if fixed != q.lower().split()[:MAX_WORDS]:
+            return search(db, q=" ".join(fixed), category=category, city=city, region=region, district_id=district_id,
+                          price_min=price_min, price_max=price_max, sort=sort, housing_provided=housing_provided,
+                          meals_provided=meals_provided, condition=condition, rooms_min=rooms_min, visa=visa,
+                          employment=employment, schedule=schedule, housing_type=housing_type, deposit_max=deposit_max,
+                          area_min=area_min, pets_allowed=pets_allowed, furnished=furnished, goods_category=goods_category,
+                          year_min=year_min, year_max=year_max, mileage_max=mileage_max, limit=limit, offset=offset, _fuzzy=False)
     if sort == "price_asc":
         order = [Listing.price_amount.asc().nulls_last(), Listing.id.desc()]
     elif sort == "price_desc":

@@ -1,4 +1,5 @@
 """Saved searches: the user keeps a set of filters and the bot tells them about new matching listings."""
+import datetime as dt
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -86,22 +87,37 @@ def delete_search(search_id: int, user_id: str = Depends(writer), db: Session = 
     return {"ok": True}
 
 
+DIGEST_EVERY = dt.timedelta(hours=24)
+
+
 def new_matches(db: Session) -> list[tuple[str, str]]:
-    """For every saved search: listings published since the last check. Returns (user_id, message) pairs."""
+    """For every saved search: listings published since the last check. Returns (user_id, message) pairs.
+    People who chose the daily digest get one message per day with all their searches together."""
     messages = []
+    digests: dict[str, list[str]] = {}
     for row in db.scalars(select(SavedSearch)).all():
-        since = aware(row.last_checked_at)
-        row.last_checked_at = now()
         user = db.get(User, row.user_tg_id)
         if user is None or user.blocked or user.deleted_at is not None:
+            row.last_checked_at = now()
             continue
+        digest = (user.notify_prefs or {}).get("searches_digest") is True
+        since = aware(row.last_checked_at)
+        if digest and now() - since < DIGEST_EVERY:
+            continue                                  # not yet time: keep «since» so nothing is lost
+        row.last_checked_at = now()
         items, _ = catalog.search(db, limit=50, **row.params)
         fresh = [x for x in items if x.published_at and aware(x.published_at) > since
                  and x.author_telegram_id != row.user_tg_id]
-        if fresh:
-            first = fresh[0]
-            more = f" и ещё {len(fresh) - 1}" if len(fresh) > 1 else ""
+        if not fresh:
+            continue
+        first = fresh[0]
+        more = f" и ещё {len(fresh) - 1}" if len(fresh) > 1 else ""
+        if digest:
+            digests.setdefault(row.user_tg_id, []).append(f"• «{row.name}»: {first.title} — {first.city}{more}")
+        else:
             messages.append((row.user_tg_id, f"🔔 Новое по вашему поиску «{row.name}»: {first.title} — {first.city}{more}. "
                                              "Откройте приложение, чтобы посмотреть."))
+    for tg, lines in digests.items():
+        messages.append((tg, "🗞 Новое за сутки по вашим поискам:\n" + "\n".join(lines) + "\nОткройте приложение, чтобы посмотреть."))
     db.commit()
     return messages

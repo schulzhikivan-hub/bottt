@@ -134,6 +134,34 @@ def _not_found(listing_id: int) -> HTMLResponse:
     return HTMLResponse(shown.body, status_code=404)
 
 
+SECTION_TITLE = {"job": "Вакансии в Южной Корее", "housing": "Жильё в Южной Корее", "marketplace": "Барахолка в Южной Корее"}
+
+
+@router.get("/c/{category}")
+@router.get("/c/{category}/{city}")
+def public_section(category: str, city: str | None = None, db: Session = Depends(get_db)):
+    """Landing pages for search engines: «Вакансии в Пусане». Empty pages are served but not indexed."""
+    if category not in SECTION_TITLE:
+        missing = page("Не найдено", "", "<div class='card'><h1>Раздел не найден</h1></div>", f"{base_url()}/", robots="noindex")
+        missing.status_code = 404
+        return missing
+    cond = [Listing.status == "approved", Listing.category == category, or_(Listing.expires_at.is_(None), Listing.expires_at > now())]
+    heading = SECTION_TITLE[category]
+    if city:
+        city = city.strip()[:60].replace("%", "").replace("_", "")
+        cond.append(Listing.city_key.like(city.lower() + "%"))
+        heading = f"{CAT[category]}: {city.strip()}"
+    rows = db.scalars(select(Listing).where(*cond).order_by(Listing.id.desc()).limit(50)).all()
+    items = "".join(f'<p><a href="{base_url()}/l/{x.id}"><b>{html.escape(x.title)}</b></a><br>'
+                    f'<span class="meta">📍 {html.escape(x.city)} · {html.escape(_price(x))}</span></p>' for x in rows)
+    body = (f'<div class="card"><h1>{html.escape(heading)}</h1>'
+            f'{items or "<p>Пока здесь нет объявлений.</p>"}'
+            f'<a class="cta" href="{html.escape(base_url())}/">Открыть KOREA HUB</a></div>')
+    path = f"/c/{category}" + (f"/{quote(city.strip())}" if city else "")
+    return page(f"{heading} — {SITE_NAME}", f"{heading}: свежие объявления на русском языке, без посредников.", body,
+                f"{base_url()}{path}", robots="index,follow" if rows else "noindex,follow")
+
+
 @router.get("/robots.txt")
 def robots():
     return PlainTextResponse(
@@ -150,6 +178,14 @@ def sitemap(db: Session = Depends(get_db)):
     urls = [f"<url><loc>{html.escape(base_url())}/</loc></url>",
             f"<url><loc>{html.escape(base_url())}/legal/terms</loc></url>",
             f"<url><loc>{html.escape(base_url())}/legal/privacy</loc></url>"]
+    for cat in SECTION_TITLE:
+        urls.append(f"<url><loc>{html.escape(base_url())}/c/{cat}</loc></url>")
+    seen = set()
+    for x in rows:                      # a section+city page exists for every city that has a live listing
+        key = (x.category, (x.city or "").split(",")[0].strip())
+        if key[1] and key not in seen and len(seen) < 300:
+            seen.add(key)
+            urls.append(f"<url><loc>{html.escape(base_url())}/c/{key[0]}/{html.escape(quote(key[1]))}</loc></url>")
     for x in rows:
         last = f"<lastmod>{aware(x.published_at).date().isoformat()}</lastmod>" if x.published_at else ""
         urls.append(f"<url><loc>{html.escape(base_url())}/l/{x.id}</loc>{last}</url>")

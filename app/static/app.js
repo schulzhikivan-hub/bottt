@@ -177,6 +177,16 @@ function priceText(x) {
   const suffix = x.category === "job" ? labelOf("salary_period", x.salary_period || "month") : x.category === "housing" ? "в месяц" : "";
   return [text, suffix, x.price].filter(Boolean).join(" ");
 }
+let ratesCfg = {};
+// Приблизительный пересчёт: курс задаёт владелец в настройках сервера, к конкретной цене не привязан
+function approxPrice(x) {
+  if (x.price_amount == null || !(ratesCfg.rub || ratesCfg.usd)) return "";
+  const n = (v) => new Intl.NumberFormat("ru-RU", {maximumFractionDigits: 0}).format(v);
+  const parts = [];
+  if (ratesCfg.rub) parts.push("≈ " + n(x.price_amount * ratesCfg.rub) + " ₽");
+  if (ratesCfg.usd) parts.push("≈ $" + n(x.price_amount * ratesCfg.usd));
+  return `<div class="muted">${parts.join(" · ")} (примерно)</div>`;
+}
 function pills(x) {
   const out = [];
   if (x.category === "job") {
@@ -548,6 +558,7 @@ function authorBlock(x) {
   const a = x.author || {};
   const parts = [];
   if (a.verified) parts.push(`<b class="badge-ok">✔ Проверенный работодатель${a.company ? ": " + esc(a.company) : ""}</b>`);
+  else if (a.trusted) parts.push('<b class="badge-ok">✔ Проверенный автор</b>');
   else if (a.since) parts.push("<b>Автор</b>");
   if (a.active) parts.push(`<button class="alink" data-author="${x.id}">Все объявления автора: ${a.active}</button>`);
   if (a.reviews) parts.push(`<b class="rating">★ ${a.rating}</b> (${a.reviews} отзыв.)`);
@@ -582,7 +593,7 @@ $("#applyForm").onsubmit = async (e) => {
 };
 async function openDetail(id, push = true) {
   try {
-    await loadFields();
+    await Promise.all([loadFields(), ensureConfig()]);
     const x = await api(`/api/listings/${id}`, {quiet: true});
     const {phone, user} = contactLinks(x.contact);
     const fav = favIds.has(x.id);
@@ -595,7 +606,7 @@ async function openDetail(id, push = true) {
         <div class="dtools"><button data-act="fav" class="rnd" aria-label="В избранное">${fav ? "♥" : "♡"}</button>
         <button data-act="share" class="rnd" aria-label="Поделиться">⤴</button></div></div>
       <div class="dhead"><h1>${esc(x.title)}</h1>${promoBadge(x)}</div>
-      <div class="price big">${esc(priceText(x))}</div>
+      <div class="price big">${esc(priceText(x))}</div>${approxPrice(x)}
       <div class="meta">📍 ${esc(x.city)} · ${esc(CAT[x.category] || x.category)}</div>
       ${specs(x)}
       <h3 class="dsub">Описание</h3>
@@ -650,8 +661,12 @@ async function loadSimilar(id) {
   } catch (e) { /* не критично */ }
 }
 let botName = null;
+async function ensureConfig() {
+  if (botName !== null) return;
+  try { const cfg = await api("/api/config", {quiet: true}); botName = cfg.bot || ""; ratesCfg = cfg.rates || {}; } catch (e) { botName = ""; }
+}
 async function shareListing(id, title) {
-  if (botName === null) { try { botName = (await api("/api/config", {quiet: true})).bot || ""; } catch (e) { botName = ""; } }
+  await ensureConfig();
   // Ссылка ведёт в чат с ботом: он покажет карточку и кнопку «Открыть в приложении»
   const url = botName ? `https://t.me/${botName}?start=l_${id}` : `${location.origin}/?listing=${id}`;
   if (tg?.openTelegramLink) tg.openTelegramLink("https://t.me/share/url?url=" + encodeURIComponent(url) + "&text=" + encodeURIComponent(title));
@@ -1021,10 +1036,16 @@ async function openMenu(key) {
         <label class="check" style="margin:0"><input type="checkbox" id="setNotify"></label></div>
       ${prefs.kinds.map((k) => `<div class="set-row" style="padding-left:14px"><div>${esc(k.label)}</div>
         <label class="check" style="margin:0"><input type="checkbox" data-kind="${k.key}" ${k.on ? "checked" : ""}></label></div>`).join("")}
+      <div class="set-row" style="padding-left:14px"><div>Новое по поискам — раз в сутки одним сообщением<small>Вместо уведомления о каждом объявлении</small></div>
+        <label class="check" style="margin:0"><input type="checkbox" id="setDigest" ${prefs.digest ? "checked" : ""}></label></div>
       <p class="muted">Все уведомления всегда видны в приложении (колокольчик), даже если в Telegram они выключены.</p>
       <div class="set-row"><div><b>Язык</b><small>Сейчас доступен только русский</small></div><span class="muted">RU</span></div></article>`;
     $("#myVisa").value = me?.visa || "";
     $("#setNotify").checked = Boolean(prefs.master);
+    $("#setDigest").onchange = async (e) => {
+      try { await api("/api/me/notify-prefs", {method: "PUT", body: JSON.stringify({digest: e.target.checked})}); toast("Сохранено"); }
+      catch (err) { toast(err.message); e.target.checked = !e.target.checked; }
+    };
     $("#setCity").onclick = openCity;
     $("#myVisa").onchange = async () => {
       try { const r = await api("/api/me/settings", {method: "PUT", body: JSON.stringify({visa: $("#myVisa").value})}); me.visa = r.visa; showProfileChips(); toast("Сохранено"); }

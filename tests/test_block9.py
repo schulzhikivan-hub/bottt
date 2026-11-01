@@ -194,3 +194,25 @@ def test_start_source_tag_is_first_touch_and_counted():
     bot._remember_source("78", "bad tag!")     # junk ignored
     with SessionLocal() as db:
         assert adminx.analytics(db, 30)["sources"] == [{"source": "ads_may", "users": 1}]
+
+
+def test_section_and_city_pages_for_search_engines():
+    from fastapi.testclient import TestClient
+    from app.main import app
+    from app.database import SessionLocal
+    from app.models import Listing
+    from app.payments import now
+    import datetime as dt
+    reset_db()
+    with SessionLocal() as db:
+        row = Listing(author_telegram_id="1", category="job", title="Повар в Пусане", description="x" * 40, city="Пусан",
+                      city_key="пусан", status="approved", contact="c", expires_at=now() + dt.timedelta(days=5))
+        db.add(row); db.commit()
+    c = TestClient(app)
+    page = c.get("/c/job/Пусан")
+    assert page.status_code == 200 and "Повар в Пусане" in page.text and 'content="index,follow"' in page.text
+    empty = c.get("/c/housing/Сеул")
+    assert empty.status_code == 200 and "noindex" in empty.text
+    assert c.get("/c/nothing").status_code == 404
+    sm = c.get("/sitemap.xml").text
+    assert "/c/job" in sm and "/c/job/%D0%9F%D1%83%D1%81%D0%B0%D0%BD" in sm

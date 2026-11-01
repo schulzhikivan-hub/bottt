@@ -77,7 +77,16 @@ def check_text(title: str, description: str) -> None:
         raise HTTPException(400, "Уберите телефон, ссылки и @-ники из описания: укажите контакт в поле «Контакт»")
 
 
-def duplicate_note(db: Session, author: str, title: str, description: str, listing_id: int | None) -> str:
+def contact_key(contact: str) -> str:
+    """Same phone written differently (+82 10-1234-5678, 01012345678) gives one key; @nick is case-insensitive."""
+    c = (contact or "").strip().lower().lstrip("@")
+    digits = re.sub(r"\D", "", c)
+    if len(digits) >= 9:
+        return digits[-9:]
+    return c
+
+
+def duplicate_note(db: Session, author: str, title: str, description: str, listing_id: int | None, contact: str = "") -> str:
     """Mark a listing for the moderator when the same text was posted by someone else recently."""
     rows = db.scalars(select(Listing).where(
         Listing.title == title, Listing.description == description,
@@ -91,6 +100,14 @@ def duplicate_note(db: Session, author: str, title: str, description: str, listi
             Listing.status.in_(["pending", "approved", "hidden", "rejected"]))).all())
         if len(authors) >= 2:
             return f"Тот же текст у {len(authors) + 1} разных аккаунтов"
+    key = contact_key(contact)
+    if len(key) >= 4:     # one contact under many accounts is how spam farms look
+        others = db.execute(select(Listing.author_telegram_id, Listing.contact).where(
+            Listing.author_telegram_id != author, Listing.status.in_(["pending", "approved", "hidden", "rejected"]),
+            Listing.contact != "")).all()
+        authors = {a for a, c in others if contact_key(c) == key}
+        if len(authors) >= 2:
+            return f"Тот же контакт у {len(authors) + 1} разных аккаунтов"
     return ""
 
 

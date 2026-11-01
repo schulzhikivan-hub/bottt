@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from sqlalchemy import String, Text, DateTime, Integer, BigInteger, ForeignKey, UniqueConstraint, Boolean, JSON, event
+from sqlalchemy import false, String, Text, DateTime, Integer, BigInteger, ForeignKey, UniqueConstraint, Boolean, JSON, event
 from sqlalchemy.orm import Mapped, mapped_column
 from app.database import Base
 
@@ -30,6 +30,7 @@ class User(Base):
     avatar_key: Mapped[str | None] = mapped_column(String(40), nullable=True)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     consent_version: Mapped[str] = mapped_column(String(40), default="")
+    trusted: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())   # «Проверенный автор»: a moderator checked this person
     visa: Mapped[str] = mapped_column(String(8), default="")  # private; used for job filters and applications
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 

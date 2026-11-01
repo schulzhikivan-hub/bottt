@@ -142,7 +142,7 @@ def author_card(db: Session, item: Listing) -> dict:
         Listing.author_telegram_id == item.author_telegram_id, Listing.status == "approved")) or 0
     verified = bool(user and user.employer_status == "approved")
     from app import reviews
-    return {"verified": verified, "company": user.company_name if verified else "",
+    return {"verified": verified, "trusted": bool(user and user.trusted), "company": user.company_name if verified else "",
             "active": active, "since": user.created_at.year if user and user.created_at else None,
             **reviews.summary(db, item.author_telegram_id)}
 

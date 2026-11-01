@@ -81,11 +81,12 @@ def mark_read(payload: ReadIn, user_id: str = Depends(current_user_id), db: Sess
 class PrefsIn(BaseModel):
     master: bool | None = None
     kinds: dict[str, bool] | None = None
+    digest: bool | None = None       # new matches for saved searches once a day instead of at once
 
 
 def prefs_view(user: User) -> dict:
     prefs = user.notify_prefs or {}
-    return {"master": bool(user.notify_messages),
+    return {"master": bool(user.notify_messages), "digest": prefs.get("searches_digest") is True,
             "kinds": [{"key": k, "label": label, "on": prefs.get(k, True) is not False} for k, label in NOTIFY_KINDS.items()]}
 
 
@@ -104,6 +105,8 @@ def set_prefs(payload: PrefsIn, user_id: str = Depends(writer), db: Session = De
         if unknown:
             raise HTTPException(422, "Неизвестный вид уведомлений")
         user.notify_prefs = {**(user.notify_prefs or {}), **payload.kinds}
+    if payload.digest is not None:
+        user.notify_prefs = {**(user.notify_prefs or {}), "searches_digest": payload.digest}
     db.commit()
     return prefs_view(user)
 

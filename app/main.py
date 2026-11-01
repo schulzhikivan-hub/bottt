@@ -112,13 +112,18 @@ def public_config():
     import time
     cached = _config_cache.get("bot")
     if cached and (cached[0] or time.monotonic() - cached[1] < 300):  # a failed lookup is not repeated for 5 minutes
-        return {"bot": cached[0]}
+        return {"bot": cached[0], "rates": _rates()}
     try:
         name = webauth.bot_username()
     except Exception:
         name = ""
     _config_cache["bot"] = (name, time.monotonic())
-    return {"bot": name}
+    return {"bot": name, "rates": _rates()}
+
+
+def _rates() -> dict:
+    """Approximate conversion, set by the owner in .env (no outside service is called). Empty when not set."""
+    return {k: v for k, v in (("rub", settings.krw_rub), ("usd", settings.krw_usd)) if v and v > 0}
 
 
 _config_cache: dict = {}
@@ -345,7 +350,7 @@ def create_listing(payload: ListingCreate, user_id: str = Depends(writer), db: S
     db.add(item)
     db.commit()
     db.refresh(item)
-    dup = duplicate_note(db, user_id, payload.title, payload.description, item.id)
+    dup = duplicate_note(db, user_id, payload.title, payload.description, item.id, payload.contact)
     if dup:
         # Для модератора: виден в журнале, автор этого не видит
         log_action(db, "system", "listing.duplicate_suspected", "listing", item.id, dup)

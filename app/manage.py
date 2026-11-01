@@ -246,8 +246,22 @@ def admin_users(q: str = Query(default="", max_length=40), actor: str = Depends(
         stmt = select(User).where(User.tg_id.contains(q.strip())).limit(100)
     return [{"tg_id": u.tg_id, "city": u.city, "consent": u.consent_at is not None,
              "blocked": u.blocked, "block_reason": u.block_reason, "deleted": u.deleted_at is not None,
-             "employer_status": u.employer_status, "company_name": u.company_name}
+             "employer_status": u.employer_status, "company_name": u.company_name, "trusted": u.trusted}
             for u in db.scalars(stmt).all()]
+
+
+@router.post("/api/admin/users/{tg_id}/trust/{state}")
+def admin_trust(tg_id: str, state: str, actor: str = Depends(staff(*MOD)), db: Session = Depends(get_db)):
+    """The «Проверенный автор» mark. Only moderators and up; the action is logged."""
+    if state not in {"on", "off"}:
+        raise HTTPException(400, "Состояние: on или off")
+    user = db.get(User, tg_id)
+    if user is None:
+        raise HTTPException(404, "Пользователь не найден")
+    user.trusted = state == "on"
+    log_action(db, actor, f"user.trust_{state}", "user", tg_id, "")
+    db.commit()
+    return {"tg_id": tg_id, "trusted": user.trusted}
 
 
 @router.post("/api/admin/users/{tg_id}/block")

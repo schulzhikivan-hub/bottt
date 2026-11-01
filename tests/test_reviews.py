@@ -61,3 +61,30 @@ def test_hidden_review_leaves_rating_and_report_hides_it():
     assert c.get("/api/admin/reviews", headers=ADMIN).json()[0]["id"] == rid
     assert c.delete(f"/api/reviews/{rid}", headers=as_user(1)).status_code == 404   # only the writer deletes
     assert c.delete(f"/api/reviews/{rid}", headers=as_user(2)).status_code == 200
+
+
+def test_trusted_author_mark_and_contact_farm_flag():
+    c, lid = setup_chat()
+    assert c.post("/api/admin/users/1/trust/on", headers=ADMIN).json()["trusted"] is True
+    assert c.get(f"/api/listings/{lid}").json()["author"]["trusted"] is True
+    assert c.post("/api/admin/users/1/trust/maybe", headers=ADMIN).status_code == 400
+    from app import guard
+    assert guard.contact_key("+82 10-1234-5678") == guard.contact_key("010 1234 5678")
+    with SessionLocal() as db:
+        for a in ("5", "6"):
+            db.add(Listing(author_telegram_id=a, category="market", title="t" + a, description="d" * 40, city="Сеул",
+                           status="approved", contact="010-1234-5678"))
+        db.commit()
+        note = guard.duplicate_note(db, "7", "other", "unique text here", None, "+82 10 1234 5678")
+        assert note.startswith("Тот же контакт")
+
+
+def test_config_has_rates_only_when_set(monkeypatch):
+    from app.config import settings
+    from app import main
+    c = TestClient(app)
+    main._config_cache.clear()
+    monkeypatch.setattr(settings, "krw_rub", 0.0)
+    assert c.get("/api/config").json()["rates"] == {}
+    monkeypatch.setattr(settings, "krw_rub", 0.065)
+    assert c.get("/api/config").json()["rates"] == {"rub": 0.065}
