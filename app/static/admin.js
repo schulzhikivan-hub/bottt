@@ -341,48 +341,71 @@ function openAudit(a) {
   return show("audit");
 }
 function palShow(kind, q) { $("#gQuery").value = q; $("#gSearch").requestSubmit(); }
-const TILES = [
-  ["listings", "📋", "На проверке", "listings", "listings_wait_h"], ["reports", "🚩", "Жалобы", "reports"], ["support", "💬", "Обращения", "support", "support_wait_h"],
-  ["dating", "💗", "Анкеты", "dating"], ["resumes", "🧑‍💼", "Резюме", "resumes"], ["companies", "🏬", "Компании и работодатели", "employers"], ["errors", "🐞", "Ошибки за сутки", "errors"],
+const QUEUES = [  // [вкладка, значок, название, ключ счётчика, ключ ожидания, подпись]
+  ["listings", "📋", "Объявления на проверке", "listings", "listings_wait_h", "новые и правки"], ["reports", "🚩", "Жалобы", "reports", null, "ждут решения"],
+  ["dating", "💗", "Анкеты знакомств", "dating", null, "анкеты и селфи"], ["resumes", "🧑‍💼", "Резюме", "resumes", null, "на проверке"],
+  ["companies", "🏬", "Компании и работодатели", "employers", null, "ждут проверки"], ["support", "💬", "Обращения", "support", "support_wait_h", "и оспаривания"],
+  ["refunds", "↩️", "Возвраты", "refunds", null, "новые и в работе"], ["errors", "🐞", "Ошибки у людей", "errors", null, "за сутки"],
 ];
+function ring(pct, level, label, sub) {
+  const r = 34, c = 2 * Math.PI * r, v = Math.max(0, Math.min(100, pct ?? 0));
+  const col = {ok: "var(--ok)", warn: "var(--warn)", bad: "var(--bad)", na: "var(--muted)"}[level] || "var(--ok)";
+  return `<div class="gauge"><svg viewBox="0 0 84 84"><circle cx="42" cy="42" r="${r}" fill="none" stroke="var(--surface2)" stroke-width="9"/>
+    <circle cx="42" cy="42" r="${r}" fill="none" stroke="${col}" stroke-width="9" stroke-linecap="round" stroke-dasharray="${(c * v / 100).toFixed(1)} ${c.toFixed(1)}" transform="rotate(-90 42 42)"/>
+    <text x="42" y="47" text-anchor="middle" font-size="17" font-weight="800" fill="var(--text)">${pct == null ? "—" : Math.round(v) + "%"}</text></svg><b>${label}</b><small>${sub}</small></div>`;
+}
+const gb = (n) => (n == null ? "—" : (n / 1073741824).toFixed(n >= 10737418240 ? 0 : 1) + " ГБ");
+const dur = (s) => { const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60); return d ? `${d} дн. ${h} ч` : h ? `${h} ч ${m} мин` : `${m} мин`; };
+let sysTimer = null;
+async function fillSystemCard() {
+  const box = $("#sysBox");
+  if (!box) { clearInterval(sysTimer); return; }
+  try {
+    const [m, sys] = await Promise.all([api("/api/admin/system/metrics"), api("/api/admin/system").catch(() => ({}))]);
+    box.innerHTML = `<div class="gauges">${ring(m.cpu.pct, m.cpu.level, "Процессор", `нагрузка ${m.cpu.load1} · ядер ${m.cpu.cores}`)}${ring(m.memory.pct, m.memory.level, "Память", `свободно ${gb(m.memory.available)} из ${gb(m.memory.total)}`)}
+      ${ring(m.disk.pct, m.disk.level, "Диск", `свободно ${gb(m.disk.free)} из ${gb(m.disk.total)}`)}</div>
+      <div class="facts"><span>⏱ Сервер работает: <b>${dur(m.uptime_s)}</b></span><span>🧩 Приложение: <b>${dur(m.app_uptime_s)}</b>, ${gb(m.memory.app_rss)} памяти</span><span>🗄 База: <b>${m.db_bytes == null ? "—" : (m.db_bytes / 1048576).toFixed(0) + " МБ"}</b></span>
+      <span>🤖 Бот: <b class="${sys.bot_ok ? "good" : "bad"}">${sys.bot_ok ? "отвечает" : "молчит"}</b></span><span>🔒 Сертификат: <b>${sys.cert_days == null ? "—" : sys.cert_days + " дн."}</b></span>
+      <span>Нагрузка за 5 и 15 минут: <b>${m.cpu.load5} · ${m.cpu.load15}</b></span></div>`;
+    const bad = [m.cpu, m.memory, m.disk].some((x) => x.level === "bad"), warn = [m.cpu, m.memory, m.disk].some((x) => x.level === "warn");
+    const dot = $("#pulseDot"), txt = $("#pulseText");
+    if (dot) { dot.className = "dot " + (bad ? "bad" : warn ? "warn" : ""); txt.textContent = bad ? "Сервер перегружен" : warn ? "Нагрузка повышена" : "Сервер в порядке"; }
+  } catch (err) { box.innerHTML = '<p class="muted">Нагрузку не удалось получить.</p>'; }
+}
 async function loadDash() {
   $("#main").innerHTML = '<div class="skel"></div><div class="skel" style="margin-top:12px;height:140px"></div>';
-  const [s, a, c, queue, audit] = await Promise.all([api("/api/admin/stats"), api(`/api/admin/analytics?days=${dashDays}`), api("/api/admin/counters").catch(() => ({})),
-    api("/api/admin/listings"), api("/api/admin/audit?limit=12").catch(() => [])]);
-  const f = a.funnel, days = a.days;
-  const hour = new Date().getHours();
-  const hello = hour < 5 ? "Доброй ночи" : hour < 12 ? "Доброе утро" : hour < 18 ? "Добрый день" : "Добрый вечер";
-  const open = TILES.map(([k, ic, name, key, waitKey]) => ({k, ic, name, n: c[key] || 0, wait: waitKey ? c[waitKey] || 0 : 0})).filter((t) => t.n > 0 || t.k === "listings");
-  const anyOpen = open.some((t) => t.n > 0);
-  const tiles = anyOpen ? open.filter((t) => t.n > 0).map((t) => `<button class="tile ${t.wait >= 24 || (t.k === "errors" && t.n > 5) ? "hot" : t.n > 0 ? "warm" : "calm"}" data-go="${t.k}"><span class="ic">${t.ic}</span>
-      <div class="n">${t.n}</div><div class="t">${t.name}</div>${t.wait ? `<div class="w">ждёт уже ${t.wait} ч</div>` : ""}</button>`).join("")
-    : '<div class="allclear">🎉 Всё чисто: очередей и срочных дел нет</div>';
-  const kpi = (title, val, key, go, color) => { const v = days.map((d) => d[key] || 0); return `<button class="kpi" data-go="${go}"><small>${title}</small><b>${val}</b>${delta(v)}${spark(v, color)}</button>`; };
+  const [s, a, c, queue, audit, sus] = await Promise.all([api("/api/admin/stats"), api(`/api/admin/analytics?days=${dashDays}`), api("/api/admin/counters").catch(() => ({})),
+    api("/api/admin/listings"), api("/api/admin/audit?limit=12").catch(() => []), api("/api/admin/suspicious").catch(() => ({reported: [], burst: [], shared_contact: []}))]);
+  const f = a.funnel, days = a.days, today = days[days.length - 1] || {}, yest = days[days.length - 2] || {};
+  const rows = QUEUES.map(([tab, ic, name, key, waitKey, hint]) => ({tab, ic, name, hint, n: c[key] || 0, wait: waitKey ? c[waitKey] || 0 : 0}));
+  const open = rows.reduce((n, r) => n + r.n, 0);
+  const tod = (title, key, go, suffix = "") => { const t = today[key] || 0, y = yest[key] || 0, d = t - y; return `<button class="today" data-go="${go}"><small>${title}</small><b>${fmtN(t)}${suffix}</b><span class="${d > 0 ? "up" : d < 0 ? "down" : "flat"}">${d > 0 ? "▲ +" + d : d < 0 ? "▼ " + d : "как вчера"}</span></button>`; };
   $("#main").innerHTML = `
-    <div class="hero"><button class="pulse" id="pulseBtn" type="button"><span class="dot" id="pulseDot"></span><span id="pulseText">проверяем систему…</span></button>
-      <h2>${hello}! Вот что происходит</h2>
-      <p>${anyOpen ? `Ждут вашего решения: <b>${open.reduce((n, t) => n + t.n, 0)}</b>. Нажмите на плитку ниже.` : "Очередь пуста, можно заняться настройками."}</p>
-      <div class="quick"><button data-go="listings">📋 Очередь</button><button data-go="users">👥 Найти человека</button><button data-go="marketing">📣 Реклама и акции</button><button data-go="rules">📐 Правила</button><button data-go="stest">🔎 Тест поиска</button><button id="quickPal">⌘ Команды</button></div></div>
-    <div class="sect"><h3>Требует внимания</h3></div><div class="attn">${tiles}</div>
-    <div class="sect"><h3>Показатели</h3><div class="seg" id="dashDays">${[7, 30, 90].map((d) => `<button class="${d === dashDays ? "on" : ""}" data-dd="${d}">${d} дн.</button>`).join("")}</div></div>
-    <div class="kpis">
-      ${kpi("Новые люди", fmtN(a.totals.users), "users", "users", "var(--brand)")}
-      ${kpi("Объявления", fmtN(a.totals.listings), "listings", "listings", "var(--brand2)")}
-      ${kpi("Выручка", fmtN(a.totals.stars) + " ⭐", "stars", "reportsm", "#f2a20c")}
-      ${kpi("Отклики", fmtN(a.totals.applications), "applications", "reports", "#e5484d")}
+    <div class="dhead"><div><h2>${new Date().getHours() < 12 ? "Доброе утро" : new Date().getHours() < 18 ? "Добрый день" : "Добрый вечер"}</h2><p class="muted">${open ? `Ждут решения: <b>${open}</b>` : "Очередей нет"} · людей на сайте: <b>${fmtN(s.users)}</b> · платящих: <b>${s.payers}</b></p></div>
+      <div class="quick2"><button class="pulse2" id="pulseBtn"><span class="dot" id="pulseDot"></span><span id="pulseText">проверяем…</span></button><button data-go="listings">📋 Очередь</button><button data-go="users">👥 Найти человека</button><button id="quickPal">⌘ Команды</button></div></div>
+    <div class="todaybar">${tod("Новые люди сегодня", "users", "users")}${tod("Новые объявления", "listings", "listings")}${tod("Отклики", "applications", "jobs")}${tod("Выручка сегодня", "stars", "reportsm", " ⭐")}</div>
+    <div class="cols2">
+      <div class="card"><div class="sect2"><h3>Очереди: что делать сейчас</h3></div>
+        <table class="queues"><tr><th></th><th>Очередь</th><th>Сейчас</th><th>Ждёт</th><th></th></tr>${rows.map((r) => `<tr class="${r.n ? "" : "zero"}"><td>${r.ic}</td><td><b>${r.name}</b><br><small class="muted">${r.hint}</small></td>
+          <td><span class="qn ${r.wait >= 24 ? "hot" : r.n ? "warm" : ""}">${r.n}</span></td><td>${r.wait ? `<span class="${r.wait >= 24 ? "bad" : ""}">${r.wait} ч</span>` : "—"}</td><td><button class="act ${r.n ? "" : "gray"}" data-go="${r.tab}">${r.n ? "Взять →" : "Открыть"}</button></td></tr>`).join("")}</table></div>
+      <div class="card"><div class="sect2"><h3>Сервер</h3><button class="act gray" data-go="errors">Ошибки</button></div><div id="sysBox"><p class="muted">Загрузка…</p></div></div>
     </div>
-    <div class="card chartcard" style="margin-top:14px"><div class="head"><h3 style="margin:0">Динамика</h3>
-      <div class="seg" id="dashMetric">${Object.entries(METRICS).map(([k, [n]]) => `<button class="${k === dashMetric ? "on" : ""}" data-dm="${k}">${n}</button>`).join("")}</div></div>
-      ${bigChart(days, dashMetric)}<p class="muted" style="margin:6px 4px 0">Проведите пальцем или мышью по графику, чтобы увидеть цифру за день.</p></div>
+    ${sus.reported.length || sus.burst.length || sus.shared_contact.length ? `<div class="card susp"><h3>⚠ Подозрительное</h3><div class="cols3">
+      <div><b>Несколько жалоб на человека</b>${sus.reported.map((x) => `<div class="drun"><a href="#" data-gu="${esc(x.tg_id)}">${esc(x.name || "ID …" + x.tg_id.slice(-4))}</a><span class="bad">${x.reports} жалоб</span></div>`).join("") || '<p class="muted">нет</p>'}</div>
+      <div><b>Всплеск публикаций за час</b>${sus.burst.map((x) => `<div class="drun"><a href="#" data-gu="${esc(x.tg_id)}">ID …${esc(x.tg_id.slice(-4))}</a><span class="bad">${x.listings} объявл.</span></div>`).join("") || '<p class="muted">нет</p>'}</div>
+      <div><b>Один контакт у разных людей</b>${sus.shared_contact.map((x) => `<div class="drun"><span>${esc(x.contact)}</span><span class="bad">${x.accounts} аккаунта</span></div>`).join("") || '<p class="muted">нет</p>'}</div></div></div>` : ""}
+    <div class="card chartcard"><div class="head"><h3 style="margin:0">Динамика</h3><div style="display:flex;gap:8px;flex-wrap:wrap"><div class="seg" id="dashDays">${[7, 30, 90].map((d) => `<button class="${d === dashDays ? "on" : ""}" data-dd="${d}">${d} дн.</button>`).join("")}</div>
+      <div class="seg" id="dashMetric">${Object.entries(METRICS).map(([k, [n]]) => `<button class="${k === dashMetric ? "on" : ""}" data-dm="${k}">${n}</button>`).join("")}</div></div></div>
+      ${bigChart(days, dashMetric)}<p class="muted" style="margin:6px 4px 0">За период: людей ${fmtN(a.totals.users)}, объявлений ${fmtN(a.totals.listings)}, откликов ${fmtN(a.totals.applications)}, выручка ${fmtN(a.totals.stars)} ⭐. Проведите по графику, чтобы увидеть день.</p></div>
     <div class="cols">
-      <div class="card"><h3>Путь человека: от просмотра до оплаты</h3>${[["👁 Просмотры", f.views, "listings"], ["💬 Чаты", f.chats, "listings"], ["📨 Отклики", f.applications, "reports"], ["⭐ Оплаты", f.paid, "payments"]].map(([name, v, go], i, arr) => {
+      <div class="card"><h3>Путь человека: от просмотра до оплаты</h3>${[["👁 Просмотры", f.views, "listings"], ["💬 Чаты", f.chats, "listings"], ["📨 Отклики", f.applications, "jobs"], ["⭐ Оплаты", f.paid, "payments"]].map(([name, v, go], i, arr) => {
         const top = Math.max(1, f.views), prev = i ? arr[i - 1][1] : null;
         return `<button class="fstep" data-go="${go}"><span class="lab">${name}</span><span class="bar" style="width:${Math.max(6, Math.round(v / top * 100) * 0.62)}%">${fmtN(v)}</span><span class="cv">${prev ? (prev ? Math.round(v / prev * 1000) / 10 : 0) + "% от шага выше" : ""}</span></button>`; }).join("")}</div>
       <div class="card"><h3>Что происходит</h3><div class="feed">${audit.slice(0, 9).map((x, i) => `<button data-feed="${i}"><span class="fi">${ACT_ICON[x.object_type] || "•"}</span><span class="ft"><b>${esc(actorName(x.actor))}</b> ${esc(ACT_TEXT(x))} <span class="muted">${esc(x.object_type)} ${esc(x.object_id)}</span><small>${esc(fmt(x.created_at))}</small></span></button>`).join("") || '<p class="muted">Пока тихо.</p>'}</div></div>
     </div>
     <div class="cols">
       <div class="card"><h3>Деньги по услугам</h3>${a.stars_by_service.length ? a.stars_by_service.slice(0, 7).map((x) => { const top = Math.max(1, a.stars_by_service[0].stars); return `<button class="hbar" data-go="reportsm"><span class="nm">${esc(x.service)}</span><span class="tr"><i style="width:${Math.round(x.stars / top * 100)}%"></i></span><span class="vl">${x.stars} ⭐</span></button>`; }).join("") : '<p class="muted">Продаж не было.</p>'}
-        <p class="muted">Всего: ${fmtN(s.revenue_stars_total)} ⭐ · платящих: ${s.payers} · за неделю ${s.week.stars} ⭐ (${s.week.sales} продаж)</p></div>
+        <p class="muted">Всего: ${fmtN(s.revenue_stars_total)} ⭐ · за неделю ${s.week.stars} ⭐ (${s.week.sales} продаж)</p></div>
       <div class="card"><h3>Откуда приходят</h3>${(a.sources || []).length ? a.sources.slice(0, 7).map((x) => { const top = Math.max(1, a.sources[0].users); return `<div class="hbar" style="cursor:default"><span class="nm">${esc(x.source)}</span><span class="tr"><i style="width:${Math.round(x.users / top * 100)}%"></i></span><span class="vl">${x.users}</span></div>`; }).join("") : '<p class="muted">Меток пока нет. Ссылка для рекламы: t.me/ИМЯ_БОТА?start=src_МЕТКА</p>'}</div>
     </div>
     <div class="card"><h3>Быстрая проверка очереди</h3>${queue.length ? `<table><tr><th>№</th><th>Раздел</th><th>Название</th><th>Город</th><th></th></tr>${queue.slice(0, 6).map((x) => `
@@ -390,7 +413,9 @@ async function loadDash() {
       <td><button class="act ok" data-quick="approve">Одобрить</button><button class="act no" data-quick="reject">Отклонить</button></td></tr>`).join("")}</table>` : '<p class="muted">Очередь пуста.</p>'}</div>`;
   window.__auditRows = audit;
   bindChart(days, dashMetric);
-  fillPulse();
+  clearInterval(sysTimer);
+  fillSystemCard();
+  sysTimer = setInterval(fillSystemCard, 15000);
 }
 async function fillPulse() {
   try {
@@ -1264,12 +1289,29 @@ $("#main").addEventListener("click", async (e) => {
 
 // ---- журнал ----
 async function loadErrors() {
-  const rows = await api("/api/admin/client-errors");
-  $("#main").innerHTML = rows.length ? `<p class="muted">Приложение само присылает сюда ошибки. «Код» совпадает с тем, что человек видит на экране.</p>
-    <table><tr><th>Время</th><th>Пользователь</th><th>Где</th><th>Статус</th><th>Сообщение</th><th>Код</th><th>Телефон</th></tr>
-    ${rows.map((r) => `<tr><td>${esc(fmt(r.at))}</td><td>${esc(r.user || "гость")}</td><td>${esc(r.where)}</td><td>${r.status || ""}</td><td>${esc(r.message)}</td><td>${esc(r.request_id)}</td><td>${esc(r.agent)}</td></tr>`).join("")}</table>`
-    : '<div class="card muted">Ошибок пока нет.</div>';
+  const [groups, rows] = await Promise.all([api("/api/admin/client-errors/groups"), api("/api/admin/client-errors")]);
+  $("#main").innerHTML = `<div class="card"><div class="row" style="justify-content:space-between"><div><h3 style="margin:0">Ошибки, которые видели люди</h3>
+      <p class="muted" style="margin:4px 0 0">Приложение само присылает сюда ошибки. «Код» совпадает с тем, что человек видит на экране. Исправили причину — сбросьте, чтобы не мешали.</p></div>
+      <div><button class="act gray" data-errclear="older">Сбросить старше недели</button><button class="act no" data-errclear="all">Сбросить всё</button></div></div></div>
+    <div class="card"><h3>Группы: одна и та же проблема</h3>${groups.length ? `<table><tr><th>Где</th><th>Статус</th><th>Сообщение</th><th>Раз</th><th>Людей</th><th>Последний раз</th><th></th></tr>${groups.map((g, i) => `<tr data-eg="${i}"><td>${esc(g.where)}</td><td>${g.status || ""}</td><td>${esc(g.message)}</td>
+      <td><b>${g.count}</b></td><td>${g.people}</td><td>${esc(fmt(g.last))}</td><td><button class="act gray" data-errclear="group">Сбросить группу</button></td></tr>`).join("")}</table>` : '<p class="muted">Ошибок нет. 🎉</p>'}</div>
+    <div class="card"><h3>Последние отдельно</h3>${rows.length ? `<table><tr><th>Время</th><th>Человек</th><th>Где</th><th>Статус</th><th>Сообщение</th><th>Код</th><th>Телефон</th><th></th></tr>
+    ${rows.map((r) => `<tr data-eid="${r.id}"><td>${esc(fmt(r.at))}</td><td>${esc(r.user || "гость")}</td><td>${esc(r.where)}</td><td>${r.status || ""}</td><td>${esc(r.message)}</td><td>${esc(r.request_id)}</td><td>${esc(r.agent)}</td><td><button class="act gray" data-errdel>✕</button></td></tr>`).join("")}</table>` : '<p class="muted">Пусто.</p>'}</div>`;
+  window.__errGroups = groups;
 }
+$("#main").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-errclear],[data-errdel]");
+  if (!b) return;
+  try {
+    if (b.dataset.errdel !== undefined) { await api(`/api/admin/client-errors/${b.closest("[data-eid]").dataset.eid}`, {method: "DELETE"}); reload(); return; }
+    const mode = b.dataset.errclear;
+    if (mode === "all" && !confirm("Сбросить весь список ошибок?")) return;
+    const body = {mode};
+    if (mode === "group") { const g = window.__errGroups[Number(b.closest("[data-eg]").dataset.eg)]; Object.assign(body, {where: g.where, status: g.status, message: g.message}); }
+    if (mode === "older") body.days = 7;
+    const r = await post("/api/admin/client-errors/clear", body); say(`Сброшено: ${r.deleted}`); reload();
+  } catch (err) { say(err.message); }
+});
 async function loadAudit() {
   $("#main").innerHTML = `<form id="auditForm" class="filters"><input name="who" placeholder="Кто (ID)" style="width:110px"><input name="action" placeholder="Действие, напр. listing.reject" style="width:200px">
     <input name="object_type" placeholder="Объект, напр. listing" style="width:150px"><input name="object_id" placeholder="№ объекта" style="width:100px"><input name="q" placeholder="Слово в деталях" style="width:160px">

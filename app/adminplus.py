@@ -6,7 +6,7 @@ import re
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.orm import Session
 
 from app import guard, rules
@@ -62,6 +62,8 @@ def counters(actor: str = Depends(staff(*SUPPORT)), db: Session = Depends(get_db
         "dating": c(select(func.count()).select_from(DatingProfile).where(
             or_(DatingProfile.status == "pending", DatingProfile.selfie_status == "pending"))),
         "errors": c(select(func.count()).select_from(ClientError).where(ClientError.created_at >= now() - dt.timedelta(hours=24))),
+        "refunds": c(text("select count(*) from refunds where status in ('new','in_progress')")),
+        "companies": c(text("select count(*) from companies where status = 'pending'")),
     }
 
 
