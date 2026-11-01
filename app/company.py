@@ -469,10 +469,21 @@ def public_logo_probe(company_id: int, db: Session = Depends(get_db)):
 @router.get("/api/company/{company_id}/balance")
 def company_balance(company_id: int, user_id: str = Depends(writer), db: Session = Depends(get_db)):
     c, role = _company(db, company_id, user_id, MONEY)
+    from app.models import Pricing
     rows = db.scalars(select(Payment).where(Payment.company_id == c.id).order_by(Payment.id.desc()).limit(50)).all()
+    titles = {x.code: x.title for x in db.scalars(select(Pricing)).all()}
+    titles["topup"] = "Пополнение баланса"
+    listings = {x.id: x.title for x in db.scalars(select(Listing).where(Listing.id.in_([p.listing_id for p in rows if p.listing_id] or [0]))).all()}
+    out = []
+    for p in rows:
+        status = p.status
+        if status == "pending" and aware(p.created_at) < now() - dt.timedelta(hours=1):
+            status = "abandoned"            # the invoice was opened and never paid
+        out.append({"id": p.id, "service": titles.get(p.service_code, p.service_code), "stars": p.stars, "from_balance": p.balance_used,
+                    "status": status, "by": p.user_tg_id[-4:], "listing": listings.get(p.listing_id, ""),
+                    "at": str(p.paid_at or p.created_at)})
     return {"balance": c.balance_stars, "note": "Баланс компании отдельный: он не смешивается с личным балансом сотрудников. Пополняется возвратами за неиспользованные услуги и начислениями поддержки.",
-            "history": [{"id": p.id, "service": "Пополнение баланса" if p.service_code == "topup" else p.service_code, "stars": p.stars, "from_balance": p.balance_used, "status": p.status, "by": p.user_tg_id[-4:],
-                         "at": str(p.paid_at or p.created_at)} for p in rows]}
+            "history": out}
 
 
 # ---------- public page ----------

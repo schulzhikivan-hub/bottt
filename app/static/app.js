@@ -2510,7 +2510,7 @@ async function renderCoPane(ov) {
       pane.innerHTML = `<article class="dcard2"><div class="dcard2-head"><h3>Баланс компании</h3><b>${b.balance} ⭐</b></div><p class="muted">${esc(b.note)}</p>
         <p class="muted">Платить с баланса за продвижение объявлений компании могут владелец и админы. Личные балансы сотрудников сюда не попадают.</p></article>
         <article class="dcard2"><h3>Пополнить баланс компании</h3>${topupHtml("co")}</article>
-        <article class="dcard2"><h3>Движение</h3>${b.history.length ? b.history.map((h) => `<div class="drun"><span>${esc(h.service)} · ${esc(fmtDate(h.at).slice(0, 10))}</span><span>${h.stars ? h.stars + " ⭐" : ""}${h.from_balance ? " + " + h.from_balance + " с баланса" : ""} · ${esc(h.status)}</span></div>`).join("") : '<p class="muted">Платежей пока нет.</p>'}</article>`;
+        <article class="dcard2"><h3>Движение</h3>${b.history.length ? b.history.map((h) => `<div class="drun"><span><b>${esc(h.service)}</b>${h.listing ? " · «" + esc(h.listing) + "»" : ""}<br><small class="muted">${esc(fmtDate(h.at))}</small></span><span>${h.stars ? h.stars + " ⭐" : ""}${h.from_balance ? (h.stars ? " + " : "") + h.from_balance + " ⭐ с баланса" : ""}<br><small class="muted">${esc({pending: "ожидает оплаты", paid: "оплачено", refunded: "возврат выполнен", failed: "ошибка", granted: "подарок", abandoned: "не оплачено"}[h.status] || h.status)}</small></span></div>`).join("") : '<p class="muted">Платежей пока нет.</p>'}</article>`;
     }
   } catch (err) { pane.innerHTML = `<div class="empty">${esc(err.message)}</div>`; }
 }
