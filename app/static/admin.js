@@ -170,6 +170,7 @@ async function loadDash() {
       <h3 style="margin-top:12px">Заработано звёзд по дням</h3>${bars(a.days, "stars")}<p class="muted">Итого за 30 дней: ${a.totals.stars} ⭐, откликов: ${a.totals.applications}</p></div>
     <div class="card"><h3>Воронка за всё время</h3><div class="funnel">
       <span>👁 просмотры <b>${f.views}</b></span><span>→ 💬 чаты <b>${f.chats}</b></span><span>→ 📨 отклики <b>${f.applications}</b></span><span>→ ⭐ оплаты <b>${f.paid}</b></span></div></div>
+    <div class="card"><h3>Откуда пришли (30 дней)</h3>${(a.sources || []).length ? `<table><tr><th>Метка</th><th>Людей</th></tr>${a.sources.map((x) => `<tr><td>${esc(x.source)}</td><td>${x.users}</td></tr>`).join("")}</table><p class="muted">Ссылка для рекламы: t.me/ИМЯ_БОТА?start=src_МЕТКА</p>` : '<p class="muted">Пока нет. Ссылка для рекламы: t.me/ИМЯ_БОТА?start=src_МЕТКА (латиница, цифры, _).</p>'}</div>
     <div class="card"><h3>Заработано по услугам (30 дней)</h3>${a.stars_by_service.length ? `<table><tr><th>Услуга</th><th>⭐</th></tr>${a.stars_by_service.map((x) => `<tr><td>${esc(x.service)}</td><td>${x.stars}</td></tr>`).join("")}</table>` : '<p class="muted">Продаж не было.</p>'}</div>
     <div class="card"><h3>Последние на проверке</h3>${queue.length ? `<table><tr><th>№</th><th>Раздел</th><th>Название</th><th>Город</th><th></th></tr>${queue.slice(0, 8).map((x) => `
       <tr data-id="${x.id}"><td>${x.id}</td><td>${esc(CAT[x.category] || x.category)}</td><td>${esc(x.title)}</td><td>${esc(x.city)}</td>

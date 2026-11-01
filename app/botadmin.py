@@ -308,6 +308,7 @@ def analytics_view(db: Session) -> Reply:
             f"Новых объявлений: {data['totals']['listings']} (за 7 дней: {sum(d['listings'] for d in week)})\n"
             f"Откликов: {data['totals']['applications']}\nЗаработано: {data['totals']['stars']} ⭐ (за 7 дней: {sum(d['stars'] for d in week)})\n\n"
             f"Воронка за всё время: просмотры {f['views']} → чаты {f['chats']} → отклики {f['applications']} → оплаты {f['paid']}\n"
+            + ("\nОткуда пришли (метки src_…):\n" + "\n".join(f"• {x['source']}: {x['users']}" for x in data["sources"][:8]) + "\n" if data["sources"] else "")
             + ("\nПо услугам:\n" + "\n".join(f"• {s['service']}: {s['stars']} ⭐" for s in data["stars_by_service"][:5]) if data["stars_by_service"] else ""))
     return Reply(text, [BACK])
 

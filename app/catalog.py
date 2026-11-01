@@ -207,6 +207,26 @@ def listing_detail(listing_id: int, request: Request, db: Session = Depends(get_
     return out.model_copy(update={"author": applications.author_card(db, item)})
 
 
+@router.get("/api/listings/{listing_id}/similar")
+def similar(listing_id: int, db: Session = Depends(get_db)):
+    """Up to 6 other published listings of the same category: same city first, then the same region."""
+    item = db.get(Listing, listing_id)
+    if item is None or item.status != "approved":
+        raise HTTPException(404, "Объявление не найдено или снято с публикации")
+    live = [Listing.status == "approved", Listing.id != item.id, Listing.category == item.category,
+            Listing.author_telegram_id != item.author_telegram_id,
+            or_(Listing.expires_at.is_(None), Listing.expires_at > now())]
+    same_city = db.scalars(select(Listing).where(*live, Listing.city_key == item.city_key)
+                           .order_by(Listing.id.desc()).limit(6)).all()
+    rows = list(same_city)
+    if len(rows) < 6 and item.region_code:
+        taken = [r.id for r in rows]
+        more = db.scalars(select(Listing).where(*live, Listing.region_code == item.region_code, Listing.id.not_in(taken or [0]))
+                          .order_by(Listing.id.desc()).limit(6 - len(rows))).all()
+        rows += list(more)
+    return with_promo(db, rows)
+
+
 @router.get("/api/authors/{listing_id}")
 def author_page(listing_id: int, db: Session = Depends(get_db)):
     """Everything one author offers right now. Found through one of their listings, so no Telegram ID is exposed."""

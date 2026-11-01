@@ -610,7 +610,17 @@ async function openDetail(id, push = true) {
       <button class="linkbtn" data-act="report">⚑ Пожаловаться</button>
     </article>`;
     showView("detail", {push});
+    loadSimilar(x.id);
   } catch (e) { toast(e.message); }
+}
+// «Похожие объявления»: подгружаются после основной карточки, ошибка не мешает читать объявление
+async function loadSimilar(id) {
+  try {
+    const rows = await api(`/api/listings/${id}/similar`, {quiet: true});
+    const body = $("#detailBody");
+    if (!rows.length || body.querySelector("article")?.dataset.id !== String(id)) return;
+    body.insertAdjacentHTML("beforeend", `<section class="similar"><h3 class="dsub">Похожие объявления</h3>${rows.map(listingCard).join("")}</section>`);
+  } catch (e) { /* не критично */ }
 }
 let botName = null;
 async function shareListing(id, title) {

@@ -159,3 +159,38 @@ def test_rate_limit_is_shared_through_the_database():
     except HTTPException as e:
         assert e.status_code == 429
     guard.rate_limit("u2", "shared", 3, 60)  # other user is unaffected
+
+
+def test_similar_listings_same_category_other_authors():
+    from fastapi.testclient import TestClient
+    from app.main import app
+    from app.database import SessionLocal
+    from app.models import Listing
+    from app.payments import now
+    import datetime as dt
+    reset_db()
+    with SessionLocal() as db:
+        def add(author, cat, city, status="approved"):
+            row = Listing(author_telegram_id=author, category=cat, title=f"{cat}-{author}", description="x" * 40, city=city,
+                          status=status, contact="c", expires_at=now() + dt.timedelta(days=5))
+            db.add(row); db.commit(); return row.id
+        base = add("1", "job", "Сеул")
+        same = add("2", "job", "Сеул")
+        add("3", "housing", "Сеул")           # other category
+        add("1", "job", "Сеул")               # same author
+        add("4", "job", "Сеул", "pending")    # not published
+        c = TestClient(app)
+        got = [r["id"] for r in c.get(f"/api/listings/{base}/similar").json()]
+        assert got == [same]
+        assert c.get("/api/listings/9999/similar").status_code == 404
+
+
+def test_start_source_tag_is_first_touch_and_counted():
+    from app import bot, adminx
+    from app.database import SessionLocal
+    reset_db()
+    bot._remember_source("77", "ads_may")
+    bot._remember_source("77", "other")        # second touch ignored
+    bot._remember_source("78", "bad tag!")     # junk ignored
+    with SessionLocal() as db:
+        assert adminx.analytics(db, 30)["sources"] == [{"source": "ads_may", "users": 1}]

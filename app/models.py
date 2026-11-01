@@ -450,3 +450,11 @@ class RateHit(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     bucket: Mapped[str] = mapped_column(String(120), index=True)
     at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, index=True)
+
+
+class ReferralSource(Base):
+    """Where a person first came from: the tag in t.me/<bot>?start=src_<tag> (first touch only)."""
+    __tablename__ = "referral_sources"
+    tg_id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    source: Mapped[str] = mapped_column(String(40), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

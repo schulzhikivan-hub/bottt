@@ -100,6 +100,18 @@ def moderate(listing_id: int, decision: str, reason: str = "") -> tuple[Listing 
         return item, ""
 
 
+def _remember_source(tg_id: str, tag: str) -> None:
+    """Advertising tag from the start link. Only the first one counts; junk is ignored."""
+    import re
+    from app.models import ReferralSource
+    if not re.fullmatch(r"[A-Za-z0-9_]{1,40}", tag):
+        return
+    with SessionLocal() as db:
+        if db.get(ReferralSource, tg_id) is None:
+            db.add(ReferralSource(tg_id=tg_id, source=tag))
+            db.commit()
+
+
 def register(dp: Dispatcher, bot: Bot) -> None:
     @dp.message(CommandStart(deep_link=True))
     async def start_deeplink(message: Message, command: CommandObject):
@@ -110,6 +122,8 @@ def register(dp: Dispatcher, bot: Bot) -> None:
                 view = botbrowse.single_view(db, int(arg[2:]))
             await botbrowse.send_view(bot, message.chat.id, view)
             return
+        if arg.startswith("src_"):
+            _remember_source(str(message.from_user.id), arg[4:])
         if not arg.startswith("login_"):
             await message.answer(WELCOME + "\nВыберите нужный раздел:",
                                  reply_markup=menu_markup(is_staff(message.from_user.id)))

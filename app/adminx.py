@@ -17,7 +17,7 @@ from app.admin_auth import staff, SUPPORT, MOD, ADM
 from app.audit import log_action
 from app.database import get_db
 from app.models import (Application, Article, Banner, Broadcast, BroadcastTarget, Conversation, Group, Listing, Message,
-                        Payment, Pricing, Report, SavedSearch, User)
+                        Payment, Pricing, ReferralSource, Report, SavedSearch, User)
 from app.payments import now, aware
 
 router = APIRouter()
@@ -448,7 +448,10 @@ def analytics(db: Session, days: int = 30) -> dict:
         "applications": db.scalar(select(func.count()).select_from(Application)) or 0,
         "paid": db.scalar(select(func.count()).select_from(Payment).where(Payment.status == "paid")) or 0,
     }
-    return {"days": [{"date": k, **v} for k, v in table.items()], "funnel": funnel,
+    sources = [{"source": src, "users": n} for src, n in db.execute(
+        select(ReferralSource.source, func.count()).where(ReferralSource.created_at >= start)
+        .group_by(ReferralSource.source).order_by(func.count().desc()).limit(20)).all()]
+    return {"days": [{"date": k, **v} for k, v in table.items()], "funnel": funnel, "sources": sources,
             "stars_by_service": sorted(({"service": s, "stars": n} for s, n in by_service.items()), key=lambda x: -x["stars"]),
             "totals": {"users": sum(v["users"] for v in table.values()), "listings": sum(v["listings"] for v in table.values()),
                        "applications": sum(v["applications"] for v in table.values()),
