@@ -1197,36 +1197,87 @@ $("#chatForm").onsubmit = async (e) => {
 
 // ---------- профиль ----------
 const STATUS_BADGE = (x) => `<span class="status ${STATUS[x.status]?.[1] || ""}">${STATUS[x.status]?.[0] || esc(x.status)}</span>`;
+// ---------- «Мои объявления»: в списке только суть, всё управление на странице объявления ----------
+function ownUntil(x) {
+  if (x.status !== "approved" || !x.expires_at) return "";
+  const days = Math.max(0, Math.ceil((new Date(x.expires_at) - Date.now()) / 864e5));
+  return `до ${fmtDate(x.expires_at).split(",")[0]} · ${days} дн.`;
+}
 function ownCard(x) {
-  const acts = [];
-  if (x.status === "draft") acts.push('<button data-own="submit">Отправить на проверку</button>');
-  if (["draft", "pending", "approved", "rejected", "needs_fix"].includes(x.status)) acts.push('<button data-own="edit" class="secondary">✏️ Изменить</button>');
-  if (x.category === "job" && x.applications?.total) acts.push(`<button data-own="applicants">📨 Отклики (${x.applications.total}${x.applications.new ? ", новых " + x.applications.new : ""})</button>`);
-  if (["approved", "expired"].includes(x.status)) acts.push('<button data-own="renew">🔄 Продлить</button>');
-  if (x.status === "approved") acts.push('<button data-own="stats" class="secondary">📊 Статистика</button>');
-  if (x.status === "approved") {
-    if (x.category === "marketplace") acts.push(`<button data-own="reserve" class="secondary">${x.reserved ? "Снять резерв" : "Зарезервировано"}</button>`);
-    acts.push('<button data-own="close" class="secondary">Закрыть</button>');
-    if (x.category === "marketplace") acts.push('<button data-own="sold" class="secondary">Продано</button>');
-    acts.push('<button data-own="promo">🚀 Продвинуть</button>');
-  }
-  if (["closed", "sold"].includes(x.status)) acts.push('<button data-own="reopen">Вернуть</button>');
-  if (["rejected", "needs_fix", "hidden"].includes(x.status)) acts.push('<button data-own="appeal" class="secondary">Оспорить решение</button>');
-  if (x.status === "approved" && x.price_amount) acts.push('<button data-own="price" class="secondary">⚡ Цена</button>');
-  if (x.status !== "draft" && x.status !== "archived") acts.push('<button data-own="history" class="secondary">🕘 История</button>');
-  if (x.status !== "archived") acts.push('<button data-own="dup" class="secondary">⧉ Копия</button>');
-  if (["draft", "pending", "approved", "rejected", "needs_fix"].includes(x.status)) acts.push('<button data-own="move" class="secondary">🔀 Перенести</button>');
-  if (x.status !== "archived") acts.push('<button data-own="archive" class="secondary">Удалить</button>');
+  const until = ownUntil(x);
+  const stats = x.status === "approved" ? `<span>👁 ${x.views || 0}</span>${x.applications?.total ? `<span>📨 ${x.applications.total}${x.applications.new ? ` (+${x.applications.new})` : ""}</span>` : ""}` : "";
+  const flag = x.has_edit ? '<span class="chipnote">правка на проверке</span>' : "";
+  return `<article class="listing ocard" data-id="${x.id}" data-cat="${x.category}" data-ownopen="${x.id}">${bulkMode ? `<label class="bulkck"><input type="checkbox" data-bulk="${x.id}"> выбрать</label>` : ""}
+    <div class="ocard-row">${x.cover ? `<img class="othumb" src="${esc(x.cover)}" alt="" loading="lazy">` : `<div class="othumb ph">${{job: "💼", housing: "🏠"}[x.category] || "🛍️"}</div>`}
+      <div class="obody"><h3>${esc(x.title)}</h3>
+        <div class="meta">📍 ${esc(x.city)}</div><div class="price">${esc(priceText(x))}</div>
+        <div class="ometa">${STATUS_BADGE(x)}${until ? `<span>⏳ ${esc(until)}</span>` : ""}${stats}${flag}</div></div><span class="ochev">›</span></div></article>`;
+}
+function ownActions(x) {
+  const groups = [], add = (g, html) => { (groups[g] = groups[g] || []).push(html); };
+  if (x.status === "draft") add(0, '<button data-own="submit">Отправить на проверку</button>');
+  if (["draft", "pending", "approved", "rejected", "needs_fix"].includes(x.status)) add(0, '<button data-own="edit">✏️ Изменить</button>');
+  if (x.status === "approved") add(0, '<button data-own="promo" class="promo-btn">🚀 Продвинуть</button>');
+  if (x.category === "job" && x.applications?.total) add(0, `<button data-own="applicants" class="secondary">📨 Отклики (${x.applications.total}${x.applications.new ? ", новых " + x.applications.new : ""})</button>`);
+  if (x.status === "approved" && x.price_amount) add(1, '<button data-own="price" class="secondary">⚡ Цена</button>');
+  if (["approved", "expired"].includes(x.status)) add(1, '<button data-own="renew" class="secondary">🔄 Продлить</button>');
+  if (x.status === "approved" && x.category === "marketplace") add(1, `<button data-own="reserve" class="secondary">${x.reserved ? "Снять резерв" : "Зарезервировано"}</button>`);
+  if (x.status !== "archived") add(2, '<button data-own="dup" class="secondary">⧉ Копия</button>');
+  if (["draft", "pending", "approved", "rejected", "needs_fix"].includes(x.status)) add(2, '<button data-own="move" class="secondary">🔀 Перенести</button>');
+  if (x.status === "approved") add(3, '<button data-own="close" class="secondary">Закрыть</button>');
+  if (x.status === "approved" && x.category === "marketplace") add(3, '<button data-own="sold" class="secondary">Продано</button>');
+  if (["closed", "sold"].includes(x.status)) add(3, '<button data-own="reopen" class="secondary">Вернуть</button>');
+  if (["rejected", "needs_fix", "hidden"].includes(x.status)) add(3, '<button data-own="appeal" class="secondary">Оспорить решение</button>');
+  if (x.status !== "archived") add(3, '<button data-own="archive" class="secondary danger-btn">Удалить</button>');
+  const titles = ["Главное", "Цена и срок", "Копии", "Статус"];
+  return groups.map((g, i) => g ? `<div class="ogroup"><h4 class="grp">${titles[i]}</h4><div class="actions">${g.join("")}</div></div>` : "").join("");
+}
+let ownPageId = null;
+async function showOwnPage(id, refresh) {
+  const x = ownItems[id];
+  if (!x) return;
+  ownPageId = id;
+  SUB_TITLES.own = "Объявление";
+  if (!refresh) openSub("own");
+  const body = $("#subBody");
+  const until = ownUntil(x);
+  const runs = (x.placements || []).map((p) => `${PROMO[p.kind] || p.kind} до ${fmtDate(p.ends_at).split(",")[0]}`).join(" · ");
   const note = x.note ? `<p class="note">Комментарий модератора: ${esc(x.note)}</p>` : "";
   const edit = x.has_edit ? '<p class="muted">Правка на проверке — пока видна прежняя версия</p>' : "";
-  const until = x.status === "approved" && x.expires_at ? ` · до ${esc(fmtDate(x.expires_at).split(",")[0])}` : "";
-  const runs = (x.placements || []).map((p) => `${(PROMO[p.kind] || p.kind)} до ${fmtDate(p.ends_at).split(",")[0]}`).join(" · ");
-  const meta = x.status === "approved" ? `<p class="meta-line">👁 ${x.views || 0}${until}</p>${runs ? `<p class="meta-line">🚀 ${esc(runs)}</p>` : ""}` : "";
-  return `<article class="listing" data-id="${x.id}" data-cat="${x.category}">${bulkMode ? `<label class="bulkck"><input type="checkbox" data-bulk="${x.id}"> выбрать</label>` : ""}
-    ${x.cover ? `<img class="cover" src="${esc(x.cover)}" alt="" loading="lazy">` : ""}
-    <div class="listing-top"><div><h3>${esc(x.title)}</h3><div class="meta">📍 ${esc(x.city)}</div></div>${STATUS_BADGE(x)}</div>
-    <div class="price">${esc(priceText(x))}</div>${meta}${edit}${note}
-    <div class="actions">${acts.join("")}</div></article>`;
+  body.innerHTML = `<div class="ownpage" data-id="${x.id}" data-cat="${x.category}">
+    <article class="dcard2 ohead">${x.cover ? `<img class="ocover" src="${esc(x.cover)}" alt="">` : ""}
+      <div class="listing-top"><h3>${esc(x.title)}</h3>${STATUS_BADGE(x)}</div>
+      <div class="meta">📍 ${esc(x.city)}</div><div class="price">${esc(priceText(x))}</div>
+      ${until ? `<p class="meta-line">⏳ Показывается ${esc(until)}</p>` : ""}${runs ? `<p class="meta-line">🚀 ${esc(runs)}</p>` : ""}${edit}${note}
+      <div class="actions"><button class="secondary" data-open="${x.id}">👁 Как видят люди</button></div></article>
+    <div id="ownStats">${x.status === "approved" ? '<div class="skeleton"></div>' : ""}</div>${ownActions(x)}
+    <div class="ogroup"><h4 class="grp">История</h4><div id="ownHist" class="menu-list"><div class="skeleton"></div></div></div></div>`;
+  if (x.status === "approved") {
+    try { $("#ownStats").innerHTML = ownStatsHtml(await api(`/api/listings/${id}/stats`), x); } catch (e) { $("#ownStats").innerHTML = ""; }
+  }
+  if (x.status === "draft") { $("#ownHist").parentElement.remove(); return; }
+  try {
+    const rows = await api(`/api/listings/${id}/history`);
+    $("#ownHist").innerHTML = rows.map((r) => `<div class="hist"><b>${esc(r.what)}</b><small class="muted">${esc(fmtDate(r.at))}${r.details ? " · " + esc(r.details) : ""}</small></div>`).join("");
+  } catch (e) { $("#ownHist").innerHTML = ""; }
+}
+function ownStatsHtml(st, x) {
+  const d = st.daily || [], peak = Math.max(1, ...d.map((v) => v.views)), total = d.reduce((n, v) => n + v.views, 0);
+  const best = d.reduce((m, v) => (v.views > m.views ? v : m), {views: 0, day: ""});
+  const reply = x.category === "job" ? st.applications + st.chats : st.chats;
+  const pct = (n) => (st.views ? Math.round(1000 * n / st.views) / 10 : 0);
+  const day = (iso) => new Date(iso).toLocaleDateString("ru-RU", {day: "numeric", month: "short"});
+  return `<div class="kpis"><div><b>${st.views}</b><small>Просмотров</small></div><div><b>${st.favorites}</b><small>В избранном</small></div>
+      <div><b>${reply}</b><small>${x.category === "job" ? "Откликов и чатов" : "Чатов"}</small></div><div><b>${st.conversion}%</b><small>Конверсия</small></div></div>
+    <article class="dcard2"><div class="dcard2-head"><h3>Просмотры за 14 дней</h3><span class="muted">${total}</span></div>
+      ${total ? "" : '<p class="muted">Пока никто не смотрел: просмотры появятся здесь по дням.</p>'}
+      <div class="chart">${d.map((v) => `<div class="bar" title="${esc(day(v.day))}: ${v.views}"><i style="height:${Math.max(3, Math.round(100 * v.views / peak))}%"></i>${v.views ? `<em>${v.views}</em>` : ""}</div>`).join("")}</div>
+      <div class="chart-axis"><span>${d.length ? esc(day(d[0].day)) : ""}</span><span>${d.length ? esc(day(d[d.length - 1].day)) : ""}</span></div>
+      <p class="muted">${best.views ? `Лучший день: ${esc(day(best.day))} (${best.views}) · ` : ""}в среднем ${(total / Math.max(1, d.length)).toFixed(1)} в день</p></article>
+    <article class="dcard2"><h3>Путь человека</h3>
+      ${[["👁 Просмотры", st.views, 100], ["♥ Сохранили", st.favorites, pct(st.favorites)], [x.category === "job" ? "📨 Откликнулись или написали" : "💬 Написали", reply, pct(reply)]]
+        .map(([t, n, p]) => `<div class="fun"><span>${t}</span><b>${n}${st.views && p !== 100 ? ` · ${p}%` : ""}</b><div class="fw-bar"><i style="width:${Math.min(100, p)}%"></i></div></div>`).join("")}</article>
+    ${st.advice.map((t) => `<p class="note">💡 ${esc(t)}</p>`).join("")}`;
 }
 const OWN_GROUPS = {active: ["approved"], review: ["pending", "needs_fix", "rejected"], draft: ["draft"],
                     closed: ["closed", "sold", "expired", "hidden"]};
@@ -1234,6 +1285,9 @@ function renderOwn() {
   const visible = mineAll.filter((x) => x.status !== "archived" && (ownFilter === "all" || OWN_GROUPS[ownFilter].includes(x.status)));
   $("#myListings").innerHTML = visible.length ? visible.map(ownCard).join("")
     : `<div class="empty">${mineAll.length ? "В этом разделе пока пусто" : "Вы ещё не публиковали объявления. Нажмите «+» внизу."}</div>`;
+  if (currentView === "sub" && currentSubKey === "own" && ownPageId) {          // страница объявления обновляется после действий
+    if (!ownItems[ownPageId] || ownItems[ownPageId].status === "archived") goBack(); else showOwnPage(ownPageId, true);
+  }
 }
 document.querySelectorAll("[data-own-filter]").forEach((b) => b.onclick = () => {
   ownFilter = b.dataset.ownFilter;
@@ -2839,6 +2893,8 @@ document.addEventListener("click", async (e) => {
   }
   const tk = e.target.closest("[data-ticket]");
   if (tk) { try { await openTicket(tk.dataset.ticket); } catch (err) { toast(err.message); } return; }
+  const oc = e.target.closest("[data-ownopen]");
+  if (oc && !e.target.closest("[data-own], [data-bulk], .bulkck")) { if (!bulkMode) showOwnPage(oc.dataset.ownopen); return; }
   const own = e.target.closest("[data-own]");
   if (own) {
     const cardEl = own.closest("[data-id]");

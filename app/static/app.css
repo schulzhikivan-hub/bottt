@@ -722,3 +722,33 @@ img.co-ava{object-fit:cover}
 .spark{display:flex;align-items:flex-end;gap:3px;height:38px;margin:6px 0}
 .spark i{flex:1;background:var(--accent);opacity:.75;border-radius:3px 3px 0 0;min-height:4px}
 .hist{display:grid;gap:2px;padding:10px 14px;border-bottom:1px solid var(--border)}
+
+/* список «Мои объявления» и страница объявления */
+.ocard{cursor:pointer}
+.ocard-row{display:flex;gap:12px;align-items:center}
+.othumb{flex:none;width:68px;height:68px;border-radius:12px;object-fit:cover;background:var(--soft);display:grid;place-items:center;font-size:28px}
+.obody{flex:1;min-width:0}
+.obody h3{margin:0;font-size:15px}
+.ometa{display:flex;gap:10px;flex-wrap:wrap;color:var(--hint);font-size:12.5px;margin-top:4px}
+.chipnote{background:#fff3d6;color:#7a5600;border-radius:999px;padding:0 8px}
+.ochev{color:var(--hint);font-size:22px}
+.ownpage{display:grid;gap:12px}
+.ocover{width:100%;max-height:180px;object-fit:cover;border-radius:12px;margin-bottom:8px}
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.kpis div{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:10px 4px;text-align:center}
+.kpis b{display:block;font-size:19px}
+.kpis small{color:var(--hint);font-size:11px}
+.chart{display:flex;align-items:flex-end;gap:4px;height:96px;margin:10px 0 4px}
+.chart .bar{flex:1;height:100%;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;position:relative}
+.chart .bar i{display:block;width:100%;background:var(--accent);opacity:.8;border-radius:4px 4px 0 0}
+.chart .bar em{position:absolute;top:-2px;font-style:normal;font-size:10px;color:var(--hint)}
+.chart-axis{display:flex;justify-content:space-between;font-size:11px;color:var(--hint)}
+.fun{display:grid;grid-template-columns:1fr auto;gap:2px 8px;margin:8px 0;font-size:14px}
+.fun .fw-bar{grid-column:1/-1;margin:2px 0}
+.ogroup .actions{display:flex;flex-wrap:wrap;gap:8px}
+.promo-btn{background:linear-gradient(120deg,#e8910c,#f2b705);color:#1b2540}
+.danger-btn{color:var(--bad)}
+
+.ometa{align-items:center}
+.ogroup .actions button{flex:1 1 calc(33% - 8px);white-space:normal;min-width:0}
+.ogroup .actions button:only-child{flex-basis:100%}
