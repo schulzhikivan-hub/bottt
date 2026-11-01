@@ -6,7 +6,7 @@ import io
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from app import catalog, company
@@ -165,6 +165,7 @@ def quick_price(listing_id: int, payload: PriceIn, user_id: str = Depends(writer
         AuditLog.action == "listing.price", AuditLog.object_id == str(item.id), AuditLog.created_at >= today)) or 0
     if done >= MAX_PRICE_CHANGES_PER_DAY:
         raise HTTPException(429, "Сегодня цену уже меняли три раза. Попробуйте завтра")
+    snapshot(db, item, "Перед сменой цены", user_id)
     item.price_amount = new
     log_action(db, user_id, "listing.price", "listing", item.id, f"{old} → {new}")
     db.commit()
@@ -193,6 +194,9 @@ def history(listing_id: int, user_id: str = Depends(writer), db: Session = Depen
     for r in db.scalars(select(AuditLog).where(AuditLog.object_type == "listing", AuditLog.object_id == str(item.id),
                                                AuditLog.action.in_(list(HISTORY_LABELS))).order_by(AuditLog.id)).all():
         events.append({"at": r.created_at.isoformat(), "what": HISTORY_LABELS[r.action], "details": r.details if r.action in SHOW_DETAILS else ""})
+    for v in db.scalars(select(ListingVersion).where(ListingVersion.listing_id == item.id).order_by(ListingVersion.id)).all():
+        events.append({"at": v.at.isoformat(), "what": "Версия до изменения", "details": v.why, "version_id": v.id,
+                       "preview": f"{v.data.get('title', '')} · {v.data.get('price_amount') or ''}"})
     events.sort(key=lambda e: e["at"], reverse=True)
     return events
 
@@ -210,3 +214,84 @@ def unread_messages(user_id: str = Depends(writer), db: Session = Depends(get_db
     hides = {h.conv_id: h.at for h in db.scalars(select(ConvHide).where(ConvHide.user_tg_id == user_id)).all()}
     n = sum(c for cid, c, last in rows if cid not in hides or aware(last) > aware(hides[cid]))      # a chat I hid does not light up
     return {"messages": int(n)}
+
+
+# ---------- versions: what the listing looked like before an edit, and a way back ----------
+from sqlalchemy import JSON, DateTime, Integer, String          # noqa: E402
+from sqlalchemy.orm import Mapped, mapped_column                # noqa: E402
+
+from app.database import Base                                   # noqa: E402
+
+VERSION_FIELDS = ("title", "description", "contact", "price", "price_amount", "city", "region_code", "district_id", "salary_period",
+                  "visas", "employment", "schedule", "housing_provided", "meals_provided", "rooms", "condition", "housing_type", "deposit",
+                  "area_m2", "pets_allowed", "furnished", "goods_category", "negotiable", "details")
+MAX_VERSIONS = 15
+
+
+class ListingVersion(Base):
+    __tablename__ = "listing_versions"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    listing_id: Mapped[int] = mapped_column(Integer, index=True)
+    at: Mapped[object] = mapped_column(DateTime(timezone=True), default=now)
+    by: Mapped[str] = mapped_column(String(40), default="")
+    why: Mapped[str] = mapped_column(String(60), default="")
+    data: Mapped[dict] = mapped_column(JSON)
+
+
+def snapshot(db: Session, item: Listing, why: str, by: str) -> None:
+    """Remember the listing as it is NOW (call before changing it). Only the last MAX_VERSIONS are kept."""
+    db.add(ListingVersion(listing_id=item.id, by=by, why=why, data={f: getattr(item, f) for f in VERSION_FIELDS}))
+    db.flush()
+    old = db.scalars(select(ListingVersion.id).where(ListingVersion.listing_id == item.id).order_by(ListingVersion.id.desc()).offset(MAX_VERSIONS)).all()
+    if old:
+        db.execute(delete(ListingVersion).where(ListingVersion.id.in_(old)))
+
+
+@router.post("/api/listings/{listing_id}/restore/{version_id}", response_model=ListingOut)
+def restore(listing_id: int, version_id: int, user_id: str = Depends(writer), db: Session = Depends(get_db)):
+    """Bring back an older version. It goes through the same rules as any edit: small things at once, text and price via moderation."""
+    from app import lifecycle
+    from app.manage import EDITABLE
+    item = _manageable(db, listing_id, user_id)
+    v = db.get(ListingVersion, version_id)
+    if v is None or v.listing_id != item.id:
+        raise HTTPException(404, "Версия не найдена")
+    if item.status not in EDITABLE:
+        raise HTTPException(409, "Это объявление сейчас нельзя изменить")
+    changes = {f: val for f, val in v.data.items() if getattr(item, f) != val}
+    if not changes:
+        raise HTTPException(409, "Это уже текущая версия")
+    snapshot(db, item, "Перед возвратом версии", user_id)
+    lifecycle.edit(db, item, changes)
+    log_action(db, user_id, "listing.restore", "listing", item.id, f"версия #{version_id}")
+    db.commit()
+    db.refresh(item)
+    return catalog.with_promo(db, [item], owner=True)[0]
+
+
+# ---------- price hint: what similar listings cost ----------
+@router.get("/api/price-hint")
+def price_hint(category: str, region_code: str | None = None, employment: str | None = None, housing_type: str | None = None,
+               goods_category: str | None = None, db: Session = Depends(get_db)):
+    """The middle of the prices of similar published listings (a quarter cheaper, the median, a quarter more expensive).
+    Narrow search first (same region and kind); if there are too few, the whole category."""
+    def prices(*extra):
+        stmt = select(Listing.price_amount).where(Listing.status == "approved", Listing.category == category, Listing.price_amount.is_not(None),
+                                                  Listing.price_amount > 0, *extra)
+        return sorted(db.scalars(stmt.limit(500)).all())
+    narrow = []
+    if region_code:
+        narrow.append(Listing.region_code == region_code)
+    if category == "job" and employment:
+        narrow.append(Listing.employment == employment)
+    if category == "housing" and housing_type:
+        narrow.append(Listing.housing_type == housing_type)
+    if category == "marketplace" and goods_category:
+        narrow.append(Listing.goods_category == goods_category)
+    rows, scope = (prices(*narrow), "похожим в вашем регионе") if narrow else ([], "")
+    if len(rows) < 5:
+        rows, scope = prices(), "объявлениям этого раздела"
+    if len(rows) < 5:
+        return {"n": len(rows), "hint": None}
+    q = lambda p: rows[min(len(rows) - 1, int(p * (len(rows) - 1) + 0.5))]   # noqa: E731
+    return {"n": len(rows), "scope": scope, "hint": {"low": q(0.25), "median": q(0.5), "high": q(0.75)}}

@@ -773,3 +773,6 @@ img.co-ava{object-fit:cover}
 .qown{display:inline-flex;align-items:center}
 .qdel{border:0;background:none;color:var(--hint);font-size:16px;padding:0 6px}
 .qadd{border-style:dashed !important;color:var(--accent)}
+
+.pricehint{background:#fff8e1;color:#5c4400;border-radius:12px;padding:10px 12px;font-size:13px;line-height:1.35;margin:6px 0}
+.hist button{margin-top:6px;justify-self:start}

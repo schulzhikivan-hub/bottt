@@ -87,3 +87,22 @@ def test_search_relevance_puts_title_matches_first_and_finds_by_company_name(cli
     r = client.get("/api/catalog?q=сварщик&sort=relevance").json()["items"]
     assert [x["id"] for x in r][:2] == [b, a]                                                 # in the title beats in the text
     assert client.get("/api/catalog?q=сварщик&sort=relevance&limit=1&offset=1").json()["items"][0]["id"] == a
+
+
+def test_versions_restore_and_price_hint(client):
+    lid = make(client, title="Велосипед", description="Первое описание")
+    client.put(f"/api/listings/{lid}", json={"title": "Велосипед горный", "description": "Второе описание подлиннее"}, headers=as_user(1))   # goes to moderation
+    h = client.get(f"/api/listings/{lid}/history", headers=as_user(1)).json()
+    versions = [e for e in h if e.get("version_id")]
+    assert len(versions) == 1 and "Велосипед" in versions[0]["preview"]
+    assert client.post(f"/api/listings/{lid}/restore/{versions[0]['version_id']}", headers=as_user(2)).status_code == 404
+    r = client.post(f"/api/listings/{lid}/restore/{versions[0]['version_id']}", headers=as_user(1))
+    assert r.status_code == 200
+    assert client.post(f"/api/listings/{lid}/restore/9999", headers=as_user(1)).status_code == 404
+    assert len([e for e in client.get(f"/api/listings/{lid}/history", headers=as_user(1)).json() if e.get("version_id")]) == 2    # the state before the return is kept too
+    # price hint: needs five similar listings
+    assert client.get("/api/price-hint?category=marketplace").json()["hint"] is None
+    for i, price in enumerate((100000, 120000, 140000, 160000, 180000)):
+        make(client, title=f"Товар {i}", price_amount=price)
+    hint = client.get("/api/price-hint?category=marketplace").json()
+    assert hint["n"] >= 5 and hint["hint"]["low"] <= hint["hint"]["median"] <= hint["hint"]["high"]

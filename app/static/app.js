@@ -1292,7 +1292,7 @@ async function showOwnPage(id, refresh) {
   if (x.status === "draft") { $("#ownHist").parentElement.remove(); return; }
   try {
     const rows = await api(`/api/listings/${id}/history`);
-    $("#ownHist").innerHTML = rows.map((r) => `<div class="hist"><b>${esc(r.what)}</b><small class="muted">${esc(fmtDate(r.at))}${r.details ? " · " + esc(r.details) : ""}</small></div>`).join("");
+    $("#ownHist").innerHTML = rows.map((r) => `<div class="hist"><b>${esc(r.what)}</b><small class="muted">${esc(fmtDate(r.at))}${r.details ? " · " + esc(r.details) : ""}${r.preview ? "<br>" + esc(r.preview) : ""}</small>${r.version_id ? `<button class="secondary" data-restore="${r.version_id}">↩ Вернуть эту версию</button>` : ""}</div>`).join("");
   } catch (e) { $("#ownHist").innerHTML = ""; }
 }
 function ownStatsHtml(st, x) {
@@ -3395,3 +3395,39 @@ async function refreshNavBadge() {
 setTimeout(refreshNavBadge, 2500);
 setInterval(refreshNavBadge, 60000);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshNavBadge(); });
+
+document.addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-restore]");
+  if (!b) return;
+  try {
+    if (!(await confirmDialog("Вернуть эту версию? Текст и цену сначала проверит модератор, пока видна текущая."))) return;
+    const r = await api(`/api/listings/${ownPageId}/restore/${b.dataset.restore}`, {method: "POST"});
+    toast(r.has_edit ? "Версия отправлена на проверку" : "Версия возвращена");
+    homeLoaded = false; loadProfile();
+  } catch (err) { toast(err.message); }
+});
+// ---------- подсказка цены: сколько стоят похожие объявления ----------
+let hintTimer = null;
+function priceHint() {
+  clearTimeout(hintTimer);
+  hintTimer = setTimeout(async () => {
+    const f = $("#listingForm"), box = $("#priceHint");
+    if (!box || !f) return;
+    const category = KIND_CATEGORY[formKind];
+    const q = new URLSearchParams({category});
+    if (f.region_code.value) q.set("region_code", f.region_code.value);
+    if (category === "job" && f.employment.value) q.set("employment", f.employment.value);
+    if (category === "housing" && f.housing_type.value) q.set("housing_type", f.housing_type.value);
+    if (category === "marketplace" && f.goods_category.value) q.set("goods_category", f.goods_category.value);
+    try {
+      const r = await api("/api/price-hint?" + q, {quiet: true});
+      if (!r.hint) { box.hidden = true; return; }
+      const mine = Number(f.price_amount.value) || 0, h = r.hint;
+      const verdict = !mine ? "" : mine < h.low ? " Ваша цена ниже обычной: быстрее найдут, но проверьте, не прогадаете ли." : mine > h.high ? " Ваша цена выше обычной: откликов может быть меньше." : " Ваша цена в обычном диапазоне.";
+      box.hidden = false;
+      box.textContent = `💡 По ${r.scope}: обычно ${fmtKRW(h.low)} – ${fmtKRW(h.high)}, середина ${fmtKRW(h.median)} (${r.n} объявлений).${verdict}`;
+    } catch (err) { box.hidden = true; }
+  }, 500);
+}
+document.addEventListener("input", (e) => { if (e.target.closest("#listingForm") && ["price_amount", "employment", "housing_type", "goods_category"].includes(e.target.name)) priceHint(); });
+document.addEventListener("change", (e) => { if (e.target.closest("#listingForm") && ["region_code", "employment", "housing_type", "goods_category"].includes(e.target.name)) priceHint(); });

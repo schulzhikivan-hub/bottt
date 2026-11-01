@@ -82,6 +82,9 @@ def edit_listing(listing_id: int, payload: ListingEdit, user_id: str = Depends(w
             raise HTTPException(400, "Выберите город или район из списка. Сайт только для Южной Кореи")
         changes.update(city=place.label, region_code=place.region_code, district_id=place.district_id)
     # A published listing stays visible: small changes apply at once, important ones wait for a moderator
+    if item.status != "draft":
+        from app import listingtools
+        listingtools.snapshot(db, item, "Перед правкой автора", user_id)      # a way back to what it was
     lifecycle.edit(db, item, changes)
     db.commit()
     db.refresh(item)
