@@ -107,9 +107,9 @@ def test_sympathies_collect_during_a_pause_and_wait(client):
     p1, p2 = make(client, 1), make(client, 2, "m")
     client.post(f"/api/dating/{p1}/like", headers=as_user(2))          # 2 likes 1 first
     client.post("/api/dating/pause", json={"on": True}, headers=as_user(1))
-    assert client.get("/api/dating/counts", headers=as_user(1)).json()["to_me"] == 0            # not shown during the pause
+    assert client.get("/api/dating/counts", headers=as_user(1)).json()["to_me"] == 1            # they are kept during the pause
     client.post("/api/dating/pause", json={"on": False}, headers=as_user(1))
-    assert feed(client, 1, "mode=to_me") == [p2]                                               # but nothing was lost
+    assert feed(client, 1, "mode=to_me") == [p2]                                               # nothing was lost
 
 
 def test_invisible_profile_is_in_no_list_but_opens_by_link_and_can_like(client):
