@@ -8,6 +8,7 @@ from app.fields import (VisaCode, Employment, Schedule, SalaryPeriod, HousingTyp
 
 CATEGORIES = {"job", "housing", "marketplace"}
 MAX_ACTIVE_PER_CATEGORY = 5
+EMPLOYER_ACTIVE_JOBS = 30        # a verified employer may keep this many vacancies at once
 
 
 class ListingCreate(BaseModel):

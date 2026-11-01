@@ -861,14 +861,23 @@ document.addEventListener("click", (e) => {
   openSub("compare");
   $("#subBody").innerHTML = `<article class="listing"><table class="cmptable">${rows.map(([n, f]) => `<tr><th>${esc(n)}</th>${xs.map((x) => `<td>${esc(String(f(x) ?? ""))}</td>`).join("")}</tr>`).join("")}</table></article>`;
 });
+let favTab = "";
+document.addEventListener("click", (e) => {
+  const t = e.target.closest("[data-ftab]");
+  if (!t) return;
+  favTab = t.dataset.ftab;
+  document.querySelectorAll("#favTabs .chip").forEach((c) => c.classList.toggle("active", c === t));
+  loadFavorites();
+});
 async function loadFavorites() {
   const box = $("#favorites");
   try {
-    const items = await api("/api/favorites");
-    favIds = new Set(items.map((x) => x.id));
+    const all = await api("/api/favorites");
+    const items = favTab ? all.filter((x) => x.category === favTab) : all;
+    favIds = new Set(all.map((x) => x.id));
     cmpItems = Object.fromEntries(items.map((x) => [x.id, x]));
     box.innerHTML = items.length ? items.map(listingCard).join("") + (items.length > 1 ? '<div class="cmpbar"><button id="cmpGo" hidden>⚖ Сравнить (<span id="cmpN">0</span>)</button></div>' : "")
-      : '<div class="empty">Здесь будут объявления, которые вы сохранили ♡</div>';
+      : `<div class="empty">${favTab ? "В этом разделе ничего не сохранено" : "Здесь будут объявления, которые вы сохранили ♡"}</div>`;
     if (items.length > 1) box.querySelectorAll("article.listing").forEach((a) => a.insertAdjacentHTML("beforeend", `<label class="cmp"><input type="checkbox" data-cmp="${a.dataset.id}"> сравнить</label>`));
   } catch (e) { box.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
 }

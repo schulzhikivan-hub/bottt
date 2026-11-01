@@ -20,7 +20,7 @@ from app.models import (
 )
 from app.schemas import (
     ListingCreate, ListingOut, MessageIn, MessageOut, ConversationOut,
-    CATEGORIES, MAX_ACTIVE_PER_CATEGORY,
+    CATEGORIES, EMPLOYER_ACTIVE_JOBS, MAX_ACTIVE_PER_CATEGORY,
 )
 from app.seed import seed_reference
 from app.admin_auth import router as admin_auth_router, bootstrap_admins
@@ -363,8 +363,10 @@ def create_listing(payload: ListingCreate, user_id: str = Depends(writer), db: S
             Listing.status.in_(["draft", "pending", "approved"]),
         )
     )
-    if active >= MAX_ACTIVE_PER_CATEGORY:
-        raise HTTPException(409, f"Лимит: не больше {MAX_ACTIVE_PER_CATEGORY} активных объявлений в разделе")
+    me_row = db.get(User, user_id)
+    limit = EMPLOYER_ACTIVE_JOBS if payload.category == "job" and me_row is not None and me_row.employer_status == "approved" else MAX_ACTIVE_PER_CATEGORY
+    if active >= limit:
+        raise HTTPException(409, f"Лимит: не больше {limit} активных объявлений в разделе")
     data = catalog.clean_extras(payload.category, payload.model_dump(exclude={"city", "region_code", "district_id", "draft"}))
     item = Listing(**data, city=place.label, region_code=place.region_code, district_id=place.district_id,
                    author_telegram_id=user_id, status="draft" if payload.draft else "pending")

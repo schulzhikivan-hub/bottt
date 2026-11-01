@@ -63,3 +63,15 @@ def test_old_article_is_marked_stale(client):
         db.commit()
     rows = {a["title"]: a["stale"] for a in client.get("/api/articles").json()}
     assert rows == {"Старая": True, "Свежая": False}
+
+
+def test_verified_employer_may_keep_thirty_vacancies(client):
+    from app.models import User
+    body = {"category": "job", "title": "Повар", "city": "Сеул", "description": "ok", "contact": ""}
+    for i in range(5):
+        assert client.post("/api/listings", json=body, headers=as_user(1)).status_code == 201
+    assert client.post("/api/listings", json=body, headers=as_user(1)).status_code == 409
+    with SessionLocal() as db:
+        db.get(User, "1").employer_status = "approved"
+        db.commit()
+    assert client.post("/api/listings", json=body, headers=as_user(1)).status_code == 201
