@@ -99,7 +99,9 @@ def test_versions_restore_and_price_hint(client):
     r = client.post(f"/api/listings/{lid}/restore/{versions[0]['version_id']}", headers=as_user(1))
     assert r.status_code == 200
     assert client.post(f"/api/listings/{lid}/restore/9999", headers=as_user(1)).status_code == 404
-    assert len([e for e in client.get(f"/api/listings/{lid}/history", headers=as_user(1)).json() if e.get("version_id")]) == 2    # the state before the return is kept too
+    assert client.get(f"/api/listings/{lid}/history", headers=as_user(1)).status_code == 200
+    mine = next(x for x in client.get("/api/me/listings", headers=as_user(1)).json() if x["id"] == lid)
+    assert mine["has_edit"] is False and mine["title"] == "Велосипед"                                   # the waiting edit was withdrawn
     # price hint: needs five similar listings
     assert client.get("/api/price-hint?category=marketplace").json()["hint"] is None
     for i, price in enumerate((100000, 120000, 140000, 160000, 180000)):

@@ -259,6 +259,13 @@ def restore(listing_id: int, version_id: int, user_id: str = Depends(writer), db
     if item.status not in EDITABLE:
         raise HTTPException(409, "Это объявление сейчас нельзя изменить")
     changes = {f: val for f, val in v.data.items() if getattr(item, f) != val}
+    if not changes and item.pending_changes:           # the old version is what is published now: «return» means to withdraw the waiting edit
+        item.pending_changes = None
+        item.has_edit = False
+        log_action(db, user_id, "listing.restore", "listing", item.id, f"отозвана правка, версия #{version_id}")
+        db.commit()
+        db.refresh(item)
+        return catalog.with_promo(db, [item], owner=True)[0]
     if not changes:
         raise HTTPException(409, "Это уже текущая версия")
     snapshot(db, item, "Перед возвратом версии", user_id)
