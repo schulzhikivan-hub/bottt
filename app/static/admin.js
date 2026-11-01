@@ -85,56 +85,62 @@ const MOD = ["moderator", "admin", "super_admin"];
 const ADM = ["admin", "super_admin"];
 const FIN = ["accountant", "admin", "super_admin"];
 const SUP = ["super_admin"];
-const TABS = [
-  {key: "dash", label: "📊 Главная", roles: ADM, title: "Главная"},
-  {key: "batches", label: "🧰 Пакеты", roles: MOD, title: "Массовые действия: посчитать, подтвердить, следить, отменить"},
-  {key: "listings", label: "📋 Модерация", roles: MOD, title: "Очередь модерации"},
-  {key: "jobs", label: "💼 Вакансии", roles: MOD, title: "Вакансии", cat: "job"},
-  {key: "housing", label: "🏠 Жильё", roles: MOD, title: "Жильё", cat: "housing"},
-  {key: "market", label: "🛍 Барахолка", roles: MOD, title: "Барахолка, авто, услуги", cat: "marketplace"},
-  {key: "dating", label: "💗 Знакомства", roles: MOD, title: "Анкеты знакомств"},
-  {key: "companies", label: "🏬 Компании", roles: MOD, title: "Компании: проверка, приостановка, баланс"},
-  {key: "employers", label: "🏢 Работодатели", roles: MOD, title: "Заявки работодателей"},
-  {key: "support", label: "💬 Поддержка", roles: SUPPORT, title: "Обращения пользователей"},
-  {key: "resumes", label: "🧑‍💼 Резюме", roles: MOD, title: "Резюме соискателей"},
-  {key: "reviews", label: "⭐ Отзывы", roles: MOD, title: "Отзывы"},
-  {key: "reports", label: "🚩 Жалобы", roles: SUPPORT, title: "Жалобы"},
-  {key: "users", label: "👥 Пользователи", roles: SUPPORT, title: "Пользователи"},
-  {sep: "Контент", roles: ADM},
-  {key: "community", label: "🌍 Сообщество", roles: ADM, title: "Группы сообщества"},
-  {key: "guide", label: "📘 Гид", roles: ADM, title: "Статьи гида"},
-  {key: "texts", label: "📝 Тексты, FAQ, курс", roles: ADM, title: "Тексты, вопросы и ответы, настройки"},
-  {key: "marketing", label: "📣 Рассылки и баннеры", roles: ADM, title: "Рассылки и баннеры"},
-  {sep: "Деньги", roles: FIN},
-  {key: "payments", label: "💳 Платежи", roles: FIN, title: "Платежи и промокоды"},
-  {key: "refunds", label: "↩️ Возвраты", roles: FIN, title: "Возвраты: заявки, решения, история"},
-  {key: "pricing", label: "💰 Цены", roles: ADM, title: "Цены услуг"},
-  {key: "reportsm", label: "📈 Отчёты и VIP", roles: FIN, title: "Деньги: отчёты, VIP, возвраты, подарки"},
-  {key: "stest", label: "🔎 Тест поиска", roles: MOD, title: "Тест поиска: почему объект на этом месте или не показан"},
-  {key: "rules", label: "📐 Правила", roles: ADM, title: "Правила: выдача, платные места, сроки, хранение"},
-  {sep: "Система", roles: ADM},
-  {key: "errors", label: "🐞 Ошибки в приложении", roles: ADM, title: "Ошибки, которые видели пользователи"},
-  {key: "duty", label: "🗓 Дежурства", roles: SUPPORT, title: "Дежурства и эскалация: кто сегодня отвечает"},
-  {key: "security", label: "🛡 Безопасность", roles: SUP, title: "Безопасность: функции, просмотры данных, входы"},
-  {key: "audit", label: "📜 Журнал", roles: ADM, title: "Журнал действий"},
-  {key: "settings", label: "⚙️ Выгрузки", roles: ADM, title: "Выгрузки"},
-  {key: "admins", label: "🧑‍💼 Сотрудники", roles: SUP, title: "Сотрудники"},
+// Структура по ТЗ (§2): разделы слева, внутри раздела подразделы сверху. Один смысл = один раздел.
+const SECTIONS = [
+  {key: "home", icon: "📊", name: "Главная", tabs: ["dash"]},
+  {key: "mod", icon: "🛡", name: "Модерация", tabs: ["listings", "reports", "dating", "resumes", "reviews", "companies", "jobs", "housing", "market", "batches"]},
+  {key: "support", icon: "💬", name: "Поддержка", tabs: ["support", "duty"]},
+  {key: "people", icon: "👥", name: "Люди", tabs: ["users", "admins"]},
+  {key: "catalog", icon: "🗂", name: "Каталог и контент", tabs: ["community", "guide", "texts"]},
+  {key: "marketing", icon: "📣", name: "Маркетинг", tabs: ["marketing"]},
+  {key: "money", icon: "💰", name: "Деньги", tabs: ["payments", "refunds", "pricing", "reportsm"]},
+  {key: "rules", icon: "📐", name: "Поиск и правила", tabs: ["rules", "stest"]},
+  {key: "system", icon: "⚙️", name: "Система", tabs: ["audit", "errors", "security", "settings"]},
 ];
+const TABS = [
+  {key: "dash", label: "Обзор", roles: ADM, title: "Главная"},
+  {key: "listings", label: "Очередь объявлений", roles: MOD, title: "Модерация: очередь объявлений"},
+  {key: "reports", label: "Жалобы", roles: SUPPORT, title: "Модерация: жалобы"},
+  {key: "dating", label: "Анкеты знакомств", roles: MOD, title: "Модерация: анкеты знакомств"},
+  {key: "resumes", label: "Резюме", roles: MOD, title: "Модерация: резюме соискателей"},
+  {key: "reviews", label: "Отзывы", roles: MOD, title: "Модерация: отзывы"},
+  {key: "companies", label: "Компании и работодатели", roles: MOD, title: "Модерация: компании и работодатели (проверка, приостановка, баланс)"},
+  {key: "jobs", label: "Все вакансии", roles: MOD, title: "Все объявления: работа", cat: "job"},
+  {key: "housing", label: "Всё жильё", roles: MOD, title: "Все объявления: жильё", cat: "housing"},
+  {key: "market", label: "Вся барахолка", roles: MOD, title: "Все объявления: барахолка, авто, услуги", cat: "marketplace"},
+  {key: "batches", label: "Массовые действия", roles: MOD, title: "Модерация: массовые действия (посчитать, подтвердить, следить, отменить)"},
+  {key: "support", label: "Обращения и оспаривания", roles: SUPPORT, title: "Поддержка: обращения и оспаривания"},
+  {key: "duty", label: "Дежурства", roles: SUPPORT, title: "Поддержка: дежурства и эскалация"},
+  {key: "users", label: "Пользователи", roles: SUPPORT, title: "Люди: пользователи"},
+  {key: "admins", label: "Сотрудники", roles: SUP, title: "Люди: сотрудники и права"},
+  {key: "community", label: "Сообщество", roles: ADM, title: "Каталог: группы сообщества"},
+  {key: "guide", label: "Гид", roles: ADM, title: "Каталог: статьи гида"},
+  {key: "texts", label: "Тексты и FAQ", roles: ADM, title: "Каталог: тексты, вопросы и ответы, настройки"},
+  {key: "marketing", label: "Баннеры, рассылки, реклама, акции", roles: ADM, title: "Маркетинг: баннеры, рассылки, реклама, акции"},
+  {key: "payments", label: "Платежи и промокоды", roles: FIN, title: "Деньги: платежи и промокоды"},
+  {key: "refunds", label: "Возвраты", roles: FIN, title: "Деньги: возвраты"},
+  {key: "pricing", label: "Цены на услуги", roles: ADM, title: "Деньги: цены услуг"},
+  {key: "reportsm", label: "Отчёты и VIP", roles: FIN, title: "Деньги: отчёты, VIP, подарки"},
+  {key: "rules", label: "Правила", roles: ADM, title: "Правила: выдача, платные места, сроки, хранение"},
+  {key: "stest", label: "Тест поиска и словари", roles: MOD, title: "Поиск: тест, синонимы, стоп-слова, журнал запросов"},
+  {key: "audit", label: "Журнал действий", roles: ADM, title: "Система: журнал действий"},
+  {key: "errors", label: "Ошибки у людей", roles: ADM, title: "Система: ошибки, которые видели пользователи"},
+  {key: "security", label: "Безопасность", roles: SUP, title: "Система: безопасность, функции, просмотры данных, входы"},
+  {key: "settings", label: "Выгрузки", roles: ADM, title: "Система: выгрузки и мои входы"},
+];
+const TAB_SECTION = Object.fromEntries(SECTIONS.flatMap((s) => s.tabs.map((k) => [k, s.key])));
+const secTabs = (sec) => SECTIONS.find((s) => s.key === sec).tabs.map((k) => TABS.find((t) => t.key === k)).filter((t) => t && t.roles.includes(role()));
+const lastTab = (sec) => { const k = sessionStorage.getItem("adminTab:" + sec); return secTabs(sec).find((t) => t.key === k) || secTabs(sec)[0]; };
 let current = "";
 function startApp() {
   $("#login").classList.add("hidden");
   $("#app").classList.remove("hidden");
   $("#logout").hidden = false;
   $("#who").textContent = ({super_admin: "Суперадмин", admin: "Админ", moderator: "Модератор", support: "Поддержка"}[role()] || role()) + " · " + (sessionStorage.getItem("adminId") || "");
-  const mine = TABS.filter((t) => t.roles.includes(role()));
-  $("#tabs").innerHTML = mine.map((t) => {
-    if (t.sep) return `<div class="sep">${esc(t.sep)}</div>`;
-    const [ic, ...rest] = t.label.split(" ");
-    return `<button data-tab="${t.key}" title="${esc(rest.join(" "))}"><span class="ic">${ic}</span><span class="lb">${esc(rest.join(" "))}</span><em hidden data-badge="${t.key}"></em></button>`;
-  }).join("");
-  $("#tabs").querySelectorAll("button").forEach((b) => b.onclick = () => { document.body.classList.remove("drawer"); show(b.dataset.tab); });
-  const first = mine.find((t) => t.key);
-  show(first.key);
+  const mineSections = SECTIONS.filter((sec) => secTabs(sec.key).length);
+  $("#tabs").innerHTML = mineSections.map((sec) => `<button data-sec="${sec.key}" title="${esc(sec.name)}"><span class="ic">${sec.icon}</span><span class="lb">${esc(sec.name)}</span><em hidden data-sbadge="${sec.key}"></em></button>`).join("");
+  $("#tabs").querySelectorAll("button").forEach((b) => b.onclick = () => { document.body.classList.remove("drawer"); show(lastTab(b.dataset.sec).key); });
+  show(lastTab(mineSections[0].key).key);
   refreshBadges();
 }
 // ---- оформление: тема, узкое меню, ящик на телефоне ----
@@ -161,8 +167,8 @@ function palClose() { $("#pal").classList.add("hidden"); }
 function palRender() {
   const q = $("#palQ").value.trim().toLowerCase();
   const tabs = TABS.filter((t) => t.key && t.roles.includes(role())).map((t) => {
-    const [ic, ...rest] = t.label.split(" ");
-    return {ic, name: rest.join(" "), hint: t.title, run: () => show(t.key)};
+    const rest = [t.label];
+    return {ic: SECTIONS.find((x) => x.key === TAB_SECTION[t.key])?.icon || "•", name: t.label, hint: t.title, run: () => show(t.key)};
   });
   const actions = [
     {ic: "⭐", name: "Выдать звёзды человеку", hint: "найдите человека, откройте карточку", run: () => { $("#palQ").value = "?"; palRender(); }},
@@ -202,12 +208,17 @@ async function logout() {
 }
 $("#logout").onclick = logout;
 
-const BADGE_KEYS = {listings: "listings", reports: "reports", support: "support", resumes: "resumes", employers: "employers", dating: "dating", errors: "errors"};
+const BADGE_KEYS = {listings: "listings", reports: "reports", support: "support", resumes: "resumes", companies: "employers", dating: "dating", errors: "errors"};
 async function refreshBadges() {
   try {
     const c = await api("/api/admin/counters");
     const set = (k, n, late) => { const el = document.querySelector(`[data-badge="${k}"]`); if (el) { el.textContent = n; el.hidden = !n; el.classList.toggle("warn", !!late); } };
     for (const [tab, key] of Object.entries(BADGE_KEYS)) set(tab, c[key] || 0, (key === "listings" && c.listings_wait_h >= 24) || (key === "support" && c.support_wait_h >= 24));
+    for (const sec of SECTIONS) {            // a section shows the sum of what waits inside it
+      const n = sec.tabs.reduce((sum, t) => sum + (BADGE_KEYS[t] ? (c[BADGE_KEYS[t]] || 0) : 0), 0) - (sec.key === "system" ? (c.errors || 0) : 0);
+      const el = document.querySelector(`[data-sbadge="${sec.key}"]`);
+      if (el) { el.textContent = n; el.hidden = !n; el.classList.toggle("warn", (sec.key === "mod" && c.listings_wait_h >= 24) || (sec.key === "support" && c.support_wait_h >= 24)); }
+    }
     document.title = (c.listings + c.support + c.reports > 0 ? `(${c.listings + c.support + c.reports}) ` : "") + "KOREA HUB · админка";
   } catch (e) { /* счётчики не обязательны */ }
 }
@@ -244,10 +255,21 @@ $("#main").addEventListener("click", async (e) => {
   if (gu) { e.preventDefault(); openUserCard(gu.dataset.gu); }
 });
 
+function renderSubnav(tab) {
+  const sec = TAB_SECTION[tab], tabs = sec ? secTabs(sec) : [];
+  const bar = $("#subnav");
+  bar.hidden = tabs.length < 2;
+  bar.innerHTML = tabs.map((t) => `<button class="${t.key === tab ? "on" : ""}" data-sub="${t.key}">${esc(t.label)}<em hidden data-badge="${t.key}"></em></button>`).join("");
+  bar.querySelectorAll("button").forEach((b) => b.onclick = () => show(b.dataset.sub));
+  bar.querySelector(".on")?.scrollIntoView({inline: "center", block: "nearest"});
+}
 function show(tab) {
   const def = TABS.find((t) => t.key === tab);
   current = tab;
-  document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
+  const sec = TAB_SECTION[tab];
+  if (sec) sessionStorage.setItem("adminTab:" + sec, tab);
+  document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("active", b.dataset.sec === sec));
+  renderSubnav(tab);
   $("#title").textContent = def.title;
   say("Загрузка…");
   $("#main").innerHTML = "";
@@ -321,7 +343,7 @@ function openAudit(a) {
 function palShow(kind, q) { $("#gQuery").value = q; $("#gSearch").requestSubmit(); }
 const TILES = [
   ["listings", "📋", "На проверке", "listings", "listings_wait_h"], ["reports", "🚩", "Жалобы", "reports"], ["support", "💬", "Обращения", "support", "support_wait_h"],
-  ["dating", "💗", "Анкеты", "dating"], ["resumes", "🧑‍💼", "Резюме", "resumes"], ["employers", "🏢", "Работодатели", "employers"], ["errors", "🐞", "Ошибки за сутки", "errors"],
+  ["dating", "💗", "Анкеты", "dating"], ["resumes", "🧑‍💼", "Резюме", "resumes"], ["companies", "🏬", "Компании и работодатели", "employers"], ["errors", "🐞", "Ошибки за сутки", "errors"],
 ];
 async function loadDash() {
   $("#main").innerHTML = '<div class="skel"></div><div class="skel" style="margin-top:12px;height:140px"></div>';

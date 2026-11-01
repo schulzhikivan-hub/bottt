@@ -57,6 +57,15 @@ header.top .grow{flex:1}
 main{padding:22px 24px 60px;max-width:1280px;width:100%}
 main>h3{margin:22px 4px 10px;font-size:13px;text-transform:uppercase;letter-spacing:1px;color:var(--muted)}
 
+.subnav{display:flex;gap:6px;overflow-x:auto;padding:10px 24px 0;scrollbar-width:none;background:var(--bg);position:sticky;top:62px;z-index:15}
+.subnav::-webkit-scrollbar{display:none}
+.subnav button{flex:none;border:1px solid var(--line);background:var(--surface);color:var(--muted);border-radius:999px;padding:8px 14px;font:600 13px inherit;cursor:pointer;white-space:nowrap;display:flex;gap:6px;align-items:center;transition:background .15s,color .15s}
+.subnav button:hover{color:var(--text);border-color:var(--brand)}
+.subnav button.on{background:var(--grad);border-color:transparent;color:#fff;box-shadow:0 6px 16px -8px var(--brand)}
+.subnav button em{font-style:normal;background:var(--bad);color:#fff;border-radius:999px;font-size:11px;font-weight:700;padding:0 6px;min-width:18px;text-align:center}
+.subnav button em.warn{background:#d98100}
+@media(max-width:860px){.subnav{padding:8px 14px 0;top:56px}}
+
 /* ---------- базовые элементы (используются всеми разделами) ---------- */
 .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:18px;margin-bottom:14px;box-shadow:var(--shadow)}
 .card h3{margin:0 0 10px;font-size:15px;letter-spacing:-.1px}
@@ -208,6 +217,7 @@ hr{border:0;border-top:1px solid var(--line);margin:14px 0}
       <button class="iconbtn" id="themeBtn" type="button" aria-label="Тема" title="Светлая / тёмная">🌓</button>
       <form id="gSearch" class="gsearch" role="search"><input id="gQuery" maxlength="60" aria-label="Поиск по всему"></form>
     </header>
+    <nav class="subnav" id="subnav" hidden></nav>
     <main id="main"></main>
   </div>
 </div>
