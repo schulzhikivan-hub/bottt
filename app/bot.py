@@ -318,6 +318,7 @@ def _expire_once() -> list[tuple[str, str]]:
 def _heartbeat() -> None:
     with SessionLocal() as db:
         observe.beat(db, "bot")
+        guard.purge_rate_hits(db)       # old rate-limit counters
 
 
 async def expiry_loop(bot: Bot) -> None:

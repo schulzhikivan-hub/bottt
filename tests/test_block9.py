@@ -143,3 +143,19 @@ def test_banner_photo_and_language_button_are_wired_in_the_page(client):
     assert client.get("/api/banner-photo").json() == {"exists": False}
     assert "Сейчас доступен только русский язык" in js and "появятся позже" not in js        # no false promise about other languages
     assert ".hero.photo" in client.get("/static/app.css").text
+
+
+def test_rate_limit_is_shared_through_the_database():
+    """A second worker (fresh in-memory state) still sees the first worker's hits."""
+    from fastapi import HTTPException
+    from app import guard
+    reset_db()
+    for _ in range(3):
+        guard.rate_limit("u1", "shared", 3, 60)
+    guard._hits.clear()                     # as if another process asks
+    try:
+        guard.rate_limit("u1", "shared", 3, 60)
+        assert False, "must be limited"
+    except HTTPException as e:
+        assert e.status_code == 429
+    guard.rate_limit("u2", "shared", 3, 60)  # other user is unaffected

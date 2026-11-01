@@ -15,7 +15,7 @@ from app.models import Listing, User
 _hits: dict[tuple[str, str], deque] = defaultdict(deque)
 
 
-def rate_limit(user_id: str, action: str, limit: int, window_seconds: int) -> None:
+def _memory_limit(user_id: str, action: str, limit: int, window_seconds: int) -> None:
     now_ts = time.monotonic()
     bucket = _hits[(user_id, action)]
     while bucket and now_ts - bucket[0] > window_seconds:
@@ -23,6 +23,39 @@ def rate_limit(user_id: str, action: str, limit: int, window_seconds: int) -> No
     if len(bucket) >= limit:
         raise HTTPException(429, "Слишком много действий. Попробуйте чуть позже")
     bucket.append(now_ts)
+
+
+def rate_limit(user_id: str, action: str, limit: int, window_seconds: int) -> None:
+    """Shared by every web worker (rows in `rate_hits`); falls back to memory if the DB is unreachable."""
+    from datetime import datetime, timedelta, timezone
+    from sqlalchemy import delete, func
+    from app.database import SessionLocal
+    from app.models import RateHit
+    key = f"{action}:{user_id}"[:120]
+    now = datetime.now(timezone.utc)
+    try:
+        with SessionLocal() as db:
+            db.execute(delete(RateHit).where(RateHit.bucket == key, RateHit.at < now - timedelta(seconds=window_seconds)))
+            used = db.scalar(select(func.count()).select_from(RateHit).where(RateHit.bucket == key)) or 0
+            if used >= limit:
+                db.commit()
+                raise HTTPException(429, "Слишком много действий. Попробуйте чуть позже")
+            db.add(RateHit(bucket=key, at=now))
+            db.commit()
+    except HTTPException:
+        raise
+    except Exception:
+        _memory_limit(user_id, action, limit, window_seconds)
+
+
+def purge_rate_hits(db: Session, older_than_seconds: int = 86400) -> int:
+    """Housekeeping: counters older than a day can never matter again."""
+    from datetime import datetime, timedelta, timezone
+    from sqlalchemy import delete
+    from app.models import RateHit
+    res = db.execute(delete(RateHit).where(RateHit.at < datetime.now(timezone.utc) - timedelta(seconds=older_than_seconds)))
+    db.commit()
+    return res.rowcount or 0
 
 
 # ---- automatic checks ----

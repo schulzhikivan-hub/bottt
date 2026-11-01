@@ -442,3 +442,11 @@ class Heartbeat(Base):
     __tablename__ = "heartbeats"
     name: Mapped[str] = mapped_column(String(30), primary_key=True)
     at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class RateHit(Base):
+    """One counted action for the shared rate limit (all web workers see the same rows)."""
+    __tablename__ = "rate_hits"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    bucket: Mapped[str] = mapped_column(String(120), index=True)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, index=True)
