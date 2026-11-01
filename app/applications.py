@@ -85,8 +85,9 @@ def withdraw(app_id: int, user_id: str = Depends(writer), db: Session = Depends(
 
 @router.get("/api/listings/{listing_id}/applications")
 def listing_applications(listing_id: int, user_id: str = Depends(writer), db: Session = Depends(get_db)):
+    from app import company
     item = db.get(Listing, listing_id)
-    if item is None or item.author_telegram_id != user_id:
+    if item is None or not company.can_manage(db, user_id, item, write=False):
         raise HTTPException(404, "Вакансия не найдена")
     rows = db.scalars(select(Application).join(User, User.tg_id == Application.applicant_tg_id)
                       .where(Application.listing_id == listing_id, Application.status != "withdrawn",
@@ -105,7 +106,8 @@ def listing_applications(listing_id: int, user_id: str = Depends(writer), db: Se
 def set_status(app_id: int, payload: StatusIn, user_id: str = Depends(writer), db: Session = Depends(get_db)):
     row = db.get(Application, app_id)
     item = db.get(Listing, row.listing_id) if row else None
-    if row is None or item is None or item.author_telegram_id != user_id:
+    from app import company
+    if row is None or item is None or not company.can_manage(db, user_id, item):
         raise HTTPException(404, "Отклик не найден")
     if row.status == "withdrawn":
         raise HTTPException(409, "Соискатель отозвал отклик")
@@ -141,8 +143,14 @@ def author_card(db: Session, item: Listing) -> dict:
     active = db.scalar(select(func.count()).select_from(Listing).where(
         Listing.author_telegram_id == item.author_telegram_id, Listing.status == "approved")) or 0
     verified = bool(user and user.employer_status == "approved")
+    company_name, company_id = (user.company_name if verified else ""), None
+    if item.company_id:                                   # a company listing shows the company, not the person
+        from app.company import Company
+        co = db.get(Company, item.company_id)
+        if co is not None:
+            verified, company_name, company_id = co.status == "verified", co.name, co.id
     from app import reviews
-    return {"verified": verified, "trusted": bool(user and user.trusted), "company": user.company_name if verified else "",
+    return {"verified": verified, "company_id": company_id, "trusted": bool(user and user.trusted), "company": company_name,
             "active": active, "since": user.created_at.year if user and user.created_at else None,
             **reviews.summary(db, item.author_telegram_id)}
 

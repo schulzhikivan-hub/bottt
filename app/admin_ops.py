@@ -195,6 +195,11 @@ def decide_employer(db: Session, actor: str, tg_id: str, decision: str, reason: 
     user.employer_status = "approved" if decision == "approve" else "rejected"
     log_action(db, actor, f"employer.{decision}", "user", tg_id, f"{user.company_name} {reason}".strip())
     db.commit()
+    from app import company
+    co = company.sync_company_from_employer(db, user)
+    if co is not None and decision == "reject":
+        co.note = reason.strip()
+        db.commit()
     guard.notify_user(db, tg_id, "Статус работодателя подтверждён: на ваших вакансиях появится значок." if decision == "approve"
                       else f"Заявку работодателя не подтвердили: {reason.strip()}. Исправьте данные и подайте заново.", "moderation")
     return user

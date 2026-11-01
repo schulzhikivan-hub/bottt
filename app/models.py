@@ -110,6 +110,7 @@ class Listing(Base):
     # Life cycle: draft -> pending -> approved -> (expired | closed | sold | archived)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    company_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)     # posted on behalf of a company
     mod_nudge: Mapped[int] = mapped_column(Integer, default=0, server_default="0")        # moderation late: 1 = person told, 2 = staff alerted
     expiry_notified_7d: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())   # warned a week ahead
     expiry_notified: Mapped[bool] = mapped_column(Boolean, default=False)       # warned 3 days ahead
@@ -259,6 +260,7 @@ class Payment(Base):
     profile_id: Mapped[int | None] = mapped_column(Integer, index=True, nullable=True)       # a dating profile instead of a listing
     note: Mapped[str] = mapped_column(String(200), default="", server_default="")             # «подарок», «компенсация», comments
     balance_used: Mapped[int] = mapped_column(Integer, default=0, server_default="0")        # stars taken from the person's balance
+    company_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)       # paid for a company listing: the COMPANY balance is used
     service_code: Mapped[str] = mapped_column(String(40))
     stars: Mapped[int] = mapped_column(Integer)
     payload: Mapped[str] = mapped_column(String(64), unique=True)

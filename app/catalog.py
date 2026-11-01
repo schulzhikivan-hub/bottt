@@ -160,10 +160,15 @@ def with_promo(db: Session, rows: list[Listing], owner: bool = False) -> list[Li
         for pl in db.scalars(select(Placement).where(Placement.listing_id.in_(ids), Placement.status == "active")).all():
             if payments.aware(pl.ends_at) > payments.now():
                 running.setdefault(pl.listing_id, []).append({"kind": pl.kind, "ends_at": str(pl.ends_at)})
+    from app.company import Company
+    cids = {x.company_id for x in rows if x.company_id}
+    cos = {c.id: c for c in db.scalars(select(Company).where(Company.id.in_(cids))).all()} if cids else {}
     out = []
     for x in rows:
         pics = shots.get(x.id, [])
-        update = {"promo": placed.get(x.id), "promo_free": bool(info.get(x.id, ("", False))[1]), "photos": pics,
+        co = cos.get(x.company_id)
+        update = {"company_name": co.name if co else "", "company_verified": bool(co and co.status == "verified"),
+                  "promo": placed.get(x.id), "promo_free": bool(info.get(x.id, ("", False))[1]), "photos": pics,
                   "cover": next((p["thumb"] for p in pics if p["status"] != "pending"), None)}
         if not owner:
             update.update(note="", has_edit=False, expires_at=None)

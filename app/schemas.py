@@ -41,6 +41,7 @@ class ListingCreate(BaseModel):
     negotiable: bool | None = None
     details: dict | None = None  # descriptive details, validated per section (see app/fields.py)
     draft: bool = False  # save without sending to moderation; "submit" sends it
+    company_id: int | None = None  # post on behalf of a company (the person must be in its team and the company verified)
 
 
 class ListingOut(BaseModel):
@@ -86,6 +87,9 @@ class ListingOut(BaseModel):
     promo: str | None = None  # active paid placement: pin, vip, bump, highlight
     promo_free: bool = False  # the placement was given free by a promotion: a mark, but no lift in the list
     created_at: datetime | None = None
+    company_id: int | None = None
+    company_name: str = ""
+    company_verified: bool = False
 
 
     @field_validator("visas", mode="before")

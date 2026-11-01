@@ -188,4 +188,6 @@ def migrate() -> None:
         conn.execute(text("ALTER TABLE dating_profiles ADD COLUMN IF NOT EXISTS bumped_until TIMESTAMPTZ"))
         conn.execute(text("ALTER TABLE listings ADD COLUMN IF NOT EXISTS mod_nudge INTEGER NOT NULL DEFAULT 0"))
         conn.execute(text("ALTER TABLE ads ADD COLUMN IF NOT EXISTS max_shows INTEGER"))
+        conn.execute(text("ALTER TABLE listings ADD COLUMN IF NOT EXISTS company_id INTEGER"))
+        conn.execute(text("ALTER TABLE payments ADD COLUMN IF NOT EXISTS company_id INTEGER"))
         conn.execute(text("ALTER TABLE notifications ADD COLUMN IF NOT EXISTS tg_pending BOOLEAN NOT NULL DEFAULT FALSE"))

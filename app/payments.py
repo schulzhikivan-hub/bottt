@@ -160,15 +160,23 @@ def service_options(db: Session, listing: Listing) -> list[dict]:
     return out
 
 
-def take_from_balance(db: Session, user_id: str, stars: int, use_balance: bool) -> tuple[int, int]:
+def _purse(db: Session, user_id: str, company_id: int | None):
+    """Whose balance a payment uses: a company's own (for a company listing) or the person's. They are never mixed."""
+    if company_id:
+        from app.company import Company
+        return db.get(Company, company_id)
+    return db.get(User, user_id)
+
+
+def take_from_balance(db: Session, user_id: str, stars: int, use_balance: bool, company_id: int | None = None) -> tuple[int, int]:
     """(taken from the balance, left to pay in Stars). The balance is reserved at once and returned if the invoice is not paid."""
     if not use_balance or stars <= 0:
         return 0, stars
-    user = db.get(User, user_id)
-    have = (user.balance_stars if user is not None else 0) or 0
+    owner = _purse(db, user_id, company_id)
+    have = (owner.balance_stars if owner is not None else 0) or 0
     taken = min(have, stars)
     if taken > 0:
-        user.balance_stars = have - taken
+        owner.balance_stars = have - taken
     return taken, stars - taken
 
 
@@ -177,7 +185,7 @@ def restore_stale_balance(db: Session) -> int:
     n = 0
     for p in db.scalars(select(Payment).where(Payment.status == "pending", Payment.balance_used > 0)).all():
         if aware(p.created_at) < now() - INVOICE_TTL:
-            user = db.get(User, p.user_tg_id)
+            user = _purse(db, p.user_tg_id, p.company_id)
             if user is not None:
                 user.balance_stars = (user.balance_stars or 0) + p.balance_used
             p.status, p.note = "failed", (p.note + " баланс возвращён").strip()
@@ -194,8 +202,11 @@ def create_invoice(db: Session, user_id: str, listing_id: int, service_code: str
     if pricing is None or not pricing.is_active:
         raise PaymentError("Эта услуга сейчас недоступна")
     listing = db.get(Listing, listing_id)
-    if listing is None or listing.author_telegram_id != user_id:
+    from app import company as _co
+    if listing is None or not _co.can_manage(db, user_id, listing, write=False):
         raise PaymentError("Объявление не найдено")
+    if listing.company_id and not _co.can_pay(db, user_id, listing):
+        raise PaymentError("Платить за объявления компании могут владелец и админы")
     if listing.status != "approved":
         raise PaymentError("Услуги доступны только для опубликованных объявлений")
     if listing.category != pricing.category:
@@ -219,10 +230,10 @@ def create_invoice(db: Session, user_id: str, listing_id: int, service_code: str
     if promo_code.strip():
         promo, stars = check_promo(db, user_id, promo_code, pricing.stars)
         used_code = promo.code
-    taken, cash = take_from_balance(db, user_id, stars, use_balance)
+    taken, cash = take_from_balance(db, user_id, stars, use_balance, listing.company_id)
     payment = Payment(user_tg_id=user_id, listing_id=listing_id, service_code=service_code,
                       stars=cash, payload=secrets.token_urlsafe(24), status="pending",
-                      created_at=current, promo_code=used_code, list_stars=pricing.stars, balance_used=taken)
+                      created_at=current, promo_code=used_code, list_stars=pricing.stars, balance_used=taken, company_id=listing.company_id)
     db.add(payment)
     db.commit()
     db.refresh(payment)
@@ -368,7 +379,7 @@ def refund(db: Session, payment_id: int) -> Payment:
             "telegram_payment_charge_id": payment.telegram_payment_charge_id,
         })
     if payment.balance_used:
-        user = db.get(User, payment.user_tg_id)
+        user = _purse(db, payment.user_tg_id, payment.company_id)
         if user is not None:
             user.balance_stars = (user.balance_stars or 0) + payment.balance_used
     payment.status = "refunded"
@@ -411,7 +422,7 @@ def refund_to_balance(db: Session, payment_id: int, reason: str = "") -> tuple[P
     paid_real = (payment.stars or 0) + (payment.balance_used or 0)      # what the person really spent (cash + balance)
     fraction = remaining_fraction(db, payment)
     credit = int(paid_real * fraction)
-    user = db.get(User, payment.user_tg_id)
+    user = _purse(db, payment.user_tg_id, payment.company_id)
     if user is not None and credit > 0:
         user.balance_stars = (user.balance_stars or 0) + credit
     payment.status = "refunded"

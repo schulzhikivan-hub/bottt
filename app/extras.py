@@ -53,7 +53,8 @@ def my_reviews(user_id: str = Depends(writer), db: Session = Depends(get_db)):
 @router.get("/api/listings/{listing_id}/stats")
 def listing_stats(listing_id: int, user_id: str = Depends(writer), db: Session = Depends(get_db)):
     item = db.get(Listing, listing_id)
-    if item is None or item.author_telegram_id != user_id:
+    from app import company
+    if item is None or not company.can_manage(db, user_id, item, write=False):
         raise HTTPException(404, "Объявление не найдено")
     count = lambda stmt: db.scalar(stmt) or 0   # noqa: E731
     return {"views": item.views or 0,

@@ -37,6 +37,7 @@ from app import fields as listing_fields
 from app.users import get_or_create_user, writer, is_blocked_pair
 from app.models import Admin, AuditLog, ConvHide, DatingProfile, TypingMark
 from app.dating import router as dating_router
+from app.company import router as company_mod_router
 from app.payments import PaymentError, aware, now
 
 with startup_lock():   # with several workers only one prepares the database at a time
@@ -48,8 +49,11 @@ with startup_lock():   # with several workers only one prepares the database at 
         bootstrap_admins(_db)
         geo.backfill_places(_db)
         catalog.backfill_search_fields(_db)
+        from app import company as _company_boot
+        _company_boot.migrate_employers(_db)      # people who were employers before get a company
 
 app = FastAPI(title="KOREA HUB API", version="0.4.0")
+app.include_router(company_mod_router)
 app.include_router(adminreports.router)
 app.include_router(rules.router)
 app.include_router(ads.router)
@@ -358,20 +362,32 @@ def create_listing(payload: ListingCreate, user_id: str = Depends(writer), db: S
     place = geo.resolve_place(db, payload.district_id, payload.region_code, payload.city)
     if place is None:
         raise HTTPException(400, "Выберите город или район из списка. Сайт только для Южной Кореи")
-    active = db.scalar(
-        select(func.count()).select_from(Listing).where(
-            Listing.author_telegram_id == user_id,
-            Listing.category == payload.category,
-            Listing.status.in_(["draft", "pending", "approved"]),
+    from app import company as company_mod
+    if payload.company_id:
+        co = db.get(company_mod.Company, payload.company_id)
+        if co is None or company_mod.role_of(db, co.id, user_id) not in company_mod.WRITE:
+            raise HTTPException(403, "Публиковать от этой компании вам нельзя")
+        if co.status != "verified":
+            raise HTTPException(409, "Компания ещё не проверена: пока публикуйте от себя")
+        active = db.scalar(select(func.count()).select_from(Listing).where(
+            Listing.company_id == co.id, Listing.category == payload.category, Listing.status.in_(["draft", "pending", "approved"])))
+        limit = EMPLOYER_ACTIVE_JOBS if payload.category == "job" else 3 * MAX_ACTIVE_PER_CATEGORY
+    else:
+        active = db.scalar(
+            select(func.count()).select_from(Listing).where(
+                Listing.author_telegram_id == user_id,
+                Listing.company_id.is_(None),
+                Listing.category == payload.category,
+                Listing.status.in_(["draft", "pending", "approved"]),
+            )
         )
-    )
-    me_row = db.get(User, user_id)
-    limit = EMPLOYER_ACTIVE_JOBS if payload.category == "job" and me_row is not None and me_row.employer_status == "approved" else MAX_ACTIVE_PER_CATEGORY
+        me_row = db.get(User, user_id)
+        limit = EMPLOYER_ACTIVE_JOBS if payload.category == "job" and me_row is not None and me_row.employer_status == "approved" else MAX_ACTIVE_PER_CATEGORY
     if active >= limit:
         raise HTTPException(409, f"Лимит: не больше {limit} активных объявлений в разделе")
-    data = catalog.clean_extras(payload.category, payload.model_dump(exclude={"city", "region_code", "district_id", "draft"}))
+    data = catalog.clean_extras(payload.category, payload.model_dump(exclude={"city", "region_code", "district_id", "draft", "company_id"}))
     item = Listing(**data, city=place.label, region_code=place.region_code, district_id=place.district_id,
-                   author_telegram_id=user_id, status="draft" if payload.draft else "pending")
+                   author_telegram_id=user_id, company_id=payload.company_id, status="draft" if payload.draft else "pending")
     db.add(item)
     db.commit()
     db.refresh(item)
@@ -688,10 +704,14 @@ def my_balance(user_id: str = Depends(current_user_id), db: Session = Depends(ge
 @app.get("/api/listings/{listing_id}/services")
 def listing_services(listing_id: int, user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
     """The showcase for one own listing: every service with its price, what it does and whether it can be bought now."""
+    from app import company
     item = db.get(Listing, listing_id)
-    if item is None or item.author_telegram_id != user_id:
+    if item is None or not company.can_manage(db, user_id, item, write=False):
         raise HTTPException(404, "Объявление не найдено")
-    return {"title": item.title, "category": item.category, "options": payments.service_options(db, item)}
+    purse = payments._purse(db, user_id, item.company_id)
+    return {"title": item.title, "category": item.category, "options": payments.service_options(db, item),
+            "balance": (purse.balance_stars if purse is not None else 0) or 0, "balance_of": "company" if item.company_id else "person",
+            "can_pay": company.can_pay(db, user_id, item)}
 
 
 @app.get("/api/promo/check")

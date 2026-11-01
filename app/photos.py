@@ -138,7 +138,8 @@ def refresh_edit_flag(db: Session, item: Listing) -> None:
 
 def _own_listing(db: Session, listing_id: int, user_id: str) -> Listing:
     item = db.get(Listing, listing_id)
-    if item is None or item.author_telegram_id != user_id or item.status == "archived":
+    from app import company
+    if item is None or not company.can_manage(db, user_id, item) or item.status == "archived":
         raise HTTPException(404, "Объявление не найдено")
     return item
 
