@@ -24,6 +24,8 @@ def purge(db: Session, at: dt.datetime | None = None) -> dict:
     out["notifications"] = db.execute(delete(Notification).where(Notification.created_at < at - dt.timedelta(days=rules.val("keep.notice_days")))).rowcount or 0
     out["views"] = db.execute(delete(DatingView).where(DatingView.at < at - dt.timedelta(days=rules.val("keep.view_days")))).rowcount or 0
     from app import searchlog
+    from app import viewstats
+    viewstats.purge(db)                # day-by-day listing views older than four months
     out["searches"] = searchlog.purge(db, rules.val("keep.search_days"))
     old = db.scalars(select(Ticket).where(Ticket.status == "closed", Ticket.updated_at < at - dt.timedelta(days=rules.val("keep.ticket_days")))).all()
     for t in old:

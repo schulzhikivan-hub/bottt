@@ -718,3 +718,7 @@ img.co-ava{object-fit:cover}
 .bulkbar[hidden]{display:none}
 .bulkck{display:flex;gap:6px;align-items:center;font-size:13px;color:var(--hint);margin-bottom:6px}
 .steps div{cursor:pointer}
+
+.spark{display:flex;align-items:flex-end;gap:3px;height:38px;margin:6px 0}
+.spark i{flex:1;background:var(--accent);opacity:.75;border-radius:3px 3px 0 0;min-height:4px}
+.hist{display:grid;gap:2px;padding:10px 14px;border-bottom:1px solid var(--border)}

@@ -1209,6 +1209,8 @@ function ownCard(x) {
   }
   if (["closed", "sold"].includes(x.status)) acts.push('<button data-own="reopen">Вернуть</button>');
   if (["rejected", "needs_fix", "hidden"].includes(x.status)) acts.push('<button data-own="appeal" class="secondary">Оспорить решение</button>');
+  if (x.status === "approved" && x.price_amount) acts.push('<button data-own="price" class="secondary">⚡ Цена</button>');
+  if (x.status !== "draft" && x.status !== "archived") acts.push('<button data-own="history" class="secondary">🕘 История</button>');
   if (x.status !== "archived") acts.push('<button data-own="dup" class="secondary">⧉ Копия</button>');
   if (["draft", "pending", "approved", "rejected", "needs_fix"].includes(x.status)) acts.push('<button data-own="move" class="secondary">🔀 Перенести</button>');
   if (x.status !== "archived") acts.push('<button data-own="archive" class="secondary">Удалить</button>');
@@ -1291,8 +1293,9 @@ async function loadProfile() {
     $("#sApps").textContent = apps.length;
     $("#sListings").textContent = alive.length;
     $("#sFav").textContent = favs.length;
-    $("#sChats").textContent = convs.length;
-    $("#sChats").hidden = convs.length === 0;
+    const unreadMsgs = convs.reduce((n, c) => n + (c.unread || 0), 0);         // красный счётчик только для непрочитанного
+    $("#sChats").textContent = unreadMsgs;
+    $("#sChats").hidden = unreadMsgs === 0;
     const attention = alive.filter((x) => ["pending", "needs_fix", "rejected", "draft"].includes(x.status) || x.has_edit).length;
     $("#sMineBadge").textContent = attention;
     $("#sMineBadge").hidden = attention === 0;
@@ -2842,12 +2845,22 @@ document.addEventListener("click", async (e) => {
         toast("Копия создана в черновиках: измените, добавьте фото и отправьте на проверку"); homeLoaded = false; loadProfile(); return;
       }
       if (act === "move") { await moveListing(id, item); return; }
+      if (act === "price") {
+        const v = await askText(`Новая цена, ₩ (сейчас ${fmtKRW(item.price_amount)}, можно менять до ±50%)`, String(item.price_amount));
+        if (!v) return;
+        const n = parseInt(String(v).replace(/\s/g, ""), 10);
+        if (!n || n < 0) { toast("Введите число"); return; }
+        await api(`/api/listings/${id}/price`, {method: "POST", body: JSON.stringify({price_amount: n})});
+        toast(n < item.price_amount ? "Цена снижена: тем, у кого объявление в избранном, придёт уведомление" : "Цена изменена"); homeLoaded = false; loadProfile(); return;
+      }
+      if (act === "history") { await showListingHistory(id, item); return; }
       if (act === "reserve") { await api(`/api/listings/${id}/reserve`, {method: "POST", body: JSON.stringify({on: !item.reserved})}); toast(item.reserved ? "Резерв снят" : "Отмечено: зарезервировано"); homeLoaded = false; loadProfile(); return; }
       if (act === "stats") {
         const st = await api(`/api/listings/${id}/stats`);
         let line = cardEl.querySelector(".statline");
         if (!line) { line = document.createElement("div"); line.className = "statline"; cardEl.appendChild(line); }
-        line.innerHTML = `<p class="meta-line">👁 ${st.views} · ♥ в избранном ${st.favorites} · 💬 чатов ${st.chats}` + (st.applications ? ` · 📨 откликов ${st.applications}` : "") +
+        const peak = Math.max(1, ...(st.daily || []).map((d) => d.views));
+        line.innerHTML = ((st.daily || []).some((d) => d.views) ? `<div class="spark" title="Просмотры за 14 дней">${st.daily.map((d) => `<i style="height:${Math.max(4, Math.round(100 * d.views / peak))}%" title="${esc(d.day)}: ${d.views}"></i>`).join("")}</div>` : "") + `<p class="meta-line">👁 ${st.views} · ♥ в избранном ${st.favorites} · 💬 чатов ${st.chats}` + (st.applications ? ` · 📨 откликов ${st.applications}` : "") +
           (st.views ? ` · конверсия в чат ${st.conversion}%` : "") + (st.days_left !== null ? ` · осталось дней: ${st.days_left}` : "") + "</p>" +
           st.advice.map((t) => `<p class="note">💡 ${esc(t)}</p>`).join("") + (st.promote ? '<div class="actions"><button data-own="promo">🚀 Продвинуть</button></div>' : "");
         return;
@@ -3202,3 +3215,13 @@ document.addEventListener("click", async (e) => {
     if (csv) await downloadWithAuth(`/api/company/${coState.id}/applications.csv`, "applications.csv");
   } catch (err) { toast(err.message); }
 });
+
+async function showListingHistory(id, item) {
+  const rows = await api(`/api/listings/${id}/history`);
+  const m = document.createElement("div");
+  m.className = "modal";
+  m.innerHTML = `<div class="sheet"><div class="sheet-top"><b>История: ${esc(item?.title || "#" + id)}</b><button type="button" data-x aria-label="Закрыть">✕</button></div>
+    <div class="menu-list">${rows.map((r) => `<div class="hist"><b>${esc(r.what)}</b><small class="muted">${esc(fmtDate(r.at))}${r.details ? " · " + esc(r.details) : ""}</small></div>`).join("")}</div></div>`;
+  document.body.appendChild(m);
+  m.onclick = (e) => { if (e.target === m || e.target.closest("[data-x]")) m.remove(); };
+}

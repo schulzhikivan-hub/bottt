@@ -5,9 +5,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select, func, case, or_
 from sqlalchemy.orm import Session
 
-from app import applications, fields, payments, photos, policy, rules, searchdict, searchfix
+from app import applications, fields, payments, photos, policy, rules, searchdict, searchfix, viewstats
+from app.auth import optional_user_id
 from app.payments import now
-from app import guard
 from app.database import get_db
 from app.models import District, Listing, Placement
 from app.schemas import CATEGORIES, ListingOut
@@ -284,13 +284,11 @@ def cities(category: str | None = None, db: Session = Depends(get_db)):
 
 
 @router.get("/api/listings/{listing_id}", response_model=ListingOut)
-def listing_detail(listing_id: int, request: Request, db: Session = Depends(get_db)):
+def listing_detail(listing_id: int, request: Request, user_id: str | None = Depends(optional_user_id), db: Session = Depends(get_db)):
     item = db.get(Listing, listing_id)
     if item is None or item.status != "approved":
         raise HTTPException(404, "Объявление не найдено или снято с публикации")
-    if guard.first_view(request, listing_id):  # one view per visitor per hour, not per refresh
-        item.views = (item.views or 0) + 1
-        db.commit()
+    viewstats.record(db, request, item, user_id)      # once per person per day; not the author, the team, staff or robots
     out = with_promo(db, [item])[0]
     return out.model_copy(update={"author": applications.author_card(db, item)})
 

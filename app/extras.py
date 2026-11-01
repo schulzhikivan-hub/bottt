@@ -61,6 +61,7 @@ def listing_stats(listing_id: int, user_id: str = Depends(writer), db: Session =
     favorites = count(select(func.count()).select_from(Favorite).where(Favorite.listing_id == listing_id))
     chats = count(select(func.count()).select_from(Conversation).where(Conversation.listing_id == listing_id))
     applications = count(select(func.count()).select_from(Application).where(Application.listing_id == listing_id))
+    from app import viewstats
     from app.models import Placement
     from app.payments import aware, now
     promoted = any(aware(pl.ends_at) > now() for pl in db.scalars(select(Placement).where(
@@ -77,7 +78,7 @@ def listing_stats(listing_id: int, user_id: str = Depends(writer), db: Session =
         advice.append(f"Срок показа заканчивается через {days_left} дн.: продлите, чтобы не потерять место."); 
     return {"views": views, "favorites": favorites, "chats": chats, "applications": applications,
             "conversion": round(100 * chats / views, 1) if views else 0.0, "days_left": days_left,
-            "promoted": promoted, "advice": advice, "promote": promote}
+            "promoted": promoted, "advice": advice, "promote": promote, "daily": viewstats.daily(db, listing_id, 14)}
 
 
 # ---- price drop alert for people who saved the listing ----

@@ -5,7 +5,7 @@ import io
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -134,3 +134,64 @@ def activity(company_id: int, user_id: str = Depends(writer), db: Session = Depe
     names = {u.tg_id: (u.display_name or f"…{u.tg_id[-4:]}") for u in db.scalars(select(User).where(User.tg_id.in_({r.actor for r in rows} or {"-"}))).all()}
     return [{"at": r.created_at.isoformat(), "who": names.get(r.actor, f"…{r.actor[-4:]}"), "what": ACTIONS.get(r.action, r.action),
              "details": r.details, "object": f"{r.object_type} #{r.object_id}"} for r in rows]
+
+
+# ---------- quick price change and the author's history ----------
+class PriceIn(BaseModel):
+    price_amount: int = Field(ge=0, le=10_000_000_000)
+
+
+MAX_PRICE_SHIFT = 0.5          # more than ±50% goes through moderation like any other big edit
+MAX_PRICE_CHANGES_PER_DAY = 3
+
+
+@router.post("/api/listings/{listing_id}/price", response_model=ListingOut)
+def quick_price(listing_id: int, payload: PriceIn, user_id: str = Depends(writer), db: Session = Depends(get_db)):
+    """A small price change without moderation: people who saved the listing are told about a cheaper price."""
+    item = _manageable(db, listing_id, user_id)
+    if item.status != "approved":
+        raise HTTPException(409, "Быстро менять цену можно у опубликованного объявления")
+    if item.pending_changes:
+        raise HTTPException(409, "Правка уже ждёт проверки: цена подтвердится вместе с ней")
+    old, new = item.price_amount, payload.price_amount
+    if not old:
+        raise HTTPException(409, "У объявления не указана цена: добавьте её через «Изменить»")
+    if new == old:
+        raise HTTPException(409, "Цена та же")
+    if abs(new - old) / old > MAX_PRICE_SHIFT:
+        raise HTTPException(409, "Изменение больше 50%: используйте «Изменить», объявление проверит модератор")
+    today = now().replace(hour=0, minute=0, second=0, microsecond=0)
+    done = db.scalar(select(func.count()).select_from(AuditLog).where(
+        AuditLog.action == "listing.price", AuditLog.object_id == str(item.id), AuditLog.created_at >= today)) or 0
+    if done >= MAX_PRICE_CHANGES_PER_DAY:
+        raise HTTPException(429, "Сегодня цену уже меняли три раза. Попробуйте завтра")
+    item.price_amount = new
+    log_action(db, user_id, "listing.price", "listing", item.id, f"{old} → {new}")
+    db.commit()
+    if new < old:
+        from app import extras
+        extras.price_dropped(db, item, old)
+        db.commit()
+    db.refresh(item)
+    return catalog.with_promo(db, [item], owner=True)[0]
+
+
+HISTORY_LABELS = {"listing.price": "Изменена цена", "listing.duplicate": "Создана копия", "listing.move": "Объявление перенесено",
+                  "listing.approve": "Опубликовано модератором", "listing.reject": "Отклонено модератором", "listing.needs_fix": "Возвращено на доработку",
+                  "listing.hide": "Скрыто модератором", "listing.show": "Возвращено модератором", "listing.admin_edit": "Поправлено модератором",
+                  "listing.undo": "Решение модератора отменено"}
+SHOW_DETAILS = {"listing.price", "listing.duplicate", "listing.move", "listing.reject", "listing.needs_fix"}
+
+
+@router.get("/api/listings/{listing_id}/history")
+def history(listing_id: int, user_id: str = Depends(writer), db: Session = Depends(get_db)):
+    """What happened to the listing, newest first (for its author or team)."""
+    item = _manageable(db, listing_id, user_id)
+    events = [{"at": item.created_at.isoformat(), "what": "Объявление создано", "details": ""}]
+    if item.published_at:
+        events.append({"at": item.published_at.isoformat(), "what": "Начало показа", "details": ""})
+    for r in db.scalars(select(AuditLog).where(AuditLog.object_type == "listing", AuditLog.object_id == str(item.id),
+                                               AuditLog.action.in_(list(HISTORY_LABELS))).order_by(AuditLog.id)).all():
+        events.append({"at": r.created_at.isoformat(), "what": HISTORY_LABELS[r.action], "details": r.details if r.action in SHOW_DETAILS else ""})
+    events.sort(key=lambda e: e["at"], reverse=True)
+    return events

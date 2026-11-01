@@ -207,7 +207,7 @@ def test_renewing_allows_a_new_warning(client):
 
 # ---- views ----
 
-def test_views_are_counted_once_per_visitor_per_hour(client):
+def test_views_are_counted_once_per_visitor_per_day(client):
     lid = make(client)
     for _ in range(3):
         client.get(f"/api/listings/{lid}", headers={"user-agent": "A"})
