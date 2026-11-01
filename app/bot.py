@@ -293,6 +293,10 @@ def _expire_once() -> list[tuple[str, str]]:
     """End finished placements and listings, warn about listings ending soon. Returns (user_id, message) pairs."""
     with SessionLocal() as db:
         messages = []  # (user, text, kind)
+        for item in lifecycle.expiring_week(db):
+            messages.append((item.author_telegram_id,
+                             f"Через неделю закончится срок объявления «{item.title}». Продлить можно заранее: "
+                             "Профиль → Мои объявления → Продлить, оставшиеся дни не потеряются.", "expiry"))
         for item in lifecycle.expiring_soon(db):
             messages.append((item.author_telegram_id,
                              f"Объявление «{item.title}» закончится через несколько дней. "

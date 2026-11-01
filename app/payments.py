@@ -457,3 +457,30 @@ def set_price(db: Session, code: str, stars: int | None, is_active: bool | None)
         pricing.is_active = is_active
     db.commit()
     return pricing
+
+
+# ---------- the paid time of a listing stops while the listing is not shown ----------
+def sync_freeze(db: Session, listing_id: int, shown: bool, at: dt.datetime | None = None) -> None:
+    """Hidden, paused, rejected or expired listing: its running services stop (frozen_at). Shown again: the stopped time is
+    added back to the end, so the person does not lose paid days."""
+    at = at or now()
+    for pl in db.scalars(select(Placement).where(Placement.listing_id == listing_id, Placement.status == "active")).all():
+        if not shown and pl.frozen_at is None:
+            pl.frozen_at = at
+        elif shown and pl.frozen_at is not None:
+            pl.ends_at = aware(pl.ends_at) + (at - aware(pl.frozen_at))
+            pl.frozen_at = None
+            pl.reminded = False
+
+
+def _listing_status_changed(target, value, oldvalue, initiator):
+    from sqlalchemy.orm import object_session
+    session = object_session(target)
+    if session is None or target.id is None or value == oldvalue:
+        return
+    with session.no_autoflush:
+        sync_freeze(session, target.id, value == "approved")
+
+
+from sqlalchemy import event as _event  # noqa: E402
+_event.listen(Listing.status, "set", _listing_status_changed, active_history=True)

@@ -61,6 +61,7 @@ def publish(db: Session, item: Listing) -> None:
     item.expires_at = moment + dt.timedelta(days=settings.listing_ttl_days)
     item.expiry_notified = False
     item.expiry_notified_1d = False
+    item.expiry_notified_7d = False
     show_waiting_photos(db, item)
     db.flush()
     photos.refresh_edit_flag(db, item)
@@ -134,6 +135,7 @@ def renew(item: Listing) -> None:
     item.status = "approved"
     item.expiry_notified = False
     item.expiry_notified_1d = False
+    item.expiry_notified_7d = False
 
 
 def expire_listings(db: Session, at: dt.datetime | None = None) -> list[Listing]:
@@ -145,6 +147,17 @@ def expire_listings(db: Session, at: dt.datetime | None = None) -> list[Listing]
         item.status = "expired"
     db.commit()
     return expired
+
+
+def expiring_week(db: Session, at: dt.datetime | None = None) -> list[Listing]:
+    """Listings that end within 7 days (and not yet within 3): the first, early reminder; marks them as warned."""
+    moment = at or now()
+    soon = [x for x in db.scalars(select(Listing).where(Listing.status == "approved", Listing.expiry_notified_7d.is_(False))).all()
+            if x.expires_at is not None and moment + dt.timedelta(days=3) < aware(x.expires_at) <= moment + dt.timedelta(days=7)]
+    for item in soon:
+        item.expiry_notified_7d = True
+    db.commit()
+    return soon
 
 
 def expiring_soon(db: Session, days: int = 3, at: dt.datetime | None = None) -> list[Listing]:

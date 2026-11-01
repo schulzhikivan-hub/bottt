@@ -110,6 +110,7 @@ class Listing(Base):
     # Life cycle: draft -> pending -> approved -> (expired | closed | sold | archived)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    expiry_notified_7d: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())   # warned a week ahead
     expiry_notified: Mapped[bool] = mapped_column(Boolean, default=False)       # warned 3 days ahead
     expiry_notified_1d: Mapped[bool] = mapped_column(Boolean, default=False)    # warned 1 day ahead
     views: Mapped[int] = mapped_column(Integer, default=0)
