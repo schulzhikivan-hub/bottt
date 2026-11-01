@@ -827,7 +827,9 @@ $("#main").addEventListener("click", async (e) => {
 async function loadMarketing() {
   const [banners, casts, geo, ads, camps] = await Promise.all([api("/api/admin/banners"), api("/api/admin/broadcasts"), fetch("/api/geo").then((r) => r.json()).then((g) => g.regions),
     api("/api/admin/ads").catch(() => []), api("/api/admin/campaigns").catch(() => [])]);
-  const SERVICES = {dating_vip: "VIP-анкета", dating_invisible: "Невидимка", dating_viewers: "Кто видел анкету", dating_super: "Супер-симпатия"};
+  const price = await api("/api/admin/pricing").catch(() => []);
+  const SERVICES = Object.fromEntries(price.map((x) => [x.code, x.title]));
+  if (!price.length) Object.assign(SERVICES, {dating_vip: "VIP-анкета", dating_invisible: "Невидимка", dating_viewers: "Кто видел анкету", dating_super: "Супер-симпатия"});
   $("#main").innerHTML = `
     <div class="card"><h3>Реклама в лентах</h3><p class="muted">Всегда с пометкой «Реклама», не выше третьего места, одна на экран. 18+ видят только люди с подтверждённым возрастом. Реклама на объявление исчезает вместе с ним.</p>
       <div class="row"><input id="adTitle" placeholder="Заголовок" maxlength="80"><input id="adText" placeholder="Текст" maxlength="200" style="flex:1;min-width:200px">
@@ -841,7 +843,7 @@ async function loadMarketing() {
       <div class="row"><input id="pcTitle" placeholder="Название акции" maxlength="80"><select id="pcService">${Object.entries(SERVICES).map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select>
       <input id="pcDays" type="number" min="1" max="30" value="3" style="width:70px" title="дней услуги">
       <select id="pcAud"><option value="all">Все</option><option value="new">Новые (14 дней)</option><option value="dating">С анкетой</option><option value="sellers">С объявлениями</option></select>
-      <select id="pcMode"><option value="claim">Человек берёт сам</option><option value="auto">Выдать всем сразу</option></select>
+      <select id="pcMode"><option value="claim">Человек берёт сам</option><option value="auto">Выдать всем сразу (только анкеты)</option></select>
       <input id="pcStart" type="number" min="0" placeholder="старт через, ч" style="width:110px"><button class="act" id="pcAdd">Создать</button></div>
       <table><tr><th>№</th><th>Акция</th><th>Кому</th><th>Режим</th><th>Взяли</th><th>Статус</th><th></th></tr>${camps.map((c) => `<tr data-pcid="${c.id}"><td>${c.id}</td><td>${esc(c.title)} · ${esc(SERVICES[c.service_code] || c.service_code)} ${c.days} дн.</td>
         <td>${esc(c.audience_title)}</td><td>${c.mode === "auto" ? "всем сразу" : "по желанию"}</td><td>${c.claims}</td><td>${c.running ? "идёт" : c.active ? "ещё не началась" : "остановлена"}</td>

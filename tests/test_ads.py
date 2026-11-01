@@ -87,3 +87,47 @@ def test_auto_campaign_is_given_once_at_start(client):
         assert db.query(DatingProfile).one().vip_promo is True
         from app.ads import PromoClaim
         assert db.query(PromoClaim).count() == 1
+
+
+def test_promo_for_a_listing_needs_the_listing_and_marks_it_free(client):
+    from tests.test_catalog import make
+    from app.models import Placement
+    lid = make(client, user=1, category="job", title="Повар", city="Сеул")
+    cid = client.post("/api/admin/campaigns", json={"title": "Бесплатное поднятие", "service_code": "job_bump", "days": 1,
+                                                   "audience": "sellers"}, headers=ADMIN).json()["id"]
+    offer = client.get("/api/promos", headers=as_user(1)).json()
+    assert offer[0]["needs_listing"] is True and offer[0]["can_claim"] is True
+    assert client.post(f"/api/promos/{cid}/claim", json={}, headers=as_user(1)).status_code == 400          # no listing chosen
+    assert client.post(f"/api/promos/{cid}/claim", json={"listing_id": lid}, headers=as_user(2)).status_code in {400, 409}   # not yours
+    assert client.post(f"/api/promos/{cid}/claim", json={"listing_id": lid}, headers=as_user(1)).status_code == 201
+    with SessionLocal() as db:
+        pl = db.query(Placement).one()
+        assert pl.promo is True and pl.kind == "bump"
+    # the unattended mode is only for dating profiles
+    aid = client.post("/api/admin/campaigns", json={"title": "Всем", "service_code": "job_bump", "mode": "auto"}, headers=ADMIN).json()["id"]
+    from app import ads
+    with SessionLocal() as db:
+        ads.housekeeping(db)
+        assert db.query(Placement).count() == 1
+
+
+def test_saved_search_does_not_alert_about_a_hidden_listing(client):
+    from tests.test_catalog import make
+    from app import searches
+    from app.models import Listing
+    client.post("/api/me/searches", json={"q": "повар"}, headers=as_user(2))
+    lid = make(client, user=1, category="job", title="Повар в кафе", city="Сеул")
+    with SessionLocal() as db:
+        db.get(Listing, lid).status = "hidden"
+        db.commit()
+        from app.models import SavedSearch
+        for row in db.query(SavedSearch):
+            row.last_checked_at = payments_now_minus()
+        db.commit()
+        assert searches.new_matches(db) == []
+
+
+def payments_now_minus():
+    import datetime as dt
+    from app.payments import now
+    return now() - dt.timedelta(days=1)

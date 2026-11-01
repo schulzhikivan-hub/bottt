@@ -22,6 +22,10 @@ HELP_TEXT = (
     "/start — разделы: работа, жильё, барахолка, знакомства, сообщество, гид (смотреть можно прямо в чате)\n"
     "/find слово — поиск по всем разделам\n"
     "/my — мои объявления и их статус\n"
+    "/dating — мой кабинет знакомств: анкета, поднять, VIP, статистика\n"
+    "/support текст — написать в поддержку\n"
+    "/feedback текст — отзыв или идея\n"
+    "/lang — язык\n"
     "/help — эта справка\n\n"
     "Для администраторов:\n"
     "/pending — объявления на модерации\n"
@@ -175,6 +179,12 @@ def register(dp: Dispatcher, bot: Bot) -> None:
     @dp.message(Command("help"))
     async def help_cmd(message: Message):
         await message.answer(HELP_TEXT)
+
+    @dp.message(Command("dating"))
+    async def dating_cmd(message: Message):
+        markup = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(
+            text="💞 Мой кабинет знакомств", web_app=WebAppInfo(url=buildinfo.app_url("?section=cabinet")))]])
+        await message.answer("Анкета, статистика, поднятие и VIP — в кабинете знакомств.", reply_markup=markup)
 
     @dp.message(Command("support"))
     async def support_cmd(message: Message):

@@ -240,6 +240,8 @@ def why_not(db: Session, camp: PromoCampaign, user_id: str) -> str:
 
 def give(db: Session, camp: PromoCampaign, user_id: str, listing_id: int | None = None) -> None:
     from app import datingsvc
+    if camp.mode == "auto" and db.get(Pricing, camp.service_code).category != "dating":
+        raise PaymentError("Автоматически можно выдавать только услуги анкет: для объявления нужно выбрать объявление")
     datingsvc.grant(db, f"promo:{camp.id}", user_id, camp.service_code, listing_id, camp.title, promo=True, days=camp.days)
     db.add(PromoClaim(campaign_id=camp.id, tg_id=user_id, service_code=camp.service_code,
                       ends_at=now() + dt.timedelta(days=camp.days)))
@@ -255,7 +257,8 @@ def my_promos(user_id: str = Depends(writer), db: Session = Depends(get_db)):
         reason = why_not(db, camp, user_id)
         pricing = db.get(Pricing, camp.service_code)
         out.append({"id": camp.id, "title": camp.title, "days": camp.days, "service": pricing.title if pricing else camp.service_code,
-                    "mode": camp.mode, "can_claim": camp.mode == "claim" and not reason, "reason": reason})
+                    "mode": camp.mode, "can_claim": camp.mode == "claim" and not reason, "reason": reason,
+                    "service_code": camp.service_code, "needs_listing": bool(pricing and pricing.category != "dating")})
     return out
 
 

@@ -1874,7 +1874,9 @@ let promoPrices = {};      // service code -> цена со скидкой
 const SAMPLE = {bump: ["⬆ Поднято", ""], vip: ["VIP", ""], pin: ["📌 Закреплено", ""], highlight: ["★ Выделено", "hl"]};
 function renderServices(data) {
   $("#serviceFor").textContent = "Для объявления: " + data.title;
-  $("#serviceList").innerHTML = data.options.map((o) => {
+  const gifts = (data.promos || []).map((x) => `<article class="listing hl"><h3>🎁 ${esc(x.title)}</h3><p>${esc(x.service)}, ${x.days} дн. бесплатно</p>
+    <div class="actions"><button data-lclaim="${x.id}">Получить бесплатно</button></div></article>`).join("");
+  $("#serviceList").innerHTML = gifts + data.options.map((o) => {
     const price = promoPrices[o.code] != null && promoPrices[o.code] !== o.stars
       ? `<s>${o.stars}</s>${promoPrices[o.code]} ⭐` : `${o.stars} ⭐`;
     const [badge, cls] = SAMPLE[o.kind] || ["", ""];
@@ -1892,6 +1894,8 @@ async function openServices(listingId, category) {
   promoCode = ""; promoPrices = {};
   $("#promoInput").value = ""; $("#promoNote").textContent = "";
   servicesData = await api(`/api/listings/${listingId}/services`);
+  servicesData.promos = (await api("/api/promos", {quiet: true}).catch(() => [])).filter((x) => x.needs_listing && x.can_claim
+    && servicesData.options.some((o) => o.code === x.service_code));
   renderServices(servicesData);
   $("#services").classList.remove("hidden");
 }
@@ -2142,7 +2146,7 @@ async function showDatingCabinet() {
         <label class="check" style="margin:0"><input type="checkbox" id="dInvisible" ${mine.invisible ? "checked" : ""} ${mine.invisible_available ? "" : "disabled"}></label></div></article>
 
     <h3 class="muted" style="margin:14px 4px 4px">Продвижение</h3>
-    ${promos.map((x) => `<article class="listing hl"><h3>🎁 ${esc(x.title)}</h3><p>${esc(x.service)}, ${x.days} дн. бесплатно</p>
+    ${promos.filter((x) => !x.needs_listing).map((x) => `<article class="listing hl"><h3>🎁 ${esc(x.title)}</h3><p>${esc(x.service)}, ${x.days} дн. бесплатно</p>
       ${x.can_claim ? `<div class="actions"><button data-dclaim="${x.id}">Получить</button></div>` : `<p class="muted">${esc(x.reason || "Выдаётся автоматически")}</p>`}</article>`).join("")}
     ${serviceCard(opt("bump"))}${serviceCard(opt("vip"))}${serviceCard(opt("super"), `<p class="muted">В запасе: ${mine.super_credits}</p>`)}
     <h3 class="muted" style="margin:14px 4px 4px">Возможности</h3>
@@ -2195,6 +2199,11 @@ document.addEventListener("click", async (e) => {
       if (r.paid) { toast("Готово: услуга включена"); return showDatingCabinet(); }
       if (!tg?.openInvoice) { toast("Оплата открывается только внутри Telegram"); return; }
       tg.openInvoice(r.invoice_url, (st) => { toast(st === "paid" ? "Оплата прошла" : st === "failed" ? "Оплата не прошла" : "Оплата отменена"); showDatingCabinet(); });
+    }
+    const lclaim = e.target.closest("[data-lclaim]");
+    if (lclaim) {
+      await api(`/api/promos/${lclaim.dataset.lclaim}/claim`, {method: "POST", body: JSON.stringify({listing_id: Number(servicesFor)})});
+      toast("Подарок включён"); return openServices(servicesFor);
     }
     if (claim) { await api(`/api/promos/${claim.dataset.dclaim}/claim`, {method: "POST", body: "{}"}); toast("Подарок включён"); showDatingCabinet(); }
     if (del) { await api(`/api/dating/private-photo/${del.dataset.dprivdel}`, {method: "DELETE"}); showDatingCabinet(); }
@@ -2508,6 +2517,7 @@ function openFromLink() {
   const params = new URLSearchParams(location.search);
   const section = params.get("section");
   if (["job", "housing", "marketplace"].includes(section)) { filters.category = section; return false; }
+  if (section === "cabinet") { setTimeout(() => $("#myDatingBtn").onclick(), 700); return true; }      // кабинет знакомств из бота
   if (["dating", "community", "guide"].includes(section)) { showView(section); return true; }
   const listing = params.get("listing");
   if (listing && /^\d+$/.test(listing)) { openDetail(listing, false); return true; }
