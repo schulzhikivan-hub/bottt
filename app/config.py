@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     admin_ids: str = ""
     upload_dir: str = "uploads"
     notifications_enabled: bool = True
+    quiet_hours: str = "22-9"     # Korean time, «from-to» (hours); empty = no quiet hours
     bot_username: str = ""
     require_photos: bool = True      # housing and goods need at least one photo before publication
     max_photos: int = 10

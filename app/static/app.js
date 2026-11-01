@@ -1391,6 +1391,8 @@ async function openMenu(key) {
         <label class="check" style="margin:0"><input type="checkbox" data-kind="${k.key}" ${k.on ? "checked" : ""}></label></div>`).join("")}
       <div class="set-row" style="padding-left:14px"><div>Новое по поискам — раз в сутки одним сообщением<small>Вместо уведомления о каждом объявлении</small></div>
         <label class="check" style="margin:0"><input type="checkbox" id="setDigest" ${prefs.digest ? "checked" : ""}></label></div>
+      <div class="set-row" style="padding-left:14px"><div>Как часто присылать в Telegram<small>Ночью (22:00–09:00 по Корее) тоже ждём, кроме платежей, модерации и поддержки</small></div>
+        <select id="setMode">${(prefs.modes || []).map((m) => `<option value="${m.key}" ${m.key === prefs.mode ? "selected" : ""}>${esc(m.label)}</option>`).join("")}</select></div>
       <p class="muted">Все уведомления всегда видны в приложении (колокольчик), даже если в Telegram они выключены.</p>
       <div class="set-row"><div><b>Размер текста</b><small>Если мелко читать</small></div>
         <span><button class="secondary" data-fs="">A</button> <button class="secondary" data-fs="1">A+</button> <button class="secondary" data-fs="2">A++</button></span></div>
@@ -1401,6 +1403,10 @@ async function openMenu(key) {
     $("#setDigest").onchange = async (e) => {
       try { await api("/api/me/notify-prefs", {method: "PUT", body: JSON.stringify({digest: e.target.checked})}); toast("Сохранено"); }
       catch (err) { toast(err.message); e.target.checked = !e.target.checked; }
+    };
+    if ($("#setMode")) $("#setMode").onchange = async (e) => {
+      try { await api("/api/me/notify-prefs", {method: "PUT", body: JSON.stringify({mode: e.target.value})}); toast("Сохранено"); }
+      catch (err) { toast(err.message); }
     };
     $("#setCity").onclick = openCity;
     $("#myVisa").onchange = async () => {

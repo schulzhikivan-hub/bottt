@@ -1,4 +1,5 @@
 """Anti-spam limits, automatic listing checks (ТЗ § 11.1) and Telegram notifications (ТЗ § 7.10)."""
+import datetime as dt
 import re
 import time
 from collections import defaultdict, deque
@@ -138,6 +139,51 @@ def telegram_allowed(db: Session, tg_id: str, kind: str) -> bool:
     return (user.notify_prefs or {}).get(kind, True) is not False
 
 
+CRITICAL_KINDS = {"payments", "moderation", "support"}      # sent at once, also at night, whatever the digest mode
+DIGEST_MODES = {"now": "Сразу", "hourly": "Раз в час", "daily": "Раз в день"}
+KST = dt.timezone(dt.timedelta(hours=9))
+
+
+def _quiet_span() -> tuple[int, int] | None:
+    raw = (settings.quiet_hours or "").strip()
+    try:
+        a, b = raw.split("-")
+        return int(a), int(b)
+    except ValueError:
+        return None
+
+
+def is_quiet(at: dt.datetime | None = None) -> bool:
+    """Are we inside the quiet hours (Korean time, 22:00-09:00 by default)?"""
+    span = _quiet_span()
+    if span is None:
+        return False
+    hour = (at or dt.datetime.now(dt.timezone.utc)).astimezone(KST).hour
+    start, end = span
+    return (start <= hour or hour < end) if start > end else (start <= hour < end)
+
+
+def digest_mode(user) -> str:
+    mode = (user.notify_prefs or {}).get("_digest", "now") if user is not None else "now"
+    return mode if mode in DIGEST_MODES else "now"
+
+
+def hold_for_telegram(db: Session, tg_id: str, kind: str) -> bool:
+    """Should a notice that may go to Telegram wait? Critical kinds never wait; the rest wait at night
+    and when the person chose an hourly or daily digest."""
+    if kind in CRITICAL_KINDS:
+        return False
+    return is_quiet() or digest_mode(db.get(User, tg_id)) != "now"
+
+
+def mark_pending(db: Session, note_id: int) -> None:
+    from app.models import Notification
+    row = db.get(Notification, note_id)
+    if row is not None:
+        row.tg_pending = True
+        db.commit()
+
+
 def record_notification(db: Session, tg_id: str, text: str, kind: str = "system") -> int:
     """Put the notice in the in-app feed (always, even when Telegram is switched off). Returns its number."""
     from app.models import Notification
@@ -149,13 +195,48 @@ def record_notification(db: Session, tg_id: str, text: str, kind: str = "system"
 
 def notify_user(db: Session, tg_id: str, text: str, kind: str = "system") -> int:
     """Notify a user: the in-app feed always, Telegram when the global switch and the user's settings allow.
-    Returns the number of the notice in the feed (so that it can be taken back)."""
+    At night and in digest modes the Telegram part waits (critical kinds do not). Returns the number of the notice."""
     note_id = record_notification(db, tg_id, text, kind)
     if not settings.notifications_enabled:
         return note_id
     if telegram_allowed(db, tg_id, kind):
-        send_telegram(tg_id, text)
+        if hold_for_telegram(db, tg_id, kind):
+            mark_pending(db, note_id)
+        else:
+            send_telegram(tg_id, text)
     return note_id
+
+
+def flush_pending(db: Session, at: dt.datetime | None = None) -> list[tuple[str, str]]:
+    """Held notices that may go now, one message per person (a digest when there are several). Returns (tg_id, text).
+    Not during quiet hours; «hourly» waits an hour from the last digest, «daily» goes once a day after 09:00 Korean time."""
+    from app.models import Notification
+    at = at or dt.datetime.now(dt.timezone.utc)
+    if is_quiet(at):
+        return []
+    out: list[tuple[str, str]] = []
+    rows = db.scalars(select(Notification).where(Notification.tg_pending.is_(True)).order_by(Notification.id)).all()
+    by_user: dict[str, list] = {}
+    for row in rows:
+        by_user.setdefault(row.user_tg_id, []).append(row)
+    for tg_id, items in by_user.items():
+        user = db.get(User, tg_id)
+        mode = digest_mode(user)
+        last = (user.notify_prefs or {}).get("_last") if user is not None else None
+        last_at = dt.datetime.fromisoformat(last) if last else None
+        wait = {"now": dt.timedelta(0), "hourly": dt.timedelta(hours=1), "daily": dt.timedelta(hours=23)}[mode]
+        if last_at is not None and at - last_at < wait:
+            continue
+        for row in items:
+            row.tg_pending = False
+        live = [r for r in items if user is None or (user.notify_messages and (user.notify_prefs or {}).get(r.kind, True) is not False)]
+        if live:
+            body = live[0].text if len(live) == 1 else f"📬 Новое за это время ({len(live)}):\n" + "\n".join(f"• {r.text}" for r in live)[:3500]
+            out.append((tg_id, body))
+            if user is not None:
+                user.notify_prefs = {**(user.notify_prefs or {}), "_last": at.isoformat()}
+    db.commit()
+    return out
 
 
 # ---- views counter ----

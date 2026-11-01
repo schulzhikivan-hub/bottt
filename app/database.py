@@ -184,3 +184,4 @@ def migrate() -> None:
         conn.execute(text("ALTER TABLE dating_profiles ALTER COLUMN city TYPE VARCHAR(100)"))
         conn.execute(text("ALTER TABLE dating_profiles ADD COLUMN IF NOT EXISTS region_code VARCHAR(20)"))
         conn.execute(text("ALTER TABLE dating_profiles ADD COLUMN IF NOT EXISTS district_id INTEGER"))
+        conn.execute(text("ALTER TABLE notifications ADD COLUMN IF NOT EXISTS tg_pending BOOLEAN NOT NULL DEFAULT FALSE"))

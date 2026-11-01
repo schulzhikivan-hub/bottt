@@ -332,9 +332,13 @@ def _expire_once() -> list[tuple[str, str]]:
         # every notice goes to the in-app feed; Telegram only gets what the user allows
         out = []
         for tg, text, kind in messages:
-            guard.record_notification(db, tg, text, kind)
+            note_id = guard.record_notification(db, tg, text, kind)
             if guard.telegram_allowed(db, tg, kind):
-                out.append((tg, text))
+                if guard.hold_for_telegram(db, tg, kind):
+                    guard.mark_pending(db, note_id)      # night or digest: goes later, in one message
+                else:
+                    out.append((tg, text))
+        out.extend(guard.flush_pending(db))
         return out
 
 

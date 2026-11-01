@@ -9,7 +9,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 
-from app import photos
+from app import guard, photos
+from app.config import settings
 from app.auth import current_user_id
 from app.database import get_db
 from app.guard import NOTIFY_KINDS
@@ -81,12 +82,15 @@ def mark_read(payload: ReadIn, user_id: str = Depends(current_user_id), db: Sess
 class PrefsIn(BaseModel):
     master: bool | None = None
     kinds: dict[str, bool] | None = None
+    mode: str | None = None          # now | hourly | daily: how often non-urgent notices reach Telegram
     digest: bool | None = None       # new matches for saved searches once a day instead of at once
 
 
 def prefs_view(user: User) -> dict:
     prefs = user.notify_prefs or {}
     return {"master": bool(user.notify_messages), "digest": prefs.get("searches_digest") is True,
+            "mode": guard.digest_mode(user), "modes": [{"key": k, "label": v} for k, v in guard.DIGEST_MODES.items()],
+            "quiet_hours": settings.quiet_hours, "critical": sorted(guard.CRITICAL_KINDS),
             "kinds": [{"key": k, "label": label, "on": prefs.get(k, True) is not False} for k, label in NOTIFY_KINDS.items()]}
 
 
@@ -105,6 +109,10 @@ def set_prefs(payload: PrefsIn, user_id: str = Depends(writer), db: Session = De
         if unknown:
             raise HTTPException(422, "Неизвестный вид уведомлений")
         user.notify_prefs = {**(user.notify_prefs or {}), **payload.kinds}
+    if payload.mode is not None:
+        if payload.mode not in guard.DIGEST_MODES:
+            raise HTTPException(422, "Режим: now, hourly или daily")
+        user.notify_prefs = {**(user.notify_prefs or {}), "_digest": payload.mode}
     if payload.digest is not None:
         user.notify_prefs = {**(user.notify_prefs or {}), "searches_digest": payload.digest}
     db.commit()

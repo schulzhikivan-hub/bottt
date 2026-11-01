@@ -424,6 +424,7 @@ class Notification(Base):
     text: Mapped[str] = mapped_column(String(600))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, index=True)
     read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    tg_pending: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false(), index=True)   # held back for Telegram (quiet hours, digest)
 
 
 class ArticleBookmark(Base):

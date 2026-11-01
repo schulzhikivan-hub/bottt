@@ -13,5 +13,6 @@ os.environ["BOT_TOKEN"] = "123456:TEST-TOKEN"
 os.environ["ADMIN_IDS"] = "999"
 os.environ["ADMIN_API_KEY"] = "test-admin-key"
 os.environ["NOTIFICATIONS_ENABLED"] = "false"
+os.environ["QUIET_HOURS"] = ""             # quiet hours depend on the clock; their tests switch them on
 os.environ["NEW_ACCOUNT_MINUTES"] = "0"   # tests create accounts and post at once; the rule has its own test
 os.environ["REQUIRE_PHOTOS"] = "false"  # tests that need the rule switch it on explicitly
