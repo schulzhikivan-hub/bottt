@@ -236,3 +236,11 @@ def test_stranger_cannot_use_chat_tools(client):
     conv = start_chat(client)
     assert client.post(f"/api/conversations/{conv}/block", headers=as_user(3)).status_code == 404
     assert client.post(f"/api/conversations/{conv}/report", json={"reason": "spam"}, headers=as_user(3)).status_code == 404
+
+
+def test_empty_result_suggests_which_filter_to_drop(client):
+    make(client, title="Стол", price="50000")
+    r = client.get("/api/catalog", params={"q": "стол", "price_max": 1000}).json()
+    assert r["total"] == 0
+    assert any(x["drop"] == "price_max" and x["total"] == 1 for x in r["relax"])
+    assert "relax" not in client.get("/api/catalog", params={"q": "стол"}).json()      # only when empty

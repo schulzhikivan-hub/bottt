@@ -175,6 +175,35 @@ def with_promo(db: Session, rows: list[Listing], owner: bool = False) -> list[Li
     return out
 
 
+RELAX_LABELS = {"city": "Искать по всей стране", "district_id": "Без района", "region": "Во всех регионах", "price_min": "Без нижней цены",
+                "price_max": "Без верхней цены", "q": "Без слов поиска", "visa": "Без визы", "employment": "Любая занятость",
+                "schedule": "Любой график", "housing_type": "Любой тип жилья", "deposit_max": "Без ограничения залога",
+                "area_min": "Любая площадь", "rooms_min": "Любое число комнат", "year_min": "Любой год", "year_max": "Любой год",
+                "mileage_max": "Любой пробег", "condition": "Новые и б/у", "goods_category": "Любая категория вещей",
+                "housing_provided": "С жильём и без", "meals_provided": "С питанием и без", "pets_allowed": "С животными и без",
+                "furnished": "С мебелью и без", "category": "Во всех разделах"}
+
+
+def _relax(db: Session, args: dict, sort: str) -> list[dict]:
+    """The result is empty: which single filter, if removed, brings results? At most three suggestions, the richest first."""
+    given = {k: v for k, v in args.items() if v not in (None, "", False)}
+    if not given:
+        return []
+    found = []
+    for key in given:
+        trial = {k: v for k, v in args.items() if k != key}
+        _, count = search(db, sort=sort, limit=1, offset=0, **trial)
+        if count:
+            found.append({"drop": key, "label": RELAX_LABELS.get(key, "Без этого условия"), "total": count})
+    found.sort(key=lambda r: -r["total"])
+    labels, out = set(), []
+    for row in found:                                              # «Любой год» twice is noise
+        if row["label"] not in labels:
+            labels.add(row["label"])
+            out.append(row)
+    return out[:3]
+
+
 @router.get("/api/catalog")
 def catalog(q: str = Query(default="", max_length=100), category: str | None = None,
             city: str | None = Query(default=None, max_length=80),
@@ -209,6 +238,13 @@ def catalog(q: str = Query(default="", max_length=100), category: str | None = N
         # «2 из 5», 30% страницы, не больше двух закреплённых: одни правила для всех списков (app/policy.py)
         items = policy.arrange(items, lambda o: "promo" if o.promo_free else (o.promo if o.promo in {"pin", "vip", "bump"} else ""))
     out = {"items": items, "total": total, "has_more": offset + len(rows) < total}
+    if total == 0 and offset == 0:
+        out["relax"] = _relax(db, dict(
+            q=q, category=category, city=city, region=region, district_id=district_id, price_min=price_min, price_max=price_max,
+            housing_provided=housing_provided, meals_provided=meals_provided, condition=condition, rooms_min=rooms_min, visa=visa,
+            employment=employment, schedule=schedule, housing_type=housing_type, deposit_max=deposit_max, area_min=area_min,
+            pets_allowed=pets_allowed, furnished=furnished, goods_category=goods_category, year_min=year_min, year_max=year_max,
+            mileage_max=mileage_max), sort)
     if info.get("corrected"):
         out["corrected"] = info["corrected"]      # the app says «показано по запросу …»
     return out

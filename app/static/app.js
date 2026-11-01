@@ -465,7 +465,7 @@ async function loadCatalog(append = false) {
     if (append) box.insertAdjacentHTML("beforeend", html);
     else box.innerHTML = html || `<div class="empty">${activeFilterCount() || filters.q || filters.category
       ? 'Ничего не нашли. Проверьте написание или сбросьте фильтры.<br><button class="link" id="emptyReset">Сбросить фильтры</button> · <button class="link" id="emptyWatch">Сообщить, когда появится</button>'
-      : "Пока нет объявлений. Добавьте первое кнопкой «+»."}</div>`;
+      : "Пока нет объявлений. Добавьте первое кнопкой «+»."}${relaxHtml(r.relax)}</div>`;
     page.offset += r.items.length;
     if (!append && r.items.length) insertAds(box, r.items.length);
     $("#resultCount").textContent = !r.total ? "Ничего не найдено"
@@ -497,6 +497,21 @@ document.addEventListener("click", (e) => {
   fetch(`/api/ads/${ad.dataset.ad}/click`, {method: "POST"}).catch(() => {});
   if (ad.dataset.adurl) { e.stopPropagation(); window.open(ad.dataset.adurl, "_blank", "noopener"); }
 }, true);
+// пусто: предложить снять одно условие, после которого что-то находится
+function relaxHtml(rows) {
+  if (!rows || !rows.length) return "";
+  return `<div class="relax"><small class="muted">Можно попробовать:</small>${rows.map((x) =>
+    `<button class="chip" data-relax="${esc(x.drop)}">${esc(x.label)} (${x.total})</button>`).join("")}</div>`;
+}
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-relax]");
+  if (!b) return;
+  const key = {region: "region_code", city: "region_code"}[b.dataset.relax] || b.dataset.relax;
+  if (key === "q") $("#search").value = "";
+  if (key in filters) filters[key] = DEFAULT_FILTERS[key];
+  if (b.dataset.relax === "city") filters.district_id = "";
+  reloadCatalog();
+});
 document.addEventListener("click", async (e) => {
   if (e.target.id === "retryCatalog") reloadCatalog();
   if (e.target.id === "emptyReset") { filters = {...DEFAULT_FILTERS}; $("#search").value = ""; reloadCatalog(); }
@@ -1191,11 +1206,13 @@ async function loadProfile() {
   } catch (e) { $("#myListings").innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
 }
 function renderPayments(rows) {
+  const STATUS = {pending: "ожидает оплаты", paid: "оплачено", refunded: "возврат выполнен", failed: "ошибка", granted: "подарок"};
   return rows.length ? rows.map((p) => `
-    <article class="listing"><h3>${esc(p.service)}</h3>
-    <p>${p.stars} ⭐${p.promo ? " (промокод " + esc(p.promo) + ")" : ""} · ${esc({pending: "ожидает оплаты", paid: "оплачено", refunded: "возврат выполнен", failed: "ошибка"}[p.status] || p.status)} · объявление #${p.listing_id}</p>
+    <article class="listing"><h3>${esc(p.service)}${p.gift ? ' <span class="adlabel">🎁 бесплатно</span>' : ""}</h3>
+    <p>${p.gift ? "0" : p.stars} ⭐${p.from_balance ? ` + ${p.from_balance} ⭐ с баланса` : ""}${p.promo ? " (промокод " + esc(p.promo) + ")" : ""} · ${esc(STATUS[p.status] || p.status)}${p.profile ? " · анкета знакомств" : p.listing_id ? " · объявление #" + p.listing_id : ""}</p>
+    ${p.note ? `<p class="muted">${esc(p.note)}</p>` : ""}
     <p class="muted">${esc(p.number)} · ${fmtDate(p.paid_at || p.created_at)}</p>
-    ${p.status === "paid" || p.status === "refunded" ? `<div class="actions"><button class="secondary" data-receipt="${p.id}">Квитанция</button></div>` : ""}</article>`).join("")
+    ${["paid", "refunded", "granted"].includes(p.status) ? `<div class="actions"><button class="secondary" data-receipt="${p.id}">Квитанция</button></div>` : ""}</article>`).join("")
     : '<div class="empty">Платежей пока нет.<br>Продвижение объявления покупается в «Мои объявления» → «Продвинуть».</div>';
 }
 async function showReceipt(id) {
@@ -1203,9 +1220,10 @@ async function showReceipt(id) {
   SUB_TITLES.receipt = "Квитанция " + r.number;
   openSub("receipt");
   const rows = [["Номер", r.number], ["Дата", fmtDate(r.date)], ["Услуга", r.service + (r.days > 1 ? ` (${r.days} дн.)` : "")],
-    ["Объявление", `#${r.listing_id} ${r.listing_title}`], ["Цена", r.list_stars + " ⭐"],
+    [r.profile ? "Анкета" : "Объявление", r.profile ? "знакомства" : `#${r.listing_id} ${r.listing_title}`], ["Цена", r.list_stars + " ⭐"],
     ...(r.discount ? [["Скидка", `−${r.discount} ⭐ (промокод ${r.promo})`]] : []), ["Оплачено", r.stars + " ⭐"],
-    ["Статус", {paid: "оплачено", refunded: "возврат выполнен", pending: "ожидает оплаты", failed: "ошибка"}[r.status] || r.status],
+    ["Статус", {paid: "оплачено", refunded: "возврат выполнен", pending: "ожидает оплаты", failed: "ошибка", granted: "подарок"}[r.status] || r.status],
+    ...(r.from_balance ? [["С баланса", r.from_balance + " ⭐"]] : []), ...(r.note ? [["Примечание", r.note]] : []),
     ["Платёж Telegram", r.charge_id || "—"]];
   $("#subBody").innerHTML = `<article class="listing receipt"><dl>${rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(String(v))}</dd>`).join("")}</dl>
     <div class="actions"><button id="copyReceipt">Скопировать</button></div></article>`;
