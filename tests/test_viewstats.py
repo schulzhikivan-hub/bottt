@@ -20,9 +20,9 @@ def client():
         yield c
 
 
-def make(client, **fields):
+def make(client, user=1, **fields):
     body = {"category": "marketplace", "title": "Велосипед", "city": "Сеул", "description": "ok", "contact": "", "price_amount": 100000} | fields
-    lid = client.post("/api/listings", json=body, headers=as_user(1)).json()["id"]
+    lid = client.post("/api/listings", json=body, headers=as_user(user)).json()["id"]
     client.post(f"/api/admin/listings/{lid}/approve", headers=ADMIN)
     return lid
 
@@ -103,6 +103,6 @@ def test_versions_restore_and_price_hint(client):
     # price hint: needs five similar listings
     assert client.get("/api/price-hint?category=marketplace").json()["hint"] is None
     for i, price in enumerate((100000, 120000, 140000, 160000, 180000)):
-        make(client, title=f"Товар {i}", price_amount=price)
+        make(client, user=2 + i % 2, title=f"Товар {i}", price_amount=price)
     hint = client.get("/api/price-hint?category=marketplace").json()
     assert hint["n"] >= 5 and hint["hint"]["low"] <= hint["hint"]["median"] <= hint["hint"]["high"]
