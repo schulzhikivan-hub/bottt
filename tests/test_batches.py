@@ -23,7 +23,8 @@ def client():
 
 
 def pending(client, n):
-    return [make(client, user=1 + i % 3, publish=False, title=f"Объявление {i}") for i in range(n)]
+    cats = ["job", "housing", "marketplace"]          # the limit is 5 per person per section, so the test spreads them
+    return [make(client, user=1 + i % 3, category=cats[(i // 3) % 3], publish=False, title=f"Объявление {i}") for i in range(n)]
 
 
 def status(lid):
