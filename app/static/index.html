@@ -53,10 +53,11 @@
     <button class="t-market" data-tile="marketplace"><svg viewBox="0 0 24 24"><path d="M5 8h14l-1 12H6zM9 8a3 3 0 0 1 6 0"/></svg>Барахолка</button>
     <button class="t-dating" data-view="dating"><svg viewBox="0 0 24 24"><path d="M12 20s-8-4.800-8-10.500A4.500 4.500 0 0 1 12 7a4.500 4.500 0 0 1 8 2.500C20 15.200 12 20 12 20z"/></svg>Знакомства</button>
     <button class="t-comm" data-view="community"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2.500"/><path d="M3 20a6 6 0 0 1 12 0M15 15a5 5 0 0 1 6 5"/></svg>Сообщество</button>
-    <button class="t-svc" data-tile="marketplace" data-goods="services"><svg viewBox="0 0 24 24"><path d="M14 6a4 4 0 0 0 4 4l-9 9a2.500 2.500 0 0 1-4-4l9-9zM5 5l3 3"/></svg>Услуги</button>
-    <button class="t-car" data-tile="marketplace" data-goods="auto"><svg viewBox="0 0 24 24"><path d="M4 16V12l2-5h12l2 5v4zM4 16v2h3v-2M17 16v2h3v-2M4 12h16"/><circle cx="8" cy="14" r=".6"/><circle cx="16" cy="14" r=".6"/></svg>Автомобили</button>
-    <button class="t-docs" data-section="visas"><svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6zM14 3v5h5M9 12h7M9 16h7"/></svg>Виза и документы</button>
-    <button class="t-info" data-view="guide"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.500v.5"/></svg>Полезная информация</button>
+    <button class="t-svc" data-more data-tile="marketplace" data-goods="services"><svg viewBox="0 0 24 24"><path d="M14 6a4 4 0 0 0 4 4l-9 9a2.500 2.500 0 0 1-4-4l9-9zM5 5l3 3"/></svg>Услуги</button>
+    <button class="t-car" data-more data-tile="marketplace" data-goods="auto"><svg viewBox="0 0 24 24"><path d="M4 16V12l2-5h12l2 5v4zM4 16v2h3v-2M17 16v2h3v-2M4 12h16"/><circle cx="8" cy="14" r=".6"/><circle cx="16" cy="14" r=".6"/></svg>Автомобили</button>
+    <button class="t-docs" data-more data-section="visas"><svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6zM14 3v5h5M9 12h7M9 16h7"/></svg>Виза и документы</button>
+    <button class="t-info" data-more data-view="guide"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.500v.5"/></svg>Полезная информация</button>
+  <button class="t-more" id="tilesMore" type="button"><svg viewBox="0 0 24 24"><circle cx="6" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="18" cy="12" r="1.4"/></svg><span>Ещё</span></button>
   </div>
   <div id="banners" class="banners" hidden></div>
   <div id="landingBlocks">
@@ -135,13 +136,16 @@
     </div>
   </div>
   <button class="submit addbig" id="profileAdd" type="button">➕ Добавить объявление</button>
+  <h4 class="grp">Мои кабинеты</h4>
+  <div class="cabinets">
+    <button class="cab" data-menu="payments" id="cabPerson"><i>👤</i><b>Личный</b><small id="cabPersonSub">Баланс: …</small><span class="cab-act">Пополнить</span></button>
+    <button class="cab" data-menu="employer" id="cabCompany"><i>🏢</i><b>Компания</b><small id="cabCompanySub">Для работодателей</small><span class="cab-act">Открыть</span></button>
+    <button class="cab" id="cabDating"><i>💗</i><b>Знакомства</b><small>Анкета, симпатии</small><span class="cab-act">Открыть</span></button>
+  </div>
   <div class="stats">
     <button data-menu="mine"><b id="sListings">0</b><small>Объявления</small></button>
     <button data-menu="applications"><b id="sApps">0</b><small>Отклики</small></button>
     <button data-menu="favorites"><b id="sFav">0</b><small>Избранное</small></button>
-  </div>
-  <div class="menu-list">
-    <button class="wide" data-menu="employer"><i>🏢</i>Кабинет компании</button>
   </div>
   <h4 class="grp">Моя активность</h4>
   <div class="menu-list">
@@ -149,8 +153,6 @@
     <button class="wide" data-menu="applications"><i>📨</i>Мои отклики</button>
     <button class="wide" data-menu="favorites"><i>♡</i>Избранное</button>
     <button class="wide" data-menu="chats"><i>💬</i>Сообщения<em id="sChats" hidden>0</em></button>
-    <button class="wide" data-menu="recent"><i>🕘</i>Недавно смотрел</button>
-    <button class="wide" data-menu="myreviews"><i>⭐</i>Мои отзывы</button>
     <button class="wide" data-menu="searches"><i>🔔</i>Мои поиски</button>
     <button class="wide" data-menu="invite"><i>🎁</i>Пригласить друзей</button>
     <button class="wide" data-menu="resume"><i>🧑‍💼</i>Моё резюме (ищу работу)</button>
@@ -166,11 +168,16 @@
   <div class="menu-list">
     <button class="wide" data-menu="support"><i>💬</i>Написать в поддержку</button>
     <button class="wide" data-menu="faq"><i>❓</i>Вопросы и ответы</button>
+  </div>
+  <details class="moremenu"><summary>Ещё</summary>
+  <div class="menu-list">
+    <button class="wide" data-menu="recent"><i>🕘</i>Недавно смотрел</button>
+    <button class="wide" data-menu="myreviews"><i>⭐</i>Мои отзывы</button>
     <button class="wide" data-menu="help"><i>📖</i>Правила</button>
     <button class="wide" data-menu="export"><i>📄</i>Выгрузить мои данные</button>
     <button class="wide danger" data-menu="logout" id="logoutItem" hidden><i>⎋</i>Выйти</button>
     <button class="wide danger" data-menu="delete"><i>🗑</i>Удалить аккаунт</button>
-  </div>
+  </div></details>
 <p class="muted buildinfo" style="text-align:center;font-size:12px;margin:18px 0 8px"></p>
 </section>
 

@@ -1203,8 +1203,24 @@ function showProfileChips() {
   $("#pEmployer").hidden = me?.employer_status !== "approved";
   showCityChip();
 }
+// «Мои кабинеты»: личный, компания, знакомства: у каждого свой баланс и своя страница
+async function fillCabinets() {
+  try { const b = await api("/api/me/balance", {quiet: true}); $("#cabPersonSub").textContent = `Баланс: ${b.balance} ⭐`; } catch (e) { /* без баланса */ }
+  try {
+    const cos = await api("/api/company/mine", {quiet: true});
+    const c = cos[0];
+    $("#cabCompanySub").textContent = c ? `${c.name} · ${c.balance_stars ?? c.balance ?? 0} ⭐` : "Для работодателей: создать компанию";
+    document.querySelector("#cabCompany .cab-act").textContent = c ? "Открыть" : "Создать";
+  } catch (e) { /* без компании */ }
+}
+$("#cabDating").onclick = () => $("#myDatingBtn").onclick();
+$("#tilesMore").onclick = () => {
+  const t = document.querySelector(".tiles"), open = t.classList.toggle("open");
+  $("#tilesMore").querySelector("span").textContent = open ? "Меньше" : "Ещё";
+};
 async function loadProfile() {
   fillProfileHead();
+  fillCabinets();
   try {
     const [user, mine, favs, convs, apps] = await Promise.all([api("/api/me"), api("/api/me/listings"), api("/api/favorites"), api("/api/conversations"), api("/api/me/applications")]);
     me = user;
