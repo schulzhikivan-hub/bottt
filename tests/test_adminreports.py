@@ -82,7 +82,7 @@ def test_synonyms_and_stop_words_are_edited_in_the_panel(client):
     lid = make(client, title="Studio near subway", category="housing")
     other = make(client, title="Flat on the hill", category="housing")
     assert [x["id"] for x in client.get("/api/catalog", params={"q": "apartment"}).json()["items"]] == []
-    client.put("/api/admin/search-dict", json={"synonyms": "apartment = studio, flat\\nработа = job", "stopwords": "the, in"}, headers=ADMIN)
+    client.put("/api/admin/search-dict", json={"synonyms": "apartment = studio, flat\nработа = job", "stopwords": "the, in"}, headers=ADMIN)
     searchdict.reset()
     found = {x["id"] for x in client.get("/api/catalog", params={"q": "apartment"}).json()["items"]}
     assert found == {lid, other}                                                         # «apartment» now means studio or flat
