@@ -692,3 +692,19 @@ img.co-ava{object-fit:cover}
 .moremenu summary{list-style:none;cursor:pointer;text-align:center;color:var(--accent);font-weight:700;padding:10px}
 .moremenu summary::-webkit-details-marker{display:none}
 .moremenu[open] summary{display:none}
+
+/* подборки, чек-лист, оценка объявления */
+.picks{display:none;gap:8px;overflow-x:auto;margin:12px -2px 0;padding:2px;scrollbar-width:none}
+.picks::-webkit-scrollbar{display:none}
+.landing .picks{display:flex}
+.picks button{flex:none;border:1px solid var(--border);background:var(--card);color:var(--text);border-radius:999px;padding:8px 14px;font-size:13px;font-weight:600;white-space:nowrap}
+.fweek{display:none;background:var(--card);border:1px solid var(--border);border-radius:16px;padding:12px;margin:12px 0 0}
+.landing .fweek:not([hidden]){display:block}
+.fw-head{display:flex;align-items:center;gap:8px}
+.fw-head span{color:var(--hint);font-size:13px;margin-left:auto}
+.fw-bar{height:6px;background:var(--border);border-radius:99px;overflow:hidden;margin:8px 0}
+.fw-bar i{display:block;height:100%;background:var(--accent);border-radius:99px;transition:width .3s}
+.fw-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 0;font-size:14px}
+.fw-row label{display:flex;gap:8px;align-items:center}
+.score{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:12px;margin:12px 0}
+.score ul{margin:6px 0 0;padding-left:18px;color:var(--hint);font-size:13px}

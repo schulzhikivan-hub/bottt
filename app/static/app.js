@@ -431,7 +431,63 @@ async function useBannerPhoto() {
     if ((await api("/api/banner-photo", {quiet: true})).exists) $(".hero").classList.add("photo");
   } catch (e) { /* остаётся рисунок */ }
 }
+// ---------- умные подборки: один тап вместо настройки фильтров ----------
+const PICKS = [
+  {t: "🏠 Работа с жильём", f: {category: "job", housing_provided: true}},
+  {t: "🍱 Работа с питанием", f: {category: "job", meals_provided: true}},
+  {t: "🛂 Работа под мою визу", f: () => (me?.visa ? {category: "job", visa: me.visa} : null)},
+  {t: "💴 Жильё без залога", f: {category: "housing", deposit_max: 0}},
+  {t: "🪑 Жильё с мебелью", f: {category: "housing", furnished: true}},
+  {t: "🐾 Можно с животными", f: {category: "housing", pets_allowed: true}},
+  {t: "📉 Дешёвые вещи", f: {category: "marketplace", sort: "price_asc"}},
+];
+function renderPicks() {
+  const box = $("#picks");
+  box.innerHTML = PICKS.map((p, i) => {
+    const f = typeof p.f === "function" ? p.f() : p.f;
+    return f ? `<button type="button" data-pick="${i}">${p.t}</button>` : "";
+  }).join("");
+}
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-pick]");
+  if (!b) return;
+  const p = PICKS[Number(b.dataset.pick)], f = typeof p.f === "function" ? p.f() : p.f;
+  if (!f) return;
+  filters = {...DEFAULT_FILTERS, ...f};
+  $("#search").value = "";
+  reloadCatalog();
+});
+// ---------- «Первая неделя в Корее»: чек-лист с ссылками на гид ----------
+const WEEK_STEPS = [
+  ["visa", "🛂 Проверить визу и документы", "visas"], ["reg", "📍 Зарегистрировать адрес и получить ARC", "registration"],
+  ["bank", "🏦 Банк и SIM-карта", "banks"], ["med", "🏥 Медицинская страховка", "medicine"],
+  ["home", "🏠 Найти жильё", "tile:housing"], ["work", "💼 Найти работу", "tile:job"],
+];
+const weekDone = () => { try { return JSON.parse(localStorage.getItem("khWeek") || "{}"); } catch (e) { return {}; } };
+function renderWeek() {
+  const box = $("#firstWeek");
+  if (localStorage.getItem("khWeekHide")) { box.hidden = true; return; }
+  const done = weekDone(), n = WEEK_STEPS.filter(([k]) => done[k]).length;
+  box.hidden = false;
+  box.innerHTML = `<div class="fw-head"><b>Первая неделя в Корее</b><span>${n} из ${WEEK_STEPS.length}</span><button type="button" class="link" data-weekhide>Скрыть</button></div>
+    <div class="fw-bar"><i style="width:${Math.round(100 * n / WEEK_STEPS.length)}%"></i></div>
+    ${WEEK_STEPS.map(([k, t, go]) => `<div class="fw-row"><label><input type="checkbox" data-weekck="${k}" ${done[k] ? "checked" : ""}> ${t}</label><button type="button" class="link" data-weekgo="${go}">Открыть ›</button></div>`).join("")}`;
+}
+document.addEventListener("change", (e) => {
+  const c = e.target.closest("[data-weekck]");
+  if (!c) return;
+  const d = weekDone(); d[c.dataset.weekck] = c.checked; localStorage.setItem("khWeek", JSON.stringify(d)); renderWeek();
+});
+document.addEventListener("click", (e) => {
+  if (e.target.closest("[data-weekhide]")) { localStorage.setItem("khWeekHide", "1"); renderWeek(); return; }
+  const g = e.target.closest("[data-weekgo]");
+  if (!g) return;
+  const v = g.dataset.weekgo;
+  if (v.startsWith("tile:")) { filters = {...DEFAULT_FILTERS, category: v.slice(5)}; reloadCatalog(); } else openSection(v);
+});
 async function loadLanding() {
+  renderPicks();
+  renderWeek();
   useBannerPhoto();
   loadBanners();
   const jobs = $("#freshJobs"), ads = $("#freshAds");
@@ -1627,6 +1683,23 @@ function renderPreview() {
   const first = formPhotos[0]?.thumb || formFiles[0]?.preview || null;
   const item = {...data, id: 0, city: place, cover: first, visas: data.visas || [], details: data.details || {}, promo: null};
   $("#listingPreview").innerHTML = listingCard(item);
+  renderScore(data);
+}
+// «Насколько хорошее объявление»: полные объявления получают больше откликов; подсказки, что добавить
+function renderScore(data) {
+  const photos = formPhotos.length + formFiles.length;
+  const checks = [
+    [data.title && data.title.length >= 10, 15, "Сделайте заголовок подробнее (от 10 символов)"],
+    [data.description && data.description.length >= 80, 25, "Опишите подробнее (от 80 символов): условия, требования, детали"],
+    [data.price_amount != null, 15, "Укажите цену: объявления без цены открывают реже"],
+    [photos >= 1, 20, "Добавьте фото"],
+    [photos >= 3, 10, "Три и больше фото повышают доверие"],
+    [Boolean(data.contact) || Boolean(data.details && Object.keys(data.details).length), 15, "Заполните дополнительные поля раздела"],
+  ];
+  const score = checks.reduce((a, [ok, w]) => a + (ok ? w : 0), 0);
+  const tips = checks.filter(([ok]) => !ok).map(([, , t]) => `<li>${esc(t)}</li>`).join("");
+  $("#listingScore").innerHTML = `<div class="sc-head"><b>Качество объявления: ${score}%</b></div><div class="fw-bar"><i style="width:${score}%"></i></div>` +
+    (tips ? `<ul>${tips}</ul>` : '<p class="muted">Отлично: такое объявление находят и открывают чаще.</p>');
 }
 
 // ---- черновик на устройстве: форма не пропадает, если закрыть окно ----

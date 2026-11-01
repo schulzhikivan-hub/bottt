@@ -59,6 +59,8 @@
     <button class="t-info" data-more data-view="guide"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.500v.5"/></svg>Полезная информация</button>
   <button class="t-more" id="tilesMore" type="button"><svg viewBox="0 0 24 24"><circle cx="6" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="18" cy="12" r="1.4"/></svg><span>Ещё</span></button>
   </div>
+  <div id="picks" class="picks"></div>
+  <div id="firstWeek" class="fweek" hidden></div>
   <div id="banners" class="banners" hidden></div>
   <div id="landingBlocks">
     <div class="blockhead"><h2>Свежие вакансии</h2><button class="link" data-tile="job">Все вакансии ›</button></div>
@@ -372,6 +374,7 @@
 <p class="muted">Написать вам можно и в чате приложения. Телефон и @username — только в этом поле, не в описании.</p>
 <h3 class="dsub">Так увидят ваше объявление</h3>
 <div id="listingPreview" class="preview"></div>
+<div id="listingScore" class="score"></div>
 <label class="check"><input type="checkbox" id="rulesOk"> Подтверждаю: всё правда, предоплат и переводов на карту не прошу</label>
 <p class="muted" id="afterInfo">Модератор проверит объявление, обычно в течение суток. Оно будет показано 30 дней, потом его можно продлить.</p>
 <button class="submit" type="submit" id="sendBtn">Опубликовать</button>
