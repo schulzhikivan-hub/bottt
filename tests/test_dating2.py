@@ -206,7 +206,7 @@ def test_detail_records_views_and_admin_gets_conversion_stats(client):
 
 
 def test_a_visitor_without_sign_in_may_look_at_the_feed_only(client):
-    pid = publish(client, 1)
+    pid = make(client, 1)
     feed = client.get("/api/dating")
     assert feed.status_code == 200 and [x["id"] for x in feed.json()] == [pid]
     assert client.get("/api/dating?mode=mutual").status_code == 401        # nothing personal for a guest
