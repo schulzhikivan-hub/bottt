@@ -235,7 +235,7 @@ def claim(payload: ClaimIn, actor: str = Depends(staff(*SUPPORT)), db: Session =
         raise HTTPException(409, f"Уже в работе у сотрудника {row.staff}")
     if row is None:
         row = Claim(kind=payload.kind, obj_id=payload.id, staff=actor, until=now())
-    row.staff, row.until = actor, now() + dt.timedelta(minutes=CLAIM_MINUTES)
+    row.staff, row.until = actor, now() + dt.timedelta(minutes=rules.val("moderation.claim_minutes"))
     db.add(row)
     db.commit()
     return {"claimed": True, "until": row.until.isoformat()}

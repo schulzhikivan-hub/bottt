@@ -339,6 +339,14 @@ def _expire_once() -> list[tuple[str, str]]:
     """End finished placements and listings, warn about listings ending soon. Returns (user_id, message) pairs."""
     with SessionLocal() as db:
         messages = []  # (user, text, kind)
+        tell, alert = lifecycle.moderation_overdue(db)
+        for item in tell:
+            messages.append((item.author_telegram_id,
+                             f"Проверка объявления «{item.title}» занимает дольше обычного. Мы помним о нём и ответим как можно скорее.", "moderation"))
+        if alert:
+            from app import adminplus
+            adminplus.notify_staff(db, f"⏰ Модерация затянулась: объявлений ждут больше суток — {len(alert)}. Откройте очередь.", "slow",
+                                   ("moderator", "admin", "super_admin"))
         for item in lifecycle.expiring_week(db):
             messages.append((item.author_telegram_id,
                              f"Через неделю закончится срок объявления «{item.title}». Продлить можно заранее: "

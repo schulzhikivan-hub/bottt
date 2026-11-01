@@ -149,6 +149,28 @@ def expire_listings(db: Session, at: dt.datetime | None = None) -> list[Listing]
     return expired
 
 
+def moderation_overdue(db: Session, at: dt.datetime | None = None) -> tuple[list[Listing], list[Listing]]:
+    """Listings that wait for a moderator too long. First (after `moderation.slow_hours`) the author is told once; later
+    (after `moderation.escalate_hours`) the administrators are alerted once. Returns (to tell the author, to alert staff)."""
+    from app import rules
+    moment = at or now()
+    slow = moment - dt.timedelta(hours=rules.val("moderation.slow_hours"))
+    late = moment - dt.timedelta(hours=rules.val("moderation.escalate_hours"))
+    tell, alert = [], []
+    for x in db.scalars(select(Listing).where(Listing.status == "pending", Listing.mod_nudge < 2)).all():
+        waited_since = aware(x.created_at)
+        if waited_since <= late:
+            if x.mod_nudge < 1:
+                tell.append(x)
+            alert.append(x)
+            x.mod_nudge = 2
+        elif waited_since <= slow and x.mod_nudge < 1:
+            tell.append(x)
+            x.mod_nudge = 1
+    db.commit()
+    return tell, alert
+
+
 def expiring_week(db: Session, at: dt.datetime | None = None) -> list[Listing]:
     """Listings that end within 7 days (and not yet within 3): the first, early reminder; marks them as warned."""
     moment = at or now()

@@ -50,3 +50,21 @@ def test_week_reminder_is_sent_once(client):
         db.commit()
         assert [x.id for x in lifecycle.expiring_week(db)] == [lid]
         assert lifecycle.expiring_week(db) == []
+
+
+def test_late_moderation_tells_the_author_then_alerts_staff(client):
+    import datetime as dt
+    from app import lifecycle, payments
+    lid = make(client, publish=False)
+    with SessionLocal() as db:
+        item = db.get(Listing, lid)
+        item.created_at = payments.now() - dt.timedelta(hours=30)
+        db.commit()
+        tell, alert = lifecycle.moderation_overdue(db)
+        assert [x.id for x in tell] == [lid] and alert == []
+        assert lifecycle.moderation_overdue(db) == ([], [])                    # once
+        item.created_at = payments.now() - dt.timedelta(hours=60)
+        db.commit()
+        tell, alert = lifecycle.moderation_overdue(db)
+        assert tell == [] and [x.id for x in alert] == [lid]
+        assert lifecycle.moderation_overdue(db) == ([], [])
