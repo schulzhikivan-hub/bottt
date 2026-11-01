@@ -147,12 +147,16 @@ function applyGuestMode(name) {
   if (guest && !card) {
     const [icon, title, text] = GUEST_VIEWS[name];
     el.insertAdjacentHTML("afterbegin", `<div class="guestcard"><div class="gicon">${icon}</div><h2>${title}</h2><p>${text}</p>
-      <button class="submit" data-guest-login type="button">Войти через Telegram</button>
+      <button class="submit" data-guest-mail type="button">Войти по e-mail и паролю</button>
+      <button class="secondary" data-guest-login type="button">Войти через Telegram</button>
       <p class="muted">Смотреть объявления, вакансии и гид можно и без входа.</p></div>`);
   }
   return guest;
 }
-document.addEventListener("click", (e) => { if (e.target.closest("[data-guest-login]")) { showWebLogin(); startWebLogin(); } });
+document.addEventListener("click", (e) => {
+  if (e.target.closest("[data-guest-mail]")) { showWebLogin(); setTimeout(() => document.querySelector("#pwLoginForm [name=email]")?.focus(), 150); }
+  if (e.target.closest("[data-guest-login]")) { showWebLogin(); startWebLogin(); }
+});
 async function startWebLogin() {
   const info = $("#webLoginInfo");
   info.textContent = "Готовим вход…";

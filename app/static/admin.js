@@ -671,9 +671,11 @@ async function openUserCard(id) {
       <b>Регистрация</b><span>${esc(fmt(u.created_at))}</span><b>Был в сети</b><span>${esc(fmt(u.last_seen_at) || "—")}</span><b>Согласие с правилами</b><span>${u.consent ? "да" : "нет"}</span>
       <b>Объявлений</b><span>${u.listings.length}</span><b>Откликов</b><span>${u.applications}</span><b>Чатов</b><span>${u.chats}</span><b>В избранном</b><span>${u.favorites}</span>
       <b>Жалоб на него / от него</b><span>${u.reports_against} / ${u.reports_made}</span><b>Отзывов получено / написано</b><span>${u.reviews_got} / ${u.reviews_written}</span>
+      <b>Личный баланс</b><span>${u.balance} ⭐</span>
       <b>Вход на сайт</b><span>${u.email ? esc(u.email) + (u.has_password ? " · пароль задан" : " · без пароля") : "не настроен (только Telegram)"}</span>
       <b>Заплатил</b><span>${u.stars_paid} ⭐</span><b>Резюме</b><span>${u.has_resume ? "есть" : "нет"}</span></div>
       <div style="margin-top:10px">${u.blocked ? '<button class="act ok" data-ux="unblock">Разблокировать</button>' : '<button class="act no" data-ux="block">Заблокировать бессрочно</button><button class="act warn" data-ux="blockfor">Заблокировать на срок</button>'}
+        <button class="act ok" data-ux="stars">⭐ Выдать / списать звёзды</button>
         ${u.email || u.has_password ? '<button class="act warn" data-ux="resetpw">Сбросить пароль</button><button class="act warn" data-ux="resetmail">Сбросить e-mail и пароль</button>' : ""}
         <button class="act gray" data-ux="${u.trusted ? "untrust" : "trust"}">${u.trusted ? "Снять «проверенный автор»" : "Отметить «проверенный автор»"}</button></div></div>
       <div class="card"><h3>Править профиль</h3><div class="gridform" id="ueForm">
@@ -742,6 +744,14 @@ $("#main").addEventListener("click", async (e) => {
   const id = card.dataset.uid;
   try {
     if (btn.dataset.ux === "card") { openUserCard(id); return; }
+    if (btn.dataset.ux === "stars") {
+      const n = Number(prompt("Сколько ⭐ выдать? (минус — списать ошибочно начисленное)", "50"));
+      if (!n) return;
+      const why = ask("Причина (человек её увидит):");
+      if (!why) return;
+      const r = await post(`/api/admin/users/${id}/stars`, {stars: n, reason: why});
+      say(`Готово. Баланс человека: ${r.balance} ⭐`); openUserCard(id); return;
+    }
     if (btn.dataset.ux === "resetpw" || btn.dataset.ux === "resetmail") {
       const why = ask("Причина сброса (запишется в журнал):");
       if (!why) return;

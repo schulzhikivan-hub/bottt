@@ -1,14 +1,17 @@
 """Admin: money reports, VIP history, and the search test («why is this object here / not shown»)."""
 import datetime as dt
+import secrets
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app import catalog, policy
+from app import catalog, guard, policy, rules
+from app.audit import log_action
 from app.admin_auth import ADM, MOD, staff
 from app.database import get_db
-from app.models import Listing, Payment, Pricing, User
+from app.models import Admin, AuditLog, Listing, Payment, Pricing, User
 from app.payments import aware, now
 
 router = APIRouter()
@@ -108,3 +111,45 @@ def search_test(q: str = Query(default="", max_length=100), category: str | None
                 why = "Срок публикации вышел"
             out["not_shown"].append({"id": x.id, "title": x.title, "status": x.status, "why": why})
     return out
+
+
+# ---------- Stars to a person ----------
+class StarsIn(BaseModel):
+    stars: int
+    reason: str = Field(min_length=3, max_length=200)
+
+
+@router.post("/api/admin/users/{tg_id}/stars")
+def give_stars(tg_id: str, payload: StarsIn, actor: str = Depends(staff(*ADM)), db: Session = Depends(get_db)):
+    """Put Stars on a person's PERSONAL balance (a gift, a compensation) or take back a mistake (a negative number).
+    A gift is written into the person's payment history with the mark «🎁», every change into the journal. A daily cap per
+    employee protects against a slip of the finger; the super administrator has no cap."""
+    if payload.stars == 0 or abs(payload.stars) > 100000:
+        raise HTTPException(400, "Сумма: от 1 до 100 000 ⭐, минус — списать")
+    user = db.get(User, tg_id)
+    if user is None:
+        raise HTTPException(404, "Пользователь не найден")
+    boss = db.get(Admin, actor)
+    if payload.stars > 0 and (boss is None or boss.role != "super_admin"):
+        today = now().replace(hour=0, minute=0, second=0, microsecond=0)
+        given = 0
+        for row in db.scalars(select(AuditLog).where(AuditLog.actor == actor, AuditLog.action == "user.stars", AuditLog.created_at >= today)).all():
+            try:
+                given += max(0, int(row.details.split()[0]))
+            except (ValueError, IndexError):
+                continue
+        if given + payload.stars > rules.val("credit.day_stars"):
+            raise HTTPException(429, f"Дневной лимит выдачи {rules.val('credit.day_stars')} ⭐ исчерпан (выдано {given}). Дальше выдаёт суперадмин")
+    have = user.balance_stars or 0
+    if have + payload.stars < 0:
+        raise HTTPException(409, f"На балансе только {have} ⭐: списать больше нельзя")
+    user.balance_stars = have + payload.stars
+    if payload.stars > 0:
+        db.add(Payment(user_tg_id=tg_id, listing_id=None, service_code="topup", stars=payload.stars, list_stars=payload.stars,
+                       payload=f"gift-{secrets.token_hex(10)}", status="granted", created_at=now(), paid_at=now(),
+                       note=f"🎁 Начисление от поддержки: {payload.reason.strip()}"))
+    log_action(db, actor, "user.stars", "user", tg_id, f"{payload.stars} {payload.reason.strip()}")
+    db.commit()
+    guard.notify_user(db, tg_id, (f"🎁 Вам начислено {payload.stars} ⭐ на баланс." if payload.stars > 0 else f"С вашего баланса списано {-payload.stars} ⭐.")
+                      + f" Причина: {payload.reason.strip()}", "payments")
+    return {"balance": user.balance_stars}

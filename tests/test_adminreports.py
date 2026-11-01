@@ -58,3 +58,20 @@ def test_ad_lists_block_forbidden_topics_hosts_and_budget_stops_it(client):
     assert client.get("/api/ads?organic=10", headers=as_user(1)).json() == []        # the budget of one show is spent
     client.put("/api/admin/ads/lists", json={"banned_words": "", "banned_hosts": "", "allowed_hosts": "only.com"}, headers=ADMIN)
     assert client.post("/api/admin/ads", json=base, headers=ADMIN).status_code == 400
+
+
+def test_staff_gives_and_takes_back_stars_with_history_cap_and_journal(client):
+    r = client.post("/api/admin/users/1/stars", json={"stars": 100, "reason": "компенсация"}, headers=ADMIN)
+    assert r.status_code == 200 and r.json()["balance"] == 100
+    pay = client.get("/api/me/payments", headers=as_user(1)).json()[0]
+    assert pay["gift"] is True and pay["service"] == "Пополнение баланса" and "компенсация" in pay["note"]
+    assert client.get("/api/admin/users/1/card", headers=ADMIN).json()["balance"] == 100
+    assert client.post("/api/admin/users/1/stars", json={"stars": -150, "reason": "ошибка"}, headers=ADMIN).status_code == 409   # not below zero
+    assert client.post("/api/admin/users/1/stars", json={"stars": -40, "reason": "ошибка"}, headers=ADMIN).json()["balance"] == 60
+    assert client.post("/api/admin/users/1/stars", json={"stars": 0, "reason": "ничего"}, headers=ADMIN).status_code == 400
+    assert client.post("/api/admin/users/1/stars", json={"stars": 5, "reason": "x"}, headers=ADMIN).status_code == 422          # reason is needed
+    assert client.post("/api/admin/users/999/stars", json={"stars": 5, "reason": "нет такого"}, headers=ADMIN).status_code == 404
+    assert client.post("/api/admin/users/1/stars", json={"stars": 5, "reason": "без входа"}).status_code == 401
+    with SessionLocal() as db:
+        from app.models import AuditLog
+        assert [a.details for a in db.query(AuditLog).filter_by(action="user.stars").order_by(AuditLog.id)] == ["100 компенсация", "-40 ошибка"]
