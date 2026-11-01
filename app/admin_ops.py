@@ -126,13 +126,15 @@ def decide_report(db: Session, actor: str, report_id: int, decision: str, reason
     return report
 
 
-def hide_user_listings(db: Session, tg_id: str) -> list[Listing]:
-    """A blocked account disappears from the site: its published listings are hidden (and come back on unblock)."""
-    items = list(db.scalars(select(Listing).where(Listing.author_telegram_id == tg_id, Listing.status == "approved")).all())
+def hide_user_listings(db: Session, tg_id: str, listings: bool = True, resume: bool = True) -> list[Listing]:
+    """A blocked account disappears from the site: its published listings are hidden (and come back on unblock).
+    `listings` and `resume` let the moderator choose what the block touches."""
+    items = list(db.scalars(select(Listing).where(Listing.author_telegram_id == tg_id, Listing.status == "approved",
+                                                  Listing.company_id.is_(None))).all()) if listings else []
     for item in items:
         item.status, item.note = "hidden", BLOCK_NOTE
     from app.models import Resume
-    cv = db.get(Resume, tg_id)       # the resume of a blocked person is hidden too
+    cv = db.get(Resume, tg_id) if resume else None       # the resume of a blocked person is hidden too
     if cv is not None and cv.status == "approved":
         cv.status, cv.note = "hidden", BLOCK_NOTE
     return items
@@ -152,7 +154,10 @@ def restore_user_listings(db: Session, tg_id: str) -> int:
     return count
 
 
-def block_user(db: Session, actor: str, tg_id: str, reason: str) -> User:
+def block_user(db: Session, actor: str, tg_id: str, reason: str, cascade: dict | None = None) -> User:
+    """Block a person. `cascade` says what else the block touches (all on by default):
+    listings (their own, not a company's), resume, companies (the ones they own are suspended), refund (unused paid time goes back to the balance)."""
+    cascade = {"listings": True, "resume": True, "companies": False, "refund": True} | (cascade or {})
     if len(reason.strip()) < 3:
         raise OpError(400, "Укажите причину (не короче 3 символов)")
     user = db.get(User, tg_id)
@@ -160,10 +165,18 @@ def block_user(db: Session, actor: str, tg_id: str, reason: str) -> User:
         raise OpError(404, "Пользователь не найден")
     user.blocked = True
     user.block_reason = reason.strip()[:300]
-    hidden = hide_user_listings(db, tg_id)
+    hidden = hide_user_listings(db, tg_id, cascade["listings"], cascade["resume"])
     from app import payments as _pay
-    credited = _pay.refund_active_services(db, tg_id, "блокировка")
-    log_action(db, actor, "user.block", "user", tg_id, f"{reason}; скрыто объявлений: {len(hidden)}; возврат на баланс: {credited} ⭐")
+    credited = _pay.refund_active_services(db, tg_id, "блокировка") if cascade["refund"] else 0
+    suspended = 0
+    if cascade["companies"]:
+        from app.company import Company
+        for c in db.scalars(select(Company).where(Company.owner_tg_id == tg_id, Company.status == "verified")).all():
+            c.status, c.note = "suspended", "Блокировка владельца"
+            for item in db.scalars(select(Listing).where(Listing.company_id == c.id, Listing.status == "approved")).all():
+                item.status, item.note = "hidden", "company suspended"
+            suspended += 1
+    log_action(db, actor, "user.block", "user", tg_id, f"{reason}; скрыто объявлений: {len(hidden)}; возврат на баланс: {credited} ⭐; компаний приостановлено: {suspended}")
     db.commit()
     for item in hidden:
         applications.notify_ended(db, item, "скрыта модератором")
@@ -179,6 +192,11 @@ def unblock_user(db: Session, actor: str, tg_id: str, reason: str) -> User:
     user.blocked = False
     user.block_reason = ""
     back = restore_user_listings(db, tg_id)
+    from app.company import Company
+    for c in db.scalars(select(Company).where(Company.owner_tg_id == tg_id, Company.status == "suspended", Company.note == "Блокировка владельца")).all():
+        c.status, c.note = "verified", ""                         # only what the block itself suspended comes back
+        for item in db.scalars(select(Listing).where(Listing.company_id == c.id, Listing.status == "hidden", Listing.note == "company suspended")).all():
+            item.status, item.note = "approved", ""
     log_action(db, actor, "user.unblock", "user", tg_id, f"{reason}; возвращено объявлений: {back}")
     db.commit()
     return user

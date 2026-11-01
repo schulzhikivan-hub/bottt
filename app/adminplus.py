@@ -14,7 +14,7 @@ from app.admin_auth import ADM, MOD, SUP, SUPPORT, staff, _hash
 from app.audit import log_action
 from app.database import get_db
 from app.models import (Admin, AdminSession, Application, AuditLog, Claim, ClientError, Conversation, Favorite, Heartbeat,
-                        Listing, Payment, Report, Resume, Review, Ticket, User, UserNote)
+                        Listing, Payment, Report, Resume, Review, Ticket, TicketMessage, User, UserNote)
 from app.payments import aware, now
 
 router = APIRouter()
@@ -173,11 +173,18 @@ def unblock_expired(db: Session) -> int:
     from app import admin_ops as ops
     done = 0
     for u in db.scalars(select(User).where(User.blocked.is_(True), User.blocked_until.is_not(None), User.blocked_until <= now())).all():
+        appeals = db.scalars(select(Ticket).where(Ticket.user_tg_id == u.tg_id, Ticket.kind == "appeal", Ticket.listing_id.is_(None),
+                                                  Ticket.status == "open")).all()
+        if appeals and rules.val("blocks.extend_for_appeal"):
+            continue                                        # the block waits for the answer to the appeal
         try:
             ops.unblock_user(db, "system:auto", u.tg_id, "срок блокировки закончился")
         except ops.OpError:
             continue
         u.blocked_until = None
+        for t in appeals:                                  # the appeal is about a block that is over
+            t.status = "closed"
+            db.add(TicketMessage(ticket_id=t.id, staff=True, author="system", text="Блокировка закончилась по сроку, обращение закрыто."))
         done += 1
     if done:
         db.commit()

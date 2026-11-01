@@ -811,6 +811,39 @@ $("#main").addEventListener("click", (e) => {
   if (b) openPreview(b.dataset.preview).catch((err) => say(err.message));
 });
 
+
+// ---- блокировка: пресеты, срок и что затрагивает ----
+async function openBlockDialog(id) {
+  const cfg = await api("/api/admin/block-presets");
+  const old = document.getElementById("blockBox"); if (old) old.remove();
+  const box = document.createElement("div");
+  box.id = "blockBox"; box.className = "pmodal";
+  box.innerHTML = `<div class="pbox" style="height:auto;max-height:90vh;overflow:auto"><div class="pbar"><b>Блокировка человека</b><button class="act gray" id="bkClose">Закрыть</button></div>
+    <div style="padding:14px"><div class="filters" id="bkPresets">${cfg.presets.map((p) => `<button class="act gray" data-bkp="${p.key}">${esc(p.title)}</button>`).join("")}</div>
+      <div class="gridform"><label>Срок<select id="bkDays"><option value="1">1 день</option><option value="3">3 дня</option><option value="7">7 дней</option><option value="30">30 дней</option>
+        ${cfg.can_permanent ? '<option value="0">бессрочно</option>' : ""}</select></label>
+      <label>Причина (человек её не увидит, записывается в журнал)<input id="bkReason" maxlength="300"></label></div>
+      <p class="muted">Что затрагивает блокировка:</p>
+      ${Object.entries(cfg.cascade_text).map(([k, t]) => `<label style="display:block;margin:4px 0"><input type="checkbox" data-bkc="${k}"> ${esc(t)}</label>`).join("")}
+      <div class="row"><button class="act no" id="bkGo">Заблокировать</button></div><p class="muted" id="bkErr"></p></div></div>`;
+  document.body.appendChild(box);
+  const apply = (p) => {
+    $("#bkReason").value = p.reason; $("#bkDays").value = p.days == null ? "0" : String(p.days);
+    if (p.days != null && ![1, 3, 7, 30].includes(p.days)) $("#bkDays").insertAdjacentHTML("beforeend", `<option value="${p.days}" selected>${p.days} дн.</option>`);
+    box.querySelectorAll("[data-bkc]").forEach((c) => { c.checked = Boolean(p.cascade[c.dataset.bkc]); });
+  };
+  apply(cfg.presets.find((p) => p.key === "rules") || cfg.presets[0]);
+  box.querySelectorAll("[data-bkp]").forEach((b) => { b.onclick = () => apply(cfg.presets.find((p) => p.key === b.dataset.bkp)); });
+  $("#bkClose").onclick = () => box.remove();
+  $("#bkGo").onclick = async () => {
+    const d = Number($("#bkDays").value), cascade = {};
+    box.querySelectorAll("[data-bkc]").forEach((c) => { cascade[c.dataset.bkc] = c.checked; });
+    try {
+      await post(`/api/admin/users/${id}/block-preset`, {permanent: d === 0, days: d || null, reason: $("#bkReason").value, cascade});
+      box.remove(); say("Заблокирован"); openUserCard(id);
+    } catch (err) { $("#bkErr").textContent = err.message; }
+  };
+}
 // ---- карточка человека ----
 async function openUserCard(id) {
   try {
@@ -828,7 +861,7 @@ async function openUserCard(id) {
       <b>Личный баланс</b><span>${u.balance} ⭐</span>
       <b>Вход на сайт</b><span>${u.email ? esc(u.email) + (u.has_password ? " · пароль задан" : " · без пароля") : "не настроен (только Telegram)"}</span>
       <b>Заплатил</b><span>${u.stars_paid} ⭐</span><b>Резюме</b><span>${u.has_resume ? "есть" : "нет"}</span></div>
-      <div style="margin-top:10px">${u.blocked ? '<button class="act ok" data-ux="unblock">Разблокировать</button>' : '<button class="act no" data-ux="block">Заблокировать бессрочно</button><button class="act warn" data-ux="blockfor">Заблокировать на срок</button>'}
+      <div style="margin-top:10px">${u.blocked ? '<button class="act ok" data-ux="unblock">Разблокировать</button>' : '<button class="act no" data-ux="blockterms">🚫 Заблокировать…</button>'}
         <button class="act ok" data-ux="stars">⭐ Выдать / списать звёзды</button>
         ${u.email || u.has_password ? '<button class="act warn" data-ux="resetpw">Сбросить пароль</button><button class="act warn" data-ux="resetmail">Сбросить e-mail и пароль</button>' : ""}
         <button class="act gray" data-ux="${u.trusted ? "untrust" : "trust"}">${u.trusted ? "Снять «проверенный автор»" : "Отметить «проверенный автор»"}</button></div></div>
@@ -898,6 +931,7 @@ $("#main").addEventListener("click", async (e) => {
   const id = card.dataset.uid;
   try {
     if (btn.dataset.ux === "card") { openUserCard(id); return; }
+    if (btn.dataset.ux === "blockterms") { openBlockDialog(id); return; }
     if (btn.dataset.ux === "stars") {
       const n = Number(prompt("Сколько ⭐ выдать? (минус — списать ошибочно начисленное)", "50"));
       if (!n) return;
