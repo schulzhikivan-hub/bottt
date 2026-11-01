@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app import applications, guard, lifecycle
 from app.audit import log_action
-from app.models import Listing, Report, User, DatingProfile, Payment
+from app.models import Admin, Listing, Report, User, DatingProfile, Payment
 
 BLOCK_NOTE = "Аккаунт автора заблокирован"
 from app.payments import now, aware
@@ -42,6 +42,10 @@ def moderate_listing(db: Session, actor: str, listing_id: int, decision: str, re
     item = db.get(Listing, listing_id)
     if item is None:
         raise OpError(404, "Объявление не найдено")
+    if item.dispute:
+        boss = db.get(Admin, actor)
+        if boss is None or boss.role not in {"admin", "super_admin"}:
+            raise OpError(409, "По этому объявлению идёт спор: решение принимает администратор")
     before = item.status
     if decision == "hide":
         if item.status != "approved":

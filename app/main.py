@@ -32,7 +32,7 @@ from app.guard import rate_limit, check_text, duplicate_note, notify_user
 from app import admin_ops as ops
 from app import catalog
 from app import photos, applications, searches, inbox, promos, adminx, observe, site
-from app import geo, reviews, resumes, referrals, support, extras, adminplus, adminview, datingsvc, ads, rules, adminreports, account, refunds, blocks, reportsflow
+from app import geo, reviews, resumes, referrals, support, extras, adminplus, adminview, datingsvc, ads, rules, adminreports, account, refunds, blocks, reportsflow, batches
 from app import fields as listing_fields
 from app.users import get_or_create_user, writer, is_blocked_pair
 from app.models import Admin, AuditLog, ConvHide, DatingProfile, TypingMark
@@ -53,6 +53,7 @@ with startup_lock():   # with several workers only one prepares the database at 
         _company_boot.migrate_employers(_db)      # people who were employers before get a company
 
 app = FastAPI(title="KOREA HUB API", version="0.4.0")
+app.include_router(batches.router)
 app.include_router(reportsflow.router)
 app.include_router(blocks.router)
 app.include_router(refunds.router)

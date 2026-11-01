@@ -72,7 +72,7 @@ def search(db: Session, *, q: str = "", category: str | None = None, city: str |
            year_min: int | None = None, year_max: int | None = None, mileage_max: int | None = None,
            limit: int = 20, offset: int = 0, _fuzzy: bool = True, _info: dict | None = None) -> tuple[list[Listing], int]:
     """Published listings matching every condition. Paid placements come first on every page."""
-    conditions = [Listing.status == "approved", or_(Listing.expires_at.is_(None), Listing.expires_at > now())]
+    conditions = [Listing.status == "approved", Listing.quarantine.is_(False), or_(Listing.expires_at.is_(None), Listing.expires_at > now())]
     if category:
         conditions.append(Listing.category == category)
     if region:

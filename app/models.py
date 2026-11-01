@@ -118,6 +118,8 @@ class Listing(Base):
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     company_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)     # posted on behalf of a company
+    quarantine: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())   # not in search; staff see it with a mark
+    dispute: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())      # «идёт спор»: stays in search, actions limited
     mod_nudge: Mapped[int] = mapped_column(Integer, default=0, server_default="0")        # moderation late: 1 = person told, 2 = staff alerted
     expiry_notified_7d: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())   # warned a week ahead
     expiry_notified: Mapped[bool] = mapped_column(Boolean, default=False)       # warned 3 days ahead

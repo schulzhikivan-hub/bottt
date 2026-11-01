@@ -39,6 +39,10 @@ def listing_flags(db: Session, item: Listing) -> list[str]:
     """Things a moderator should look at twice: the same text or the same photo under other accounts."""
     from app.models import AuditLog
     out = []
+    if getattr(item, "dispute", False):
+        out.append("⚖ Идёт спор: решает администратор")
+    if getattr(item, "quarantine", False):
+        out.append("🧪 Карантин: не показывается в поиске, выход — решение модератора")
     note = guard.duplicate_note(db, item.author_telegram_id, item.title, item.description or "", item.id, item.contact or "")
     if note:
         out.append(note)
