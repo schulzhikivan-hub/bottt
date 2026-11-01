@@ -2040,10 +2040,6 @@ async function openMyDating() {
       f.gender.value = mine.gender; f.seeking.value = mine.seeking || ""; f.goal.value = mine.goal || ""; f.height.value = mine.height || ""; f.visa.value = mine.visa || "";
       f.first_name.value = mine.name || "";
       await setGeo("#datingGeo", mine.region_code || "", mine.district_id || "");
-      toast("Статус анкеты: " + ({pending: "на проверке", published: "опубликована", rejected: "отклонена"}[mine.status] || mine.status) + (mine.status === "rejected" && mine.note ? ". Причина: " + mine.note : "") + (mine.paused ? ". Анкета на паузе" : ""));
-      $("#datingPause").hidden = false;
-      $("#datingPause").textContent = mine.paused ? "▶ Вернуть анкету в поиск" : "⏸ Поставить анкету на паузу";
-      $("#datingPause").dataset.on = mine.paused ? "" : "1";
     }
   } catch (e) { toast(e.message); }
   $("#addSheet").classList.add("hidden");

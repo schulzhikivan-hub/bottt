@@ -649,3 +649,10 @@ button.dcab-tile:active{transform:scale(.97)}
 .dfile{cursor:pointer;padding:10px 14px;border-radius:12px;display:inline-block}
 .dsnote{background:var(--soft);color:var(--accent);border-radius:12px;padding:8px 12px;font-size:13px;margin:0 0 10px}
 .dsheet .dtags{margin-top:10px}
+
+.dform{display:grid;gap:12px}
+.fsec{border:1px solid var(--border);background:var(--card);border-radius:16px;padding:12px 14px 14px;margin:0;display:grid;gap:10px}
+.fsec legend{font-weight:800;font-size:14px;padding:0 6px}
+.fsec label{display:grid;gap:4px;font-size:14px}
+.fsec .geo{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.fsec small{display:inline;font-size:12px}

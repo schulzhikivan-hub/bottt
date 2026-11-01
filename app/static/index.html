@@ -469,26 +469,30 @@
 <p class="muted" id="promoNote"></p>
 <div id="serviceList" class="listings"></div></div></div>
 
-<div id="datingModal" class="modal hidden"><div class="sheet"><div class="sheet-top"><b>Моя анкета</b><button id="closeDating">✕</button></div>
+<div id="datingModal" class="modal page hidden"><div class="sheet"><div class="sheet-top"><span></span><b>Редактировать анкету</b><button id="closeDating">✕</button></div>
 <button type="button" class="link" id="datingPause" hidden></button>
-<button type="button" class="link" id="datingServices">⭐ Кабинет: продвижение, статистика, услуги</button>
-<form id="datingForm"><label>Имя (видно в анкете, без ссылок и телефона)<input name="first_name" maxlength="40" placeholder="Например: Аня"></label>
-<label>Дата рождения<input name="birth_date" type="date" required></label>
+<button type="button" class="link" id="datingServices" hidden>Кабинет</button>
+<form id="datingForm" class="dform">
+<fieldset class="fsec"><legend>👤 О вас</legend>
+<label>Имя<small class="muted"> видно в анкете, без ссылок и телефона</small><input name="first_name" maxlength="40" placeholder="Например: Аня"></label>
+<div class="geo"><label>Дата рождения<input name="birth_date" type="date" required></label>
+<label>Пол<select name="gender"><option value="f">Женщина</option><option value="m">Мужчина</option></select></label></div>
 <p class="muted" id="ageNote"></p>
-<label>Пол<select name="gender"><option value="f">Женщина</option><option value="m">Мужчина</option></select></label>
-<label>Кого ищу<select name="seeking"><option value="">Не указано</option><option value="f">Женщину</option><option value="m">Мужчину</option><option value="any">Не важно</option></select></label>
-<label>Цель знакомства<select name="goal"><option value="">Не указано</option><option value="friendship">Дружба</option><option value="relationship">Отношения</option><option value="marriage">Брак</option><option value="chat">Общение</option></select></label>
-<label>Рост, см<input name="height" type="number" min="120" max="230"></label>
-<label>Виза<select name="visa" id="dpVisa"><option value="">Не указана</option></select></label>
+<div class="geo"><label>Рост, см<input name="height" type="number" min="120" max="230"></label>
+<label>Виза<select name="visa" id="dpVisa"><option value="">Не указана</option></select></label></div>
 <div class="geo" id="datingGeo">
 <label>Регион<select name="region_code" required data-geo-region></select></label>
 <label>Город / район<select name="district_id" required data-geo-district></select></label>
-</div>
-<label>О себе<textarea name="bio" rows="3" maxlength="500"></textarea></label>
-<label>Фото (JPEG, PNG или WebP, до 5 МБ)<input name="photo" type="file" accept="image/jpeg,image/png,image/webp"></label>
-<label>Фото-подтверждение, по желанию<input name="selfie" type="file" accept="image/jpeg,image/png,image/webp"></label>
-<p class="muted" id="selfieNote">Селфи с открытой ладонью рядом с лицом. Его видят только модераторы; после проверки в анкете появится отметка ✔ «проверено», доверия больше.</p>
-<p class="muted">Анкета появится после проверки модератором. Контакты в анкете не нужны: общение только в приложении.</p>
+</div></fieldset>
+<fieldset class="fsec"><legend>💞 Что вы ищете</legend>
+<div class="geo"><label>Кого ищу<select name="seeking"><option value="">Не указано</option><option value="f">Женщину</option><option value="m">Мужчину</option><option value="any">Не важно</option></select></label>
+<label>Цель знакомства<select name="goal"><option value="">Не указано</option><option value="friendship">Дружба</option><option value="relationship">Отношения</option><option value="marriage">Брак</option><option value="chat">Общение</option></select></label></div>
+<label>О себе<textarea name="bio" rows="4" maxlength="500" placeholder="Чем занимаетесь, что любите, кого хотите встретить (от 40 знаков — анкета получает больше симпатий)"></textarea></label></fieldset>
+<fieldset class="fsec"><legend>📷 Фото</legend>
+<label>Главное фото<small class="muted"> JPEG, PNG или WebP, до 5 МБ. Видно всем после проверки</small><input name="photo" type="file" accept="image/jpeg,image/png,image/webp"></label>
+<label>Фото-подтверждение<small class="muted"> по желанию, даёт отметку ✔</small><input name="selfie" type="file" accept="image/jpeg,image/png,image/webp"></label>
+<p class="muted" id="selfieNote">Селфи с открытой ладонью рядом с лицом. Его видят только модераторы; после проверки в анкете появится отметка ✔ «проверено», доверия больше.</p></fieldset>
+<p class="muted">После правки анкета проходит проверку модератором. Контакты в анкете не нужны: общение только в приложении.</p>
 <button class="submit" type="submit">Сохранить</button></form></div></div>
 
 <div id="cityModal" class="modal hidden"><div class="sheet"><div class="sheet-top"><b>Мой город</b><button id="closeCity">✕</button></div>
