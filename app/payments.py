@@ -465,8 +465,9 @@ def sync_freeze(db: Session, listing_id: int, shown: bool, at: dt.datetime | Non
     """Hidden, paused, rejected or expired listing: its running services stop (frozen_at). Shown again: the stopped time is
     added back to the end, so the person does not lose paid days."""
     at = at or now()
+    from app import rules
     for pl in db.scalars(select(Placement).where(Placement.listing_id == listing_id, Placement.status == "active")).all():
-        if not shown and pl.frozen_at is None:
+        if not shown and pl.frozen_at is None and rules.val("vip.freeze"):
             pl.frozen_at = at
         elif shown and pl.frozen_at is not None:
             pl.ends_at = aware(pl.ends_at) + (at - aware(pl.frozen_at))

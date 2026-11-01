@@ -10,6 +10,8 @@ Order of priority of the lanes (from the top of the screen):
 A VIP that was given free by a promotion is shown with a mark but gets no lift (kind «promo»)."""
 import math
 
+from app import rules
+
 WINDOW = 5                 # look at any five places in a row ...
 MAX_PAID_IN_WINDOW = 2     # ... at most two of them may be paid (VIP or bumped)
 PAGE_CAP = 0.30            # paid items are at most 30% of a page (rounded up, at least one)
@@ -25,7 +27,12 @@ LANE_PINNED = "pin"
 
 def arrange(items: list, kind_of) -> list:
     """Return the same items in the final order. `kind_of(item)` gives 'pin', 'vip', 'bump', 'promo' or ''.
-    The relative order of the input (by relevance or date) is kept as far as the rules allow."""
+    The relative order of the input (by relevance or date) is kept as far as the rules allow. The numbers come from
+    the admin panel (rules.py); with the rules switched off paid items keep the order they came in."""
+    WINDOW = rules.val("search.window")
+    MAX_PAID_IN_WINDOW = rules.val("search.paid_in_window") if rules.val("search.paid_rule") else 10 ** 6
+    PAGE_CAP = rules.val("search.cap_pct") / 100 if rules.val("search.cap_rule") else 1.0
+    MAX_PINNED = rules.val("search.max_pinned")
     pinned = [x for x in items if kind_of(x) == LANE_PINNED][:MAX_PINNED]
     pinned_ids = {id(x) for x in pinned}
     rest = [x for x in items if id(x) not in pinned_ids]          # extra pinned items are treated like the rest
@@ -61,6 +68,7 @@ def arrange(items: list, kind_of) -> list:
 
 def window_ok(kinds: list[str]) -> bool:
     """True if in no five places in a row there are more than two paid ones (pinned lane is not counted)."""
+    WINDOW, MAX_PAID_IN_WINDOW = rules.val("search.window"), rules.val("search.paid_in_window")
     body = [k for k in kinds if k != LANE_PINNED]
     for i in range(len(body)):
         if sum(1 for k in body[i:i + WINDOW] if k in PAID_KINDS) > MAX_PAID_IN_WINDOW:
@@ -71,9 +79,11 @@ def window_ok(kinds: list[str]) -> bool:
 def ad_slots(organic_count: int, page: int, where: str = "list", all_pages: bool = False) -> list[int]:
     """Indexes (0-based, in the list of organic items) before which an ad may be inserted.
     First page only (unless switched on), never before the third organic item, one per screen, home up to two."""
+    AD_AFTER, AD_EVERY = rules.val("search.ad_after"), rules.val("search.ad_every")
+    all_pages = all_pages or rules.val("search.ad_all_pages")
     if organic_count < AD_AFTER or (page > 0 and not all_pages):
         return []
-    limit = AD_MAX_HOME if where == "home" else AD_MAX_ON_PAGE
+    limit = rules.val("search.ad_home") if where == "home" else rules.val("search.ad_on_page")
     slots = []
     pos = AD_AFTER
     while pos <= organic_count and len(slots) < limit:

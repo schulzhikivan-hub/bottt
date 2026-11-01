@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from app import guard
+from app import guard, rules
 from app.admin_auth import ADM, MOD, SUP, SUPPORT, staff, _hash
 from app.audit import log_action
 from app.database import get_db
@@ -248,7 +248,7 @@ def claims(kind: str = Query(max_length=12), actor: str = Depends(staff(*SUPPORT
 
 
 # ---------- undo the last moderation decision ----------
-UNDO_MINUTES = 30
+UNDO_MINUTES = 30      # default; the working value is rules.val('moderation.undo_minutes')
 DECISION_RE = re.compile(r"^(\w+) -> (\w+)")
 
 
@@ -261,8 +261,8 @@ def undo_decision(listing_id: int, actor: str = Depends(staff(*MOD)), db: Sessio
                                             AuditLog.action.in_(["listing.approve", "listing.reject", "listing.needs_fix", "listing.hide", "listing.show"]))
                      .order_by(AuditLog.id.desc()).limit(1))
     m = DECISION_RE.match(last.details or "") if last else None
-    if last is None or m is None or (now() - aware(last.created_at)) > dt.timedelta(minutes=UNDO_MINUTES):
-        raise HTTPException(409, f"Отменить можно только последнее решение, не старше {UNDO_MINUTES} минут")
+    if last is None or m is None or (now() - aware(last.created_at)) > dt.timedelta(minutes=rules.val("moderation.undo_minutes")):
+        raise HTTPException(409, f"Отменить можно только последнее решение, не старше {rules.val('moderation.undo_minutes')} минут")
     before, after = m.group(1), m.group(2)
     if item.status != after:
         raise HTTPException(409, "Статус уже изменился после этого решения")

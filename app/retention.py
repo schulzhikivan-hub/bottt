@@ -9,6 +9,7 @@ import datetime as dt
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
+from app import rules
 from app.models import DatingView, Heartbeat, Notification, Ticket, TicketMessage
 from app.payments import aware, now
 
@@ -20,9 +21,9 @@ TICKET_DAYS = 365
 def purge(db: Session, at: dt.datetime | None = None) -> dict:
     at = at or now()
     out = {}
-    out["notifications"] = db.execute(delete(Notification).where(Notification.created_at < at - dt.timedelta(days=NOTICE_DAYS))).rowcount or 0
-    out["views"] = db.execute(delete(DatingView).where(DatingView.at < at - dt.timedelta(days=VIEW_DAYS))).rowcount or 0
-    old = db.scalars(select(Ticket).where(Ticket.status == "closed", Ticket.updated_at < at - dt.timedelta(days=TICKET_DAYS))).all()
+    out["notifications"] = db.execute(delete(Notification).where(Notification.created_at < at - dt.timedelta(days=rules.val("keep.notice_days")))).rowcount or 0
+    out["views"] = db.execute(delete(DatingView).where(DatingView.at < at - dt.timedelta(days=rules.val("keep.view_days")))).rowcount or 0
+    old = db.scalars(select(Ticket).where(Ticket.status == "closed", Ticket.updated_at < at - dt.timedelta(days=rules.val("keep.ticket_days")))).all()
     for t in old:
         db.execute(delete(TicketMessage).where(TicketMessage.ticket_id == t.id))
         db.delete(t)

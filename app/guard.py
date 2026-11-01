@@ -146,11 +146,12 @@ KST = dt.timezone(dt.timedelta(hours=9))
 
 def _quiet_span() -> tuple[int, int] | None:
     raw = (getattr(settings, "quiet_hours", "") or "").strip()
-    try:
-        a, b = raw.split("-")
-        return int(a), int(b)
-    except ValueError:
+    if not raw:
+        return None                                  # switched off in the environment (tests)
+    from app import rules
+    if not rules.val("notify.quiet_on"):
         return None
+    return rules.val("notify.quiet_from"), rules.val("notify.quiet_to")
 
 
 def is_quiet(at: dt.datetime | None = None) -> bool:

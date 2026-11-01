@@ -105,6 +105,7 @@ const TABS = [
   {sep: "Деньги", roles: ADM},
   {key: "payments", label: "💳 Платежи", roles: ADM, title: "Платежи и промокоды"},
   {key: "pricing", label: "💰 Цены", roles: ADM, title: "Цены услуг"},
+  {key: "rules", label: "📐 Правила", roles: ADM, title: "Правила: выдача, платные места, сроки, хранение"},
   {sep: "Система", roles: ADM},
   {key: "errors", label: "🐞 Ошибки в приложении", roles: ADM, title: "Ошибки, которые видели пользователи"},
   {key: "audit", label: "📜 Журнал", roles: ADM, title: "Журнал действий"},
@@ -1070,9 +1071,29 @@ $("#main").addEventListener("click", async (e) => {
   } catch (err) { say(err.message); }
 });
 
+
+// ---- правила: числа и переключатели, которые раньше жили в коде ----
+async function loadRules() {
+  const groups = await api("/api/admin/rules");
+  $("#main").innerHTML = '<p class="muted">Меняется без релиза. Каждое изменение записывается в журнал: кто, когда, было → стало. «По умолчанию» возвращает заводское значение.</p>'
+    + groups.map((g) => `<div class="card"><h3>${esc(g.group)}</h3>${g.rules.map((r) => `<div class="row" data-rule="${esc(r.key)}" style="align-items:center;justify-content:space-between;gap:10px;padding:8px 0;border-bottom:1px solid #0001">
+      <div style="flex:1;min-width:200px"><b>${esc(r.label)}</b>${r.hint ? `<div class="muted">${esc(r.hint)}</div>` : ""}<div class="muted">по умолчанию: ${r.kind === "bool" ? (r.default ? "включено" : "выключено") : r.default}</div></div>
+      ${r.kind === "bool" ? `<label><input type="checkbox" data-rv ${r.value ? "checked" : ""}> ${r.value ? "вкл" : "выкл"}</label>`
+        : `<input type="number" data-rv value="${r.value}" min="${r.min}" max="${r.max}" style="width:90px">`}
+      <button class="act" data-rsave>Сохранить</button><button class="act gray" data-rreset>По умолчанию</button></div>`).join("")}</div>`).join("");
+}
+$("#main").addEventListener("click", async (e) => {
+  const row = e.target.closest("[data-rule]");
+  if (!row) return;
+  try {
+    const key = row.dataset.rule, input = row.querySelector("[data-rv]");
+    if (e.target.closest("[data-rsave]")) { await api(`/api/admin/rules/${key}`, {method: "PUT", body: JSON.stringify({value: input.type === "checkbox" ? input.checked : Number(input.value)})}); say("Сохранено"); reload(); }
+    if (e.target.closest("[data-rreset]")) { await post(`/api/admin/rules/${key}/reset`); say("Возвращено значение по умолчанию"); reload(); }
+  } catch (err) { say(err.message); }
+});
 const LOADERS = {dash: loadDash, listings: loadListings, jobs: loadSection, housing: loadSection, market: loadSection, dating: loadDating,
                  employers: loadEmployers, reports: loadReports, reviews: loadReviews, resumes: loadResumes, support: loadSupport, texts: loadTexts, users: loadUsers, community: loadCommunity, guide: loadGuide,
-                 marketing: loadMarketing, payments: loadPayments, pricing: loadPricing, audit: loadAudit, errors: loadErrors, settings: loadSettings, admins: loadAdmins};
+                 marketing: loadMarketing, payments: loadPayments, pricing: loadPricing, rules: loadRules, audit: loadAudit, errors: loadErrors, settings: loadSettings, admins: loadAdmins};
 
 // Старт: есть сессия — открываем; открыто из Telegram — входим сами; иначе показываем кнопку
 if (session()) startApp();

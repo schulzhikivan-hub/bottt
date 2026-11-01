@@ -32,10 +32,10 @@ from app.guard import rate_limit, check_text, duplicate_note, notify_user
 from app import admin_ops as ops
 from app import catalog
 from app import photos, applications, searches, inbox, promos, adminx, observe, site
-from app import geo, reviews, resumes, referrals, support, extras, adminplus, adminview, datingsvc, ads
+from app import geo, reviews, resumes, referrals, support, extras, adminplus, adminview, datingsvc, ads, rules
 from app import fields as listing_fields
 from app.users import get_or_create_user, writer, is_blocked_pair
-from app.models import ConvHide, DatingProfile, TypingMark
+from app.models import Admin, AuditLog, ConvHide, DatingProfile, TypingMark
 from app.dating import router as dating_router
 from app.payments import PaymentError, aware, now
 
@@ -50,6 +50,7 @@ with startup_lock():   # with several workers only one prepares the database at 
         catalog.backfill_search_fields(_db)
 
 app = FastAPI(title="KOREA HUB API", version="0.4.0")
+app.include_router(rules.router)
 app.include_router(ads.router)
 app.include_router(datingsvc.router)    # before the dating router: fixed words such as /viewers must win over /{profile_id}
 app.include_router(dating_router)
@@ -307,7 +308,7 @@ def create_report(payload: ReportIn, user_id: str = Depends(writer), db: Session
         count = db.scalar(select(func.count(func.distinct(Report.reporter_tg_id))).where(
             Report.target_type == "listing", Report.target_id == payload.target_id))
         listing = db.get(Listing, int(payload.target_id))
-        if count >= REPORTS_TO_HIDE and listing and listing.status == "approved":
+        if count >= rules.val("reports.to_hide") and listing and listing.status == "approved":
             listing.status = "hidden"
             listing.note = "Скрыто по жалобам пользователей, пока модератор проверяет"
             db.commit()
@@ -888,6 +889,13 @@ def admin_refund(payment_id: int, reason: str = Query(default="", max_length=300
     """mode=full: the whole payment goes back to the person (Telegram). mode=balance: only the unused part of the service,
     as Stars on the balance (Telegram can not return a part)."""
     credit = None
+    boss = db.get(Admin, actor)
+    if boss is None or boss.role != "super_admin":                # a daily cap protects against a mass refund by one account
+        today = now().replace(hour=0, minute=0, second=0, microsecond=0)
+        done = db.scalar(select(func.count()).select_from(AuditLog).where(
+            AuditLog.actor == actor, AuditLog.action == "payment.refund", AuditLog.created_at >= today)) or 0
+        if done >= rules.val("refund.day_count"):
+            raise HTTPException(429, "Дневной лимит возвратов исчерпан: дальше возвращает суперадмин (настройка в «Правилах»)")
     try:
         if mode == "balance":
             p, credit = payments.refund_to_balance(db, payment_id, reason)

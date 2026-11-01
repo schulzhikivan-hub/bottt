@@ -15,7 +15,7 @@ from app.database import get_db
 from app.models import (Block, Conversation, DatingLike, DatingPrivatePhoto, DatingProfile, DatingView, Message, Notification,
                         User)
 from app.payments import aware, now
-from app import policy
+from app import policy, rules
 from app.auth import optional_user_id
 from app.fields import VISAS
 from app.users import writer, is_blocked_pair, get_or_create_user
@@ -50,7 +50,9 @@ def detect_image(data: bytes) -> str | None:
 
 SEEKING = {"", "f", "m", "any"}
 GOALS = {"", "friendship", "relationship", "marriage", "chat"}
-CANCEL_WINDOW = dt.timedelta(minutes=5)
+def _cancel_window() -> dt.timedelta:
+    return dt.timedelta(minutes=rules.val("dating.cancel_minutes"))
+
 MAX_AGE = 99
 
 
@@ -119,6 +121,8 @@ def vip_kind(p: DatingProfile, at: dt.datetime | None = None) -> str:
 
 def counting(p: DatingProfile, at: dt.datetime | None = None) -> bool:
     """Does the VIP clock run? It stops while the profile is paused, invisible, hidden by doubt or in moderation."""
+    if not rules.val("vip.freeze"):
+        return True                                          # the owner switched the freeze off: the clock always runs
     return p.status == "published" and not p.paused and not p.suspect and not is_invisible(p, at)
 
 
@@ -418,7 +422,7 @@ def browse(gender: str | None = None, city: str | None = None, user_id: str = De
     if mode == "from_me":
         for p, item in zip(rows, items):
             made = out[p.owner_tg_id].created_at
-            item["can_cancel"] = bool(made and now() - aware(made) <= CANCEL_WINDOW)
+            item["can_cancel"] = bool(made and now() - aware(made) <= _cancel_window())
     return items
 
 
@@ -444,7 +448,7 @@ class LikeIn(BaseModel):
 @router.post("/api/dating/{profile_id}/like")
 def like(profile_id: int, user_id: str = Depends(writer), db: Session = Depends(get_db), body: LikeIn | None = None):
     from app.guard import rate_limit, notify_user
-    rate_limit(user_id, "like", 60, 3600)
+    rate_limit(user_id, "like", rules.val("dating.like_per_hour"), 3600)
     mine = db.scalar(select(DatingProfile).where(DatingProfile.owner_tg_id == user_id))
     if mine is not None and (mine.paused or mine.suspect):
         raise HTTPException(403, "Ваша анкета на паузе или на проверке: включите её, чтобы симпатизировать")
@@ -468,7 +472,7 @@ def like(profile_id: int, user_id: str = Depends(writer), db: Session = Depends(
                                        else "💗 Вам симпатизируют. Откройте «Знакомства» → «Мне симпатизируют».", "dating")
             db.commit()
     if reverse is None:
-        return {"mutual": False, "can_cancel_until": (aware(row.created_at) + CANCEL_WINDOW).isoformat() if row.created_at else None}
+        return {"mutual": False, "can_cancel_until": (aware(row.created_at) + _cancel_window()).isoformat() if row.created_at else None}
     a, b = sorted([user_id, target.owner_tg_id])
     key = f"{a}:{b}"
     conv = db.scalar(select(Conversation).where(Conversation.match_key == key))
@@ -493,7 +497,7 @@ def cancel_like(profile_id: int, user_id: str = Depends(writer), db: Session = D
         raise HTTPException(404, "Симпатии нет")
     if db.scalar(select(DatingLike.id).where(DatingLike.from_tg == target.owner_tg_id, DatingLike.to_tg == user_id)) is not None:
         raise HTTPException(409, "Симпатия уже взаимная: отменить её нельзя. Чат можно скрыть или заблокировать человека")
-    if row.created_at is None or now() - aware(row.created_at) > CANCEL_WINDOW:
+    if row.created_at is None or now() - aware(row.created_at) > _cancel_window():
         raise HTTPException(409, "Отменить можно только в течение 5 минут")
     if row.notif_id is not None:
         note = db.get(Notification, row.notif_id)
