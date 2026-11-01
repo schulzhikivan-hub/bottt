@@ -1852,7 +1852,7 @@ async function openArticle(id) {
     catch (err) { toast(err.message); }
   };
   $("#articleBody").innerHTML = `<article class="listing"><p class="muted">Источник: <a href="${esc(a.source_url)}" target="_blank" rel="noopener">${esc(a.source_url)}</a></p>
-    <p>${esc(a.body).replace(/\n/g, "<br>")}</p><p class="muted">Дата проверки: ${esc((a.checked_at || "").slice(0, 10))}</p></article>`;
+    <p>${esc(a.body).replace(/\n/g, "<br>")}</p><p class="muted">Дата проверки: ${esc((a.checked_at || "").slice(0, 10))}</p>${a.stale ? '<p class="muted">⚠️ Материал проверялся больше полугода назад: правила могли измениться, сверьтесь с источником.</p>' : ""}</article>`;
   $("#scroll").scrollTop = 0;
 }
 $("#articleBack").onclick = goBack;

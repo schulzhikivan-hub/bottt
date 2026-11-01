@@ -1,5 +1,6 @@
 import asyncio
 
+from fastapi import HTTPException
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import CommandStart, Command, CommandObject
 from aiogram.types import (
@@ -174,6 +175,41 @@ def register(dp: Dispatcher, bot: Bot) -> None:
     @dp.message(Command("help"))
     async def help_cmd(message: Message):
         await message.answer(HELP_TEXT)
+
+    @dp.message(Command("support"))
+    async def support_cmd(message: Message):
+        text = (message.text or "").partition(" ")[2].strip()
+        if len(text) < 5:
+            await message.answer("Напишите вопрос после команды, например:\n/support Не получается продлить объявление")
+            return
+        from app import support
+        with SessionLocal() as db:
+            try:
+                number = support.open_ticket_from_text(db, str(message.from_user.id), text)
+            except HTTPException:
+                await message.answer("Слишком много обращений за сутки. Попробуйте завтра.")
+                return
+        await message.answer(f"Обращение №{number} принято. Ответ придёт в приложение: Профиль → Поддержка.")
+
+    @dp.message(Command("feedback"))
+    async def feedback_cmd(message: Message):
+        text = (message.text or "").partition(" ")[2].strip()
+        if len(text) < 5:
+            await message.answer("Напишите отзыв или идею после команды, например:\n/feedback Добавьте фильтр по метро")
+            return
+        from app import support
+        with SessionLocal() as db:
+            try:
+                support.open_ticket_from_text(db, str(message.from_user.id), text, "Отзыв: ")
+            except HTTPException:
+                await message.answer("Слишком много обращений за сутки. Попробуйте завтра.")
+                return
+        await message.answer("Спасибо! Отзыв передан команде.")
+
+    @dp.message(Command("lang"))
+    async def lang_cmd(message: Message):
+        await message.answer("Язык сейчас один: русский (RU). Корейский и английский появятся позже; "
+                             "мы сообщим в боте, когда они будут доступны.")
 
     @dp.message(Command("my"))
     async def my_listings(message: Message):
@@ -352,6 +388,8 @@ def _heartbeat() -> None:
         guard.purge_rate_hits(db)       # old rate-limit counters
         from app import adminplus
         adminplus.unblock_expired(db)   # temporary blocks that are over
+        from app import retention
+        retention.run_daily(db)         # old notices, views and closed requests are removed once a day
 
 
 async def expiry_loop(bot: Bot) -> None:

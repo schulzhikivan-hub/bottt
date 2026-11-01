@@ -87,6 +87,20 @@ def _view(db: Session, t: Ticket, with_messages: bool = False) -> dict:
     return out
 
 
+def open_ticket_from_text(db: Session, user_id: str, text: str, prefix: str = "") -> int:
+    """A support request typed in the bot (/support, /feedback): the same ticket as from the app, answered in the app."""
+    guard.rate_limit(user_id, "ticket", 5, 86400)
+    body = (prefix + text.strip())[:1500]
+    t = Ticket(user_tg_id=user_id, kind="support")
+    db.add(t)
+    db.flush()
+    db.add(TicketMessage(ticket_id=t.id, staff=False, author=user_id, text=body))
+    db.commit()
+    from app import adminplus
+    adminplus.notify_staff(db, "Новое обращение в поддержку (админка → Поддержка).", "ticket", ("support", "moderator", "admin", "super_admin"))
+    return t.id
+
+
 @router.post("/api/tickets", status_code=201)
 def create_ticket(payload: TicketIn, user_id: str = Depends(writer), db: Session = Depends(get_db)):
     guard.rate_limit(user_id, "ticket", 5, 86400)

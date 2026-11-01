@@ -740,6 +740,11 @@ def list_groups(db: Session = Depends(get_db)):
             for g in db.scalars(select(Group).order_by(Group.id)).all()]
 
 
+def _stale(a: Article) -> bool:
+    """A guide article that was checked more than 6 months ago: the app warns that the facts may have changed."""
+    return a.checked_at is None or aware(a.checked_at) < now() - timedelta(days=183)
+
+
 @app.get("/api/articles")
 def list_articles(section: str | None = None, q: str = Query(default="", max_length=60),
                   user_id: str | None = Depends(optional_user_id), db: Session = Depends(get_db)):
@@ -753,7 +758,7 @@ def list_articles(section: str | None = None, q: str = Query(default="", max_len
         hay = f"{a.title} {a.body}".lower()
         if all(w in hay for w in words):
             out.append({"id": a.id, "section": a.section, "title": a.title, "saved": a.id in saved,
-                        "checked_at": str(a.checked_at) if a.checked_at else None})
+                        "checked_at": str(a.checked_at) if a.checked_at else None, "stale": _stale(a)})
     return out
 
 
@@ -785,7 +790,7 @@ def get_article(article_id: int, db: Session = Depends(get_db)):
     if a is None or not a.published:
         raise HTTPException(404, "Статья не найдена")
     return {"id": a.id, "section": a.section, "title": a.title, "body": a.body,
-            "source_url": a.source_url, "checked_at": str(a.checked_at) if a.checked_at else None}
+            "source_url": a.source_url, "checked_at": str(a.checked_at) if a.checked_at else None, "stale": _stale(a)}
 
 
 # ---------- Admin ----------
