@@ -92,7 +92,8 @@ def test_photo_served_only_when_published(client):
 def test_mutual_like_opens_chat_only_between_them(client):
     p1 = publish(client, 1)
     p2 = publish(client, 2)
-    assert client.post(f"/api/dating/{p2}/like", headers=as_user(1)).json() == {"mutual": False}
+    first = client.post(f"/api/dating/{p2}/like", headers=as_user(1)).json()
+    assert first["mutual"] is False and first["can_cancel_until"]      # one-sided: can be taken back for 5 minutes
     r = client.post(f"/api/dating/{p1}/like", headers=as_user(2)).json()
     assert r["mutual"] is True
     conv = r["conversation_id"]
