@@ -2626,11 +2626,18 @@ async function renderCoPane(ov) {
     if (coState.tab === "log") pane.innerHTML = await coActivityHtml(ov);
     if (coState.tab === "apps") {
       const rows = await api(`/api/company/${ov.id}/applications`);
-      pane.innerHTML = rows.length ? rows.map((a) => `<article class="dcard2" data-coapp="${a.id}"><div class="dcard2-head"><h3 style="margin:0">${esc(a.name || "Соискатель")}</h3><span class="muted">${esc(CO_APP[a.status] || a.status)}</span></div>
+      const ST = {new: "Новые", contact: "Связались", interview: "Собеседование", offer: "Оффер", hired: "Приняты", declined: "Не подошли"};
+      const flt = coState.stage || "all";
+      const cnt = (k) => rows.filter((a) => a.stage === k).length;
+      const shown = rows.filter((a) => flt === "all" || a.stage === flt);
+      pane.innerHTML = `<div class="chips">${[["all", "Все", rows.length], ...Object.entries(ST).map(([k, t]) => [k, t, cnt(k)])].map(([k, t, n]) => `<button class="chip ${k === flt ? "active" : ""}" data-costage-f="${k}">${t} ${n}</button>`).join("")}</div>
+        <div class="actions"><button class="secondary" data-cocsv>⬇ Выгрузить в CSV</button></div>` + (shown.length ? shown.map((a) => `<article class="dcard2" data-coapp="${a.id}"><div class="dcard2-head"><h3 style="margin:0">${esc(a.name || "Соискатель")}</h3><span class="muted">${esc(CO_APP[a.status] || a.status)}</span></div>
         <p class="muted">на «${esc(a.listing_title)}» · ${esc(fmtDate(a.created_at))}</p><p><b>${esc(a.contact)}</b>${a.visa ? " · виза " + esc(a.visa) : ""}${a.city ? " · " + esc(a.city) : ""}</p>
         ${a.message ? `<p>${esc(a.message)}</p>` : ""}${a.reply ? `<p class="muted">Ответ: ${esc(a.reply)}</p>` : ""}
-        ${a.can_answer ? `<div class="actions"><button data-costatus="invited" data-id="${a.id}">Пригласить</button><button class="secondary" data-costatus="rejected" data-id="${a.id}">Отказать</button></div>` : ""}</article>`).join("")
-        : '<div class="empty">Откликов пока нет.</div>';
+        ${a.can_answer ? `<label class="muted">Этап<select data-costage="${a.id}">${Object.entries(ST).map(([k, t]) => `<option value="${k}" ${k === a.stage ? "selected" : ""}>${t}</option>`).join("")}</select></label>
+          <textarea data-conote="${a.id}" rows="2" maxlength="1000" placeholder="Заметка (её видит только команда)">${esc(a.note)}</textarea>
+          <div class="actions"><button class="secondary" data-conote-save="${a.id}">💾 Заметка</button><button data-costatus="invited" data-id="${a.id}">Пригласить</button><button class="secondary" data-costatus="rejected" data-id="${a.id}">Отказать</button></div>` : ""}</article>`).join("")
+        : '<div class="empty">В этом этапе пока никого.</div>');
     }
     if (coState.tab === "team") {
       const t = await api(`/api/company/${ov.id}/team`);
@@ -3289,3 +3296,21 @@ async function showListingHistory(id, item) {
   document.body.appendChild(m);
   m.onclick = (e) => { if (e.target === m || e.target.closest("[data-x]")) m.remove(); };
 }
+
+document.addEventListener("change", async (e) => {
+  const sel = e.target.closest("[data-costage]");
+  if (!sel) return;
+  try { await api(`/api/company/${coState.id}/applications/${sel.dataset.costage}/note`, {method: "PUT", body: JSON.stringify({stage: sel.value})}); toast("Этап сохранён"); }
+  catch (err) { toast(err.message); }
+});
+document.addEventListener("click", async (e) => {
+  const f = e.target.closest("[data-costage-f]"), sv = e.target.closest("[data-conote-save]");
+  try {
+    if (f) { coState.stage = f.dataset.costageF; renderCoPane(await api(`/api/company/${coState.id}`)); }
+    if (sv) {
+      const id = sv.dataset.conoteSave;
+      await api(`/api/company/${coState.id}/applications/${id}/note`, {method: "PUT", body: JSON.stringify({note: document.querySelector(`[data-conote="${id}"]`).value})});
+      toast("Заметка сохранена");
+    }
+  } catch (err) { toast(err.message); }
+});

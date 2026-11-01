@@ -263,3 +263,20 @@ def test_company_analytics_export_and_activity(client):
     log = client.get(f"/api/company/{cid}/activity", headers=as_user(1)).json()
     assert any(x["what"] == "Создана копия объявления" for x in log)
     assert client.get(f"/api/company/{cid}/analytics", headers=as_user(2)).status_code == 404
+
+
+def test_hiring_funnel_stage_and_private_note(client):
+    cid = verified_company(client)
+    lid = approved_company_listing(client, cid)
+    team_member(client, cid, 2, "recruiter")
+    client.post(f"/api/listings/{lid}/apply", json={"contact": "@cook", "message": "Здравствуйте"}, headers=as_user(3))
+    app_id = client.get(f"/api/company/{cid}/applications", headers=as_user(1)).json()[0]["id"]
+    assert client.get(f"/api/company/{cid}/applications", headers=as_user(1)).json()[0]["stage"] == "new"
+    r = client.put(f"/api/company/{cid}/applications/{app_id}/note", json={"stage": "interview", "note": "Звонить после 18:00"}, headers=as_user(2))
+    assert r.status_code == 200
+    row = client.get(f"/api/company/{cid}/applications", headers=as_user(1)).json()[0]
+    assert row["stage"] == "interview" and row["note"] == "Звонить после 18:00"
+    assert client.put(f"/api/company/{cid}/applications/{app_id}/note", json={"stage": "bogus"}, headers=as_user(1)).status_code == 400
+    assert client.put(f"/api/company/{cid}/applications/{app_id}/note", json={"note": "x"}, headers=as_user(3)).status_code == 404   # not in the team
+    mine = client.get("/api/me/applications", headers=as_user(3)).json()
+    assert "Звонить" not in str(mine)                                      # the applicant never sees the employer's note

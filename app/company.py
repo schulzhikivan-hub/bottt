@@ -260,8 +260,11 @@ def company_applications(company_id: int, user_id: str = Depends(writer), db: Se
     rows = db.scalars(select(Application).join(User, User.tg_id == Application.applicant_tg_id)
                       .where(Application.listing_id.in_(list(listings)), Application.status != "withdrawn",
                              User.blocked.is_(False), User.deleted_at.is_(None)).order_by(Application.id.desc()).limit(200)).all()
+    from app import pipeline
+    notes = pipeline.for_applications(db, [a.id for a in rows])
     return [{"id": a.id, "listing_id": a.listing_id, "listing_title": listings[a.listing_id].title, "name": a.name, "message": a.message,
              "contact": a.contact, "visa": a.visa, "city": a.city, "status": a.status, "reply": a.reply,
+             "stage": notes[a.id].stage if a.id in notes else "new", "note": notes[a.id].note if a.id in notes else "",
              "created_at": a.created_at.isoformat(), "can_answer": role in WRITE} for a in rows]
 
 

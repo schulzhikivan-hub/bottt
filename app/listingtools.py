@@ -119,7 +119,7 @@ def applications_csv(company_id: int, user_id: str = Depends(writer), db: Sessio
 
 
 ACTIONS = {"company.edit": "Изменены данные компании", "company.invite": "Создано приглашение", "company.role": "Изменена роль",
-           "company.remove": "Участник убран", "company.leave": "Участник вышел", "company.export": "Выгрузка откликов",
+           "company.remove": "Участник убран", "company.leave": "Участник вышел", "company.export": "Выгрузка откликов", "company.stage": "Этап отклика изменён",
            "listing.duplicate": "Создана копия объявления", "listing.move": "Объявление перенесено"}
 
 
