@@ -825,8 +825,27 @@ $("#main").addEventListener("click", async (e) => {
 
 // ---- рассылки и баннеры ----
 async function loadMarketing() {
-  const [banners, casts, geo] = await Promise.all([api("/api/admin/banners"), api("/api/admin/broadcasts"), fetch("/api/geo").then((r) => r.json()).then((g) => g.regions)]);
+  const [banners, casts, geo, ads, camps] = await Promise.all([api("/api/admin/banners"), api("/api/admin/broadcasts"), fetch("/api/geo").then((r) => r.json()).then((g) => g.regions),
+    api("/api/admin/ads").catch(() => []), api("/api/admin/campaigns").catch(() => [])]);
+  const SERVICES = {dating_vip: "VIP-анкета", dating_invisible: "Невидимка", dating_viewers: "Кто видел анкету", dating_super: "Супер-симпатия"};
   $("#main").innerHTML = `
+    <div class="card"><h3>Реклама в лентах</h3><p class="muted">Всегда с пометкой «Реклама», не выше третьего места, одна на экран. 18+ видят только люди с подтверждённым возрастом. Реклама на объявление исчезает вместе с ним.</p>
+      <div class="row"><input id="adTitle" placeholder="Заголовок" maxlength="80"><input id="adText" placeholder="Текст" maxlength="200" style="flex:1;min-width:200px">
+      <input id="adLink" placeholder="Ссылка https://… или номер объявления" style="min-width:220px">
+      <select id="adPlace"><option value="both">Лента и главная</option><option value="list">Лента</option><option value="home">Главная</option></select>
+      <label><input type="checkbox" id="adAdult"> 18+</label><input id="adDays" type="number" min="1" max="365" placeholder="дней" style="width:80px"><button class="act" id="adAdd">Добавить</button></div>
+      <table><tr><th>№</th><th>Заголовок</th><th>Показы</th><th>Клики</th><th>CTR</th><th>Идёт</th><th></th></tr>${ads.map((a) => `<tr data-adid="${a.id}"><td>${a.id}</td><td>${esc(a.title)}${a.adult ? " 🔞" : ""}</td>
+        <td>${a.shows}</td><td>${a.clicks}</td><td>${a.ctr}%</td><td>${a.live ? "да" : "нет"}</td>
+        <td><button class="act ${a.active ? "gray" : "ok"}" data-adtoggle>${a.active ? "Выключить" : "Включить"}</button><button class="act no" data-addel>Удалить</button></td></tr>`).join("")}</table></div>
+    <div class="card"><h3>Акции (бесплатные услуги)</h3><p class="muted">Выдаётся с пометкой «по акции» и без подъёма в ленте. Досрочная остановка не отбирает уже выданное. У человека одновременно одна акция на услугу.</p>
+      <div class="row"><input id="pcTitle" placeholder="Название акции" maxlength="80"><select id="pcService">${Object.entries(SERVICES).map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select>
+      <input id="pcDays" type="number" min="1" max="30" value="3" style="width:70px" title="дней услуги">
+      <select id="pcAud"><option value="all">Все</option><option value="new">Новые (14 дней)</option><option value="dating">С анкетой</option><option value="sellers">С объявлениями</option></select>
+      <select id="pcMode"><option value="claim">Человек берёт сам</option><option value="auto">Выдать всем сразу</option></select>
+      <input id="pcStart" type="number" min="0" placeholder="старт через, ч" style="width:110px"><button class="act" id="pcAdd">Создать</button></div>
+      <table><tr><th>№</th><th>Акция</th><th>Кому</th><th>Режим</th><th>Взяли</th><th>Статус</th><th></th></tr>${camps.map((c) => `<tr data-pcid="${c.id}"><td>${c.id}</td><td>${esc(c.title)} · ${esc(SERVICES[c.service_code] || c.service_code)} ${c.days} дн.</td>
+        <td>${esc(c.audience_title)}</td><td>${c.mode === "auto" ? "всем сразу" : "по желанию"}</td><td>${c.claims}</td><td>${c.running ? "идёт" : c.active ? "ещё не началась" : "остановлена"}</td>
+        <td>${c.active ? '<button class="act no" data-pcstop>Остановить</button>' : ""}</td></tr>`).join("")}</table></div>
     <div class="card"><h3>Баннер на главной</h3><p class="muted">Показывается вверху главной (не больше трёх одновременно).</p>
       <div class="row"><input id="bText" placeholder="Текст баннера" maxlength="160" style="flex:1;min-width:220px"><input id="bLink" placeholder="Ссылка https://… (необязательно)">
       <input id="bDays" type="number" min="1" max="365" placeholder="дней" style="width:80px"><button class="act" id="bAdd">Добавить</button></div>
@@ -842,6 +861,18 @@ async function loadMarketing() {
       <table><tr><th>№</th><th>Текст</th><th>Кому</th><th>Статус</th><th>Отправлено</th><th></th></tr>${casts.map((c) => `<tr data-cid="${c.id}"><td>${c.id}</td><td>${esc(c.text.slice(0, 70))}</td><td>${esc(c.region_code || "вся Корея")} · ${esc({all: "все", employers: "работодатели", authors: "авторы", active30: "активные", inactive30: "неактивные"}[c.audience] || c.audience)}</td>
         <td>${esc(c.status === "scheduled" ? "запланирована на " + fmt(c.send_at) : c.status)}</td><td>${c.sent}/${c.total}${c.failed ? ` (ошибок ${c.failed})` : ""}</td><td>
         ${["draft", "scheduled"].includes(c.status) ? '<button class="act ok" data-csend>Отправить сейчас</button>' : ""}${["draft", "scheduled", "sending"].includes(c.status) ? '<button class="act no" data-ccancel>Остановить</button>' : ""}</td></tr>`).join("")}</table></div>`;
+  $("#adAdd").onclick = async () => {
+    try {
+      const link = $("#adLink").value.trim(), isId = /^\d+$/.test(link);
+      await post("/api/admin/ads", {title: $("#adTitle").value.trim(), text: $("#adText").value.trim(), link: isId ? "" : link, listing_id: isId ? Number(link) : null,
+        place: $("#adPlace").value, adult_only: $("#adAdult").checked, days: $("#adDays").value ? Number($("#adDays").value) : null}); reload();
+    } catch (err) { say(err.message); }
+  };
+  $("#pcAdd").onclick = async () => {
+    try { await post("/api/admin/campaigns", {title: $("#pcTitle").value.trim(), service_code: $("#pcService").value, days: Number($("#pcDays").value || 3),
+      audience: $("#pcAud").value, mode: $("#pcMode").value, start_in_hours: Number($("#pcStart").value || 0)}); reload(); }
+    catch (err) { say(err.message); }
+  };
   $("#bAdd").onclick = async () => {
     try { await post("/api/admin/banners", {text: $("#bText").value.trim(), link: $("#bLink").value.trim(), days: $("#bDays").value ? Number($("#bDays").value) : null}); reload(); }
     catch (err) { say(err.message); }
@@ -858,6 +889,11 @@ $("#main").addEventListener("click", async (e) => {
     const b = e.target.closest("[data-bid]");
     if (b && e.target.closest("[data-btoggle]")) { await api(`/api/admin/banners/${b.dataset.bid}/toggle`, {method: "PUT"}); reload(); }
     if (b && e.target.closest("[data-bdel]")) { await api(`/api/admin/banners/${b.dataset.bid}`, {method: "DELETE"}); reload(); }
+    const ad = e.target.closest("[data-adid]");
+    if (ad && e.target.closest("[data-adtoggle]")) { await api(`/api/admin/ads/${ad.dataset.adid}/toggle`, {method: "PUT"}); reload(); }
+    if (ad && e.target.closest("[data-addel]") && confirm("Удалить рекламу?")) { await api(`/api/admin/ads/${ad.dataset.adid}`, {method: "DELETE"}); reload(); }
+    const pc = e.target.closest("[data-pcid]");
+    if (pc && e.target.closest("[data-pcstop]") && confirm("Остановить акцию? Уже выданное останется.")) { await api(`/api/admin/campaigns/${pc.dataset.pcid}/stop`, {method: "PUT"}); reload(); }
     const c = e.target.closest("[data-cid]");
     if (c && e.target.closest("[data-csend]")) {
       if (!confirm("Отправить рассылку всем получателям?")) return;
