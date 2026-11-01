@@ -77,8 +77,8 @@ def admin(browser, base):
     page.on("pageerror", lambda e: errors.append(str(e)))
     page.on("dialog", lambda d: d.accept("тест причина"))               # prompts and confirms get an answer
     page.route("**/telegram.org/**", lambda r: r.fulfill(status=200, content_type="application/javascript", body=""))
-    page.add_init_script("sessionStorage.setItem('adminSession','test-session-token');sessionStorage.setItem('adminRole','super_admin');"
-                         "sessionStorage.setItem('adminId','999');localStorage.setItem('adminTheme','light');")
+    page.add_init_script("try{if(window===window.top){sessionStorage.setItem('adminSession','test-session-token');sessionStorage.setItem('adminRole','super_admin');"
+                         "sessionStorage.setItem('adminId','999');localStorage.setItem('adminTheme','light');}}catch(e){}")
     page.goto(base + "/admin")
     page.wait_for_selector("#app:not(.hidden)", timeout=15000)
     page.wait_for_function("() => !document.querySelector('#status').textContent.startsWith('Загрузка')", timeout=15000)
@@ -106,6 +106,8 @@ def test_every_section_and_subsection_opens_without_errors(admin):
         status = settled(page)
         if not status.startswith("Обновлено"):
             problems.append((sec, status))
+        if not page.locator("#subnav").is_visible():
+            continue                                    # a section with one page has no second row
         for j in range(page.locator("#subnav button").count()):
             btn = page.locator("#subnav button").nth(j)
             key = btn.get_attribute("data-sub")
