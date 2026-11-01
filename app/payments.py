@@ -35,6 +35,9 @@ PRICING_SEED = [
     ("marketplace_bump", "marketplace", "bump", "Поднять товар", 15, 1),
     ("marketplace_vip", "marketplace", "vip", "VIP на 7 дней", 50, 7),
     ("marketplace_highlight", "marketplace", "highlight", "Выделение объявления", 15, 7),
+    ("job_autobump", "job", "autobump", "Автоподнятие на 7 дней", 120, 7),
+    ("housing_autobump", "housing", "autobump", "Автоподнятие на 7 дней", 90, 7),
+    ("marketplace_autobump", "marketplace", "autobump", "Автоподнятие на 7 дней", 70, 7),
     ("dating_bump", "dating", "bump", "Поднять анкету наверх на 24 часа", 20, 1),
     ("dating_vip", "dating", "vip", "VIP-анкета на 7 дней", 70, 7),
     ("dating_invisible", "dating", "invisible", "Невидимка на 30 дней", 60, 30),
@@ -43,6 +46,7 @@ PRICING_SEED = [
 ]
 # Higher number = shown higher in the listing feed
 KIND_PRIORITY = {"pin": 4, "vip": 3, "bump": 2, "highlight": 1}
+PLACED_KINDS = tuple(KIND_PRIORITY)     # «autobump» is a subscription that creates daily bumps, it has no place of its own
 
 
 class PaymentError(Exception):
@@ -88,6 +92,8 @@ def active_placements(db: Session, listing_ids: list[int]) -> dict[int, str]:
         Placement.listing_id.in_(listing_ids), Placement.status == "active")).all()
     result: dict[int, str] = {}
     for row in rows:
+        if row.kind not in KIND_PRIORITY:
+            continue
         current = result.get(row.listing_id)
         if current is None or KIND_PRIORITY[row.kind] > KIND_PRIORITY[current]:
             result[row.listing_id] = row.kind
@@ -100,6 +106,8 @@ def active_placement_info(db: Session, listing_ids: list[int]) -> dict[int, tupl
         return {}
     result: dict[int, tuple[str, bool]] = {}
     for row in db.scalars(select(Placement).where(Placement.listing_id.in_(listing_ids), Placement.status == "active")).all():
+        if row.kind not in KIND_PRIORITY:
+            continue
         cur = result.get(row.listing_id)
         if cur is None or KIND_PRIORITY[row.kind] > KIND_PRIORITY[cur[0]]:
             result[row.listing_id] = (row.kind, bool(row.promo))
@@ -111,6 +119,7 @@ KIND_TEXT = {
     "vip": "Метка VIP и показ выше обычных объявлений",
     "pin": "Закрепление: объявление всегда вверху списка",
     "highlight": "Цветная рамка: объявление заметнее в ленте",
+    "autobump": "Каждый день объявление поднимается само, пока действует услуга",
 }
 
 
@@ -423,6 +432,28 @@ def expire_placements(db: Session, at: dt.datetime | None = None) -> list[Placem
             ended.append(placement)
     db.commit()
     return ended
+
+
+def run_autobump(db: Session, at: dt.datetime | None = None) -> int:
+    """Every paid «автоподнятие» lifts its listing once a day: a one-day bump is added when the last one is older than 24 hours.
+    The bumps it creates are not sold (no payment), so refunds and notices ignore them."""
+    moment = at or now()
+    made = 0
+    for sub in db.scalars(select(Placement).where(Placement.kind == "autobump", Placement.status == "active")).all():
+        if sub.frozen_at is not None or aware(sub.ends_at) <= moment:
+            continue
+        listing = db.get(Listing, sub.listing_id)
+        if listing is None or listing.status != "approved":
+            continue
+        last = db.scalar(select(Placement).where(Placement.listing_id == sub.listing_id, Placement.kind == "bump")
+                         .order_by(Placement.starts_at.desc()).limit(1))
+        if last is not None and aware(last.starts_at) > moment - BUMP_COOLDOWN:
+            continue
+        db.add(Placement(listing_id=sub.listing_id, kind="bump", starts_at=moment, ends_at=moment + dt.timedelta(days=1), status="active"))
+        made += 1
+    if made:
+        db.commit()
+    return made
 
 
 def placements_ending_soon(db: Session, hours: int = 24, at: dt.datetime | None = None) -> list[Placement]:

@@ -16,7 +16,7 @@ const REASONS = {fraud: "Мошенничество", fake: "Поддельно�
 const SECTIONS = {visas: "Визы и документы", registration: "Регистрация и адрес", medicine: "Медицина",
                   banks: "Банки и мобильная связь", housing: "Жильё", work: "Работа и трудовые права",
                   emergency: "Экстренные ситуации"};
-const PROMO = {pin: "📌 Закреплено", vip: "VIP", bump: "⬆ Поднято", highlight: "★ Выделено"};
+const PROMO = {pin: "📌 Закреплено", vip: "VIP", bump: "⬆ Поднято", highlight: "★ Выделено", autobump: "🔁 Автоподнятие"};
 const NAV_VIEWS = ["home", "saved", "chats", "profile"];
 const MAIN_VIEWS = [...NAV_VIEWS, "dating", "community", "guide"];
 const ALL_VIEWS = [...MAIN_VIEWS, "detail", "chat", "article", "mine", "sub", "notifs"];

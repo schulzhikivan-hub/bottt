@@ -371,8 +371,11 @@ def _expire_once() -> list[tuple[str, str]]:
                 for row in db.scalars(select(Application).where(Application.listing_id == item.id,
                                                                 Application.status.in_(["new", "viewed", "invited"]))).all():
                     messages.append((row.applicant_tg_id, f"Вакансия «{item.title}» закрыта: срок объявления истёк.", "applications"))
+        payments.run_autobump(db)                    # paid «автоподнятие»: one bump a day
         ended = payments.expire_placements(db)
         for placement in ended:
+            if placement.kind == "bump" and placement.payment_id is None:
+                continue                              # a bump made by the autobump: nothing to tell
             listing = db.get(Listing, placement.listing_id)
             if listing is None or not listing.author_telegram_id.isdigit():
                 continue
