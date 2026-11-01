@@ -325,6 +325,8 @@ def _expire_once() -> list[tuple[str, str]]:
                                  "Профиль → Мои объявления → Продвинуть.", "payments"))
         messages.extend((tg, text, "searches") for tg, text in searches.new_matches(db))
         from app import datingsvc
+        from app import ads
+        messages.extend(ads.housekeeping(db))        # promotions: day-before notice, automatic start
         messages.extend(datingsvc.housekeeping(db))   # VIP/invisible of dating profiles: end, reminders, frozen spans
         payments.restore_stale_balance(db)            # reserved balance of unpaid invoices goes back
         # every notice goes to the in-app feed; Telegram only gets what the user allows

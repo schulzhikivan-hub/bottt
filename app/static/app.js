@@ -467,6 +467,7 @@ async function loadCatalog(append = false) {
       ? 'Ничего не нашли. Проверьте написание или сбросьте фильтры.<br><button class="link" id="emptyReset">Сбросить фильтры</button> · <button class="link" id="emptyWatch">Сообщить, когда появится</button>'
       : "Пока нет объявлений. Добавьте первое кнопкой «+»."}</div>`;
     page.offset += r.items.length;
+    if (!append && r.items.length) insertAds(box, r.items.length);
     $("#resultCount").textContent = !r.total ? "Ничего не найдено"
       : $("#view-home").classList.contains("landing") ? "Популярные объявления"
       : r.corrected ? `Показано по запросу «${r.corrected}» (найдено: ${r.total})` : `Найдено: ${r.total}`;
@@ -477,6 +478,25 @@ async function loadCatalog(append = false) {
   }
   if (myRun === page.run) page.loading = false;
 }
+// реклама: отдельная полоса между обычными карточками, всегда с пометкой; места выбирает сервер (app/policy.py)
+async function insertAds(box, count) {
+  try {
+    const slots = await api(`/api/ads?organic=${count}&page=0`, {quiet: true});
+    const cards = [...box.querySelectorAll(".listing:not(.ad)")];
+    for (const s of [...slots].sort((a, b) => b.at - a.at)) {
+      const a = s.ad, before = cards[s.at];
+      const html = `<article class="listing hcard ad" data-ad="${a.id}" ${a.link.startsWith("/?listing=") ? `data-open="${esc(a.link.split("=")[1])}"` : `data-adurl="${esc(a.link)}"`}>
+        <div class="body"><span class="adlabel">Реклама</span><h3>${esc(a.title)}</h3><div class="meta">${esc(a.text)}</div></div></article>`;
+      if (before) before.insertAdjacentHTML("beforebegin", html); else box.insertAdjacentHTML("beforeend", html);
+    }
+  } catch (e) { /* реклама не обязательна: лента работает и без неё */ }
+}
+document.addEventListener("click", (e) => {
+  const ad = e.target.closest("[data-ad]");
+  if (!ad) return;
+  fetch(`/api/ads/${ad.dataset.ad}/click`, {method: "POST"}).catch(() => {});
+  if (ad.dataset.adurl) { e.stopPropagation(); window.open(ad.dataset.adurl, "_blank", "noopener"); }
+}, true);
 document.addEventListener("click", async (e) => {
   if (e.target.id === "retryCatalog") reloadCatalog();
   if (e.target.id === "emptyReset") { filters = {...DEFAULT_FILTERS}; $("#search").value = ""; reloadCatalog(); }

@@ -32,7 +32,7 @@ from app.guard import rate_limit, check_text, duplicate_note, notify_user
 from app import admin_ops as ops
 from app import catalog
 from app import photos, applications, searches, inbox, promos, adminx, observe, site
-from app import geo, reviews, resumes, referrals, support, extras, adminplus, adminview, datingsvc
+from app import geo, reviews, resumes, referrals, support, extras, adminplus, adminview, datingsvc, ads
 from app import fields as listing_fields
 from app.users import get_or_create_user, writer, is_blocked_pair
 from app.models import ConvHide, DatingProfile, TypingMark
@@ -50,6 +50,7 @@ with startup_lock():   # with several workers only one prepares the database at 
         catalog.backfill_search_fields(_db)
 
 app = FastAPI(title="KOREA HUB API", version="0.4.0")
+app.include_router(ads.router)
 app.include_router(datingsvc.router)    # before the dating router: fixed words such as /viewers must win over /{profile_id}
 app.include_router(dating_router)
 app.include_router(manage_router)

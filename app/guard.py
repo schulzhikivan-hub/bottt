@@ -125,7 +125,7 @@ def send_telegram(tg_id: str, text: str) -> bool:
 
 
 NOTIFY_KINDS = {"messages": "Сообщения", "applications": "Отклики", "moderation": "Решения модератора", "support": "Ответы поддержки", "favorites": "Цены в избранном", "dating": "Знакомства",
-                "searches": "Новые по моим поискам", "expiry": "Срок объявлений", "payments": "Платежи и продвижение"}
+                "searches": "Новые по моим поискам", "expiry": "Срок объявлений", "payments": "Платежи и продвижение", "promo": "Акции и новости"}
 
 
 def telegram_allowed(db: Session, tg_id: str, kind: str) -> bool:

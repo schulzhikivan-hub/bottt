@@ -604,3 +604,6 @@ body.fs1{zoom:1.1}body.fs2{zoom:1.22}
 .dbadges{position:absolute;left:8px;top:8px;display:flex;gap:4px}
 .dbadges span{background:#ffffffd9;color:#1b4b9b;font-size:11px;font-weight:700;border-radius:8px;padding:2px 7px}
 #dTabs b{font-weight:700;opacity:.8}
+
+.listing.ad{border:1px dashed var(--line,#d0d5dd)}
+.adlabel{display:inline-block;font-size:11px;opacity:.7;border:1px solid currentColor;border-radius:6px;padding:0 6px;margin-bottom:4px}
