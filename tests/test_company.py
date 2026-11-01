@@ -211,3 +211,24 @@ def test_close_company_needs_an_empty_balance(client):
     with SessionLocal() as db:
         assert db.get(Listing, lid).status == "closed"
     assert client.get("/api/company/mine", headers=as_user(1)).json() == []
+
+
+def test_company_listing_is_not_in_the_personal_list_but_in_the_company_list(client):
+    cid = verified_company(client)
+    lid = approved_company_listing(client, cid)
+    personal = client.post("/api/listings", json=JOB, headers=as_user(1)).json()["id"]
+    mine = [x["id"] for x in client.get("/api/me/listings", headers=as_user(1)).json()]
+    assert personal in mine and lid not in mine
+    assert lid in [x["id"] for x in client.get(f"/api/company/{cid}/listings", headers=as_user(1)).json()]
+
+
+def test_price_sort_is_kept_with_a_search_word(client):
+    cid = verified_company(client)
+    for price in (300, 100, 200):
+        lid = client.post("/api/listings", json=JOB | {"company_id": cid, "price_amount": price, "title": f"Повар на {price}"}, headers=as_user(1)).json()["id"]
+        with SessionLocal() as db:
+            db.get(Listing, lid).status = "approved"
+            db.commit()
+    items = client.get("/api/catalog?q=повар&sort=price_asc").json()["items"]
+    prices = [x["price_amount"] for x in items if x["price_amount"] is not None]
+    assert prices == sorted(prices)

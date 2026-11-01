@@ -357,7 +357,7 @@ function updateFilterUi() {
   document.querySelectorAll("#chips .chip").forEach((c) => c.classList.toggle("active", c.dataset.cat === filters.category));
   $("#sortSelect").value = filters.sort;
   // Без поиска и фильтров показываем «витрину»: баннер и плитки разделов
-  $("#view-home").classList.toggle("landing", !filters.q && !filters.category && n === 0);
+  $("#view-home").classList.toggle("landing", !filters.q && !filters.category && n === 0 && filters.sort === "new");
   renderCategoryHead();
 }
 const PILLS = {
@@ -1668,20 +1668,13 @@ function resetPhotos(list) {
   formPhotos = list || []; formFiles = []; removedPhotos = [];
   renderPhotos();
 }
-// «Опубликовать от»: себя или проверенной компании, где у человека есть право публиковать
-let postAsDefault = null;
-async function fillPostAs(kind) {
-  const box = $("#postAsBox"), sel = $("#postAs");
-  sel.innerHTML = '<option value="">Меня лично</option>';
-  box.hidden = true;
-  let mine = [];
-  try { mine = (await api("/api/company/mine", {quiet: true})).filter((c) => c.verified && c.role !== "viewer"); } catch (e) { mine = []; }
-  if (!mine.length) { postAsDefault = null; return; }
-  sel.insertAdjacentHTML("beforeend", mine.map((c) => `<option value="${c.id}">🏢 ${esc(c.name)}</option>`).join(""));
-  box.hidden = false;
-  const want = postAsDefault ?? (kind === "job" && mine.length === 1 ? mine[0].id : "");
-  sel.value = want && mine.some((c) => c.id === want) ? String(want) : "";
-  postAsDefault = null;
+// От чьего имени подаётся объявление: «+» на главной — от человека; кнопка в кабинете компании — от компании.
+// Никакого выбора в форме нет: откуда пришли, от того и подаём.
+let postAsCompany = null;
+function showPostAs() {
+  const box = $("#postAsBox");
+  box.hidden = !postAsCompany;
+  box.innerHTML = postAsCompany ? `<b>🏢 От компании «${esc(postAsCompany.name)}»</b><span>Объявление появится на странице компании, а не в вашем личном профиле. Откликам и сообщениям ответит команда.</span>` : "";
 }
 async function openAdd(kind) {
   if (kind === "dating") return $("#myDatingBtn").onclick();
@@ -1695,13 +1688,14 @@ async function openAdd(kind) {
   f.price_amount.disabled = false;
   await setGeo("#formGeo", me?.region_code || "", me?.district_id || "");
   $("#modalTitle").textContent = KIND_TITLE[kind];
-  await fillPostAs(kind);
+  showPostAs();
   resetPhotos([]);
   updateFormBlocks();
   // Незаконченный черновик на этом устройстве
   let saved = null;
   try { saved = JSON.parse(localStorage.getItem(draftKey()) || "null"); } catch (e) { saved = null; }
-  if (!saved) {
+  if (postAsCompany) saved = null;
+  else if (!saved) {
     try { const sd = await api("/api/me/wizard-draft", {quiet: true}); if (sd?.data && (sd.data.title || sd.data.description)) saved = sd; } catch (e) { /* без черновика */ }
   }
   $("#addSheet").classList.add("hidden");
@@ -1774,7 +1768,7 @@ function listingPayload(f) {
           ? {model: v("d_model"), year: num("d_year"), mileage_km: num("d_mileage_km")} : {})};
   }
   data.details = Object.fromEntries(Object.entries(details).filter(([, x]) => x !== undefined && x !== ""));
-  if (!currentEditId && $("#postAs")?.value) data.company_id = Number($("#postAs").value);
+  if (!currentEditId && postAsCompany) data.company_id = postAsCompany.id;
   return Object.fromEntries(Object.entries(data).filter(([, x]) => x !== undefined));
 }
 async function saveListing(send) {
@@ -1800,6 +1794,7 @@ async function saveListing(send) {
     const wasEdit = Boolean(currentEditId);
     if (!wasEdit) { localStorage.removeItem(draftKey()); api("/api/me/wizard-draft", {method: "DELETE", quiet: true}).catch(() => {}); }
     currentEditId = null;
+    postAsCompany = null;
     $("#modal").classList.add("hidden");
     homeLoaded = false;
     if (send) {
@@ -1814,10 +1809,10 @@ async function saveListing(send) {
 $("#listingForm").onsubmit = (e) => { e.preventDefault(); if (wizStep < 4) { $("#nextBtn").onclick(); return; } saveListing(true); };
 $("#draftBtn").onclick = () => saveListing(false);
 $("#doneMine").onclick = () => { $("#doneSheet").classList.add("hidden"); showView("profile"); showView("mine", {push: true}); };
-$("#doneMore").onclick = () => { $("#doneSheet").classList.add("hidden"); $("#addSheet").classList.remove("hidden"); };
-$("#closeModal").onclick = () => $("#modal").classList.add("hidden");
-$("#addBtn").onclick = async () => { if (await requireConsent()) $("#addSheet").classList.remove("hidden"); };
-$("#closeAdd").onclick = () => $("#addSheet").classList.add("hidden");
+$("#doneMore").onclick = () => { postAsCompany = null; $("#doneSheet").classList.add("hidden"); $("#addSheet").classList.remove("hidden"); };
+$("#closeModal").onclick = () => { postAsCompany = null; $("#modal").classList.add("hidden"); };
+$("#addBtn").onclick = async () => { postAsCompany = null; if (await requireConsent()) $("#addSheet").classList.remove("hidden"); };
+$("#closeAdd").onclick = () => { postAsCompany = null; $("#addSheet").classList.add("hidden"); };
 document.querySelectorAll("[data-add]").forEach((b) => b.onclick = () => openAdd(b.dataset.add));
 
 // ---------- сообщество и гид ----------
@@ -2447,12 +2442,12 @@ async function renderCoPane(ov) {
   try {
     if (coState.tab === "overview") {
       pane.innerHTML = `<article class="dcard2"><h3>Что дальше</h3>
-        ${ov.status === "verified" && canWrite ? '<div class="actions"><button id="coPost">➕ Опубликовать вакансию от компании</button></div>' : '<p class="muted">Публикация от компании откроется после проверки.</p>'}
+        ${ov.status === "verified" && canWrite ? '<div class="actions"><button id="coPost">➕ Подать объявление от компании</button></div>' : '<p class="muted">Публикация от компании откроется после проверки.</p>'}
         ${ov.status === "verified" ? '<div class="actions"><button class="secondary" id="coPublic">Публичная страница компании</button></div>' : ""}</article>
         <article class="dcard2"><h3>Объявления</h3><p>Активных: <b>${ov.listings.active}</b> · на проверке: <b>${ov.listings.pending}</b> · остальные: <b>${ov.listings.other}</b></p>
         <p class="muted">Откликов всего: ${ov.applications.total}. В команде ${ov.members} из ${ov.limits.members}.</p>
         <div class="actions"><button class="secondary" data-cotab-go="listings">Все объявления</button><button class="secondary" data-cotab-go="apps">Отклики</button></div></article>`;
-      if ($("#coPost")) $("#coPost").onclick = async () => { postAsDefault = ov.id; $("#addSheet").classList.add("hidden"); await openAdd("job"); };
+      if ($("#coPost")) $("#coPost").onclick = async () => { postAsCompany = {id: ov.id, name: ov.name}; $("#addSheet").classList.remove("hidden"); };
       if ($("#coPublic")) $("#coPublic").onclick = () => showPublicCompany(ov.id);
     }
     if (coState.tab === "listings") {

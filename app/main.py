@@ -417,7 +417,8 @@ def create_listing(payload: ListingCreate, user_id: str = Depends(writer), db: S
 @app.get("/api/me/listings", response_model=list[ListingOut])
 def my_listings(user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
     rows = db.scalars(
-        select(Listing).where(Listing.author_telegram_id == user_id).order_by(Listing.id.desc()).limit(100)
+        select(Listing).where(Listing.author_telegram_id == user_id, Listing.company_id.is_(None))
+        .order_by(Listing.id.desc()).limit(100)
     ).all()
     return catalog.with_promo(db, list(rows), owner=True)
 

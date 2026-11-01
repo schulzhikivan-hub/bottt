@@ -254,7 +254,7 @@ def catalog(q: str = Query(default="", max_length=100), category: str | None = N
                          goods_category=goods_category, year_min=year_min, year_max=year_max,
                          mileage_max=mileage_max, limit=limit, offset=offset)
     items = with_promo(db, rows)
-    if sort == "new" or q.strip():
+    if sort == "new":
         # «2 из 5», 30% страницы, не больше двух закреплённых: одни правила для всех списков (app/policy.py)
         items = policy.arrange(items, lambda o: "promo" if o.promo_free else (o.promo if o.promo in {"pin", "vip", "bump"} else ""))
     out = {"items": items, "total": total, "has_more": offset + len(rows) < total}
