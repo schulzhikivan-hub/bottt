@@ -157,6 +157,9 @@ hr{border:0;border-top:1px solid var(--line);margin:14px 0}
 @keyframes sk{to{background-position:-200% 0}}
 
 
+.toasts{position:fixed;right:16px;bottom:16px;display:flex;flex-direction:column;gap:8px;z-index:90;max-width:min(380px,calc(100% - 32px))}
+.atoast{background:#12142b;color:#fff;border-radius:12px;padding:11px 14px;font-size:13.5px;box-shadow:0 12px 30px -10px rgba(0,0,0,.6);animation:tin .2s ease}
+@keyframes tin{from{transform:translateY(10px);opacity:0}to{transform:none;opacity:1}}
 /* ---------- боковая панель правки и менеджеры ---------- */
 .drawer{position:fixed;top:0;right:0;bottom:0;width:min(620px,100%);background:var(--surface);border-left:1px solid var(--line);box-shadow:-24px 0 60px -24px rgba(0,0,0,.35);z-index:40;display:flex;flex-direction:column;animation:dr .18s ease}
 @keyframes dr{from{transform:translateX(40px);opacity:0}to{transform:none;opacity:1}}
@@ -265,5 +268,6 @@ table.queues td{vertical-align:middle}table.queues tr.zero{opacity:.55}
 </div>
 <div class="pal hidden" id="pal"><div class="box"><input id="palQ" placeholder="Куда перейти или что найти? №объявления, имя, ID, слово…" autocomplete="off"><ul id="palList"></ul>
   <div class="hint">↑↓ выбрать · Enter открыть · Esc закрыть · начните с «?» чтобы искать по всей базе</div></div></div>
+<div id="toasts" class="toasts" aria-live="polite"></div>
 <script src="/static/admin.js"></script>
 </body></html>

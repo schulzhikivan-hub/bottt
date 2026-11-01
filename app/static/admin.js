@@ -20,7 +20,12 @@ async function api(path, options = {}) {
   return data;
 }
 const post = (path, body) => api(path, {method: "POST", body: body === undefined ? undefined : JSON.stringify(body)});
-function say(text) { $("#status").textContent = text; }
+function say(text) {
+  $("#status").textContent = text;
+  if (text && !/^(Загрузка|Обновлено)/.test(text)) {          // a result must be seen: a toast in the corner, not small grey text
+    const t = document.createElement("div"); t.className = "atoast"; t.textContent = text; $("#toasts").appendChild(t); setTimeout(() => t.remove(), 4500);
+  }
+}
 function ask(question) {
   const value = prompt(question, "");
   if (value === null) return null;
@@ -171,7 +176,7 @@ function palRender() {
     return {ic: SECTIONS.find((x) => x.key === TAB_SECTION[t.key])?.icon || "•", name: t.label, hint: t.title, run: () => show(t.key)};
   });
   const actions = [
-    {ic: "⭐", name: "Выдать звёзды человеку", hint: "найдите человека, откройте карточку", run: () => { $("#palQ").value = "?"; palRender(); }},
+    {ic: "⭐", name: "Выдать звёзды человеку", hint: "найдите человека и откройте управление", run: () => { $("#palQ").value = "?"; palRender(); }},
     {ic: "🌓", name: "Сменить тему", hint: "светлая / тёмная", run: () => $("#themeBtn").click()},
     {ic: "🔄", name: "Обновить раздел", hint: "перезагрузить данные", run: () => reload()},
   ];
@@ -237,7 +242,7 @@ $("#gSearch").addEventListener("submit", async (e) => {
     const L = r.listings.map((x) => `<div class="card"><b>#${x.id} ${esc(x.title)}</b> <span class="badge">${esc(STATUS_RU[x.status] || x.status)}</span> · ${esc(x.city)} · автор ${esc(x.author_id)}
       <div><button class="act gray" data-gl="${x.id}">Открыть</button><button class="act gray" data-gu="${esc(x.author_id)}">Автор</button></div><div data-gbox></div></div>`).join("");
     const U = r.users.map((u) => `<div class="card"><b>${esc(u.name || "без имени")}</b> · ID ${esc(u.tg_id)} · ${esc(u.city)}${u.blocked ? " · <span class='bad'>заблокирован</span>" : ""}
-      <div><button class="act gray" data-gu="${esc(u.tg_id)}">Карточка</button></div></div>`).join("");
+      <div><button class="act gray" data-gu="${esc(u.tg_id)}">Управление</button></div></div>`).join("");
     const T = r.tickets.map((t) => `<div class="card">Обращение #${t.id} · ${esc(t.kind)} · ${esc(t.status)} · пользователь ${esc(t.user)}</div>`).join("");
     const P = r.payments.map((t) => `<div class="card">Платёж #${t.id} · ${t.stars} ⭐ · ${esc(t.status)} · пользователь ${esc(t.user)}</div>`).join("");
     $("#main").innerHTML = (L || U || T || P) ? (L ? "<h3>Объявления</h3>" + L : "") + (U ? "<h3>Люди</h3>" + U : "") + (T ? "<h3>Обращения</h3>" + T : "") + (P ? "<h3>Платежи</h3>" + P : "")
@@ -451,7 +456,7 @@ document.addEventListener("click", async (e) => {
   } catch (err) { say(err.message); }
 });
 
-// ---- карточка объявления ----
+// ---- управление объявлением ----
 function factsOf(x) {
   const d = x.details || {};
   const bits = [];
@@ -659,7 +664,7 @@ async function loadEmployers() {
   const rows = await api("/api/admin/employers?status=pending");
   $("#main").innerHTML = rows.length ? rows.map((u) => `
     <div class="card" data-eid="${esc(u.tg_id)}"><b>${esc(u.company_name)}</b> · рег. номер ${esc(u.registration_no)}
-      <div class="meta">Контакт: ${esc(u.contact_person || "не указан")} · <a href="#" data-gu="${esc(u.tg_id)}">карточка человека (ID ${esc(u.tg_id)})</a></div>
+      <div class="meta">Контакт: ${esc(u.contact_person || "не указан")} · <a href="#" data-gu="${esc(u.tg_id)}">управление человеком (ID ${esc(u.tg_id)})</a></div>
       <button class="act ok" data-emp="approve">Подтвердить</button><button class="act no" data-emp="reject">Отклонить</button></div>`).join("")
     : '<div class="card muted">Заявок на проверке нет.</div>';
 }
@@ -716,7 +721,7 @@ async function loadSupport() {
   await loadClaims("ticket");
   const rows = await api("/api/admin/tickets?status=open");
   const answered = await api("/api/admin/tickets?status=answered");
-  const card = (t) => `<div class="card" data-tid="${t.id}"><label style="float:right"><input type="checkbox" data-tpick> выбрать</label><b>${t.kind === "appeal" ? "Оспаривание" : "Обращение"} #${t.id}</b> · пользователь ${esc(t.user)} · <button class="act gray" data-gu="${esc(t.user)}">карточка</button>
+  const card = (t) => `<div class="card" data-tid="${t.id}"><label style="float:right"><input type="checkbox" data-tpick> выбрать</label><b>${t.kind === "appeal" ? "Оспаривание" : "Обращение"} #${t.id}</b> · пользователь ${esc(t.user)} · <button class="act gray" data-gu="${esc(t.user)}">Управление</button>
     <span class="wait ${hoursSince(t.updated_at) >= 24 && t.status === "open" ? "late" : ""}">${t.status === "open" ? "ждёт " + hoursSince(t.updated_at) + " ч" : esc(fmt(t.updated_at))}</span>
     ${claimsMap[t.id] ? `<span class="wait late">🔒 ${esc(claimsMap[t.id])}</span>` : ""}
     <p>${esc(t.preview)}</p><button class="act gray" data-tk="open">Открыть</button><div data-tbox></div></div>`;
@@ -815,7 +820,7 @@ async function loadResumes() {
   const rows = await api("/api/admin/resumes?status=pending");
   $("#main").innerHTML = (rows.length ? '<div class="toolbar"><button class="act ok" id="rBulkOk">Опубликовать выбранные</button></div>' : "") + (rows.length ? rows.map((r) => `<div class="card" data-owner="${esc(r.owner)}"><label style="float:right"><input type="checkbox" data-rpick> выбрать</label><b>${esc(r.position)}</b> · ${esc(r.city)} · виза ${esc(r.visa || "—")} · от ${r.salary_from ?? "—"} ₩
     <div class="meta">пользователь ${esc(r.owner)} · ${esc(r.updated || "")}</div><p>${esc(r.experience)}</p><p>${esc(r.about)}</p>
-    <button class="act ok" data-cv="approve">Опубликовать</button><button class="act no" data-cv="reject">Отклонить</button> <button class="act gray" data-gu="${esc(r.owner)}">Карточка</button></div>`).join("") : '<div class="card muted">Новых резюме нет.</div>');
+    <button class="act ok" data-cv="approve">Опубликовать</button><button class="act no" data-cv="reject">Отклонить</button> <button class="act gray" data-gu="${esc(r.owner)}">Управление</button></div>`).join("") : '<div class="card muted">Новых резюме нет.</div>');
 }
 $("#main").addEventListener("click", async (e) => {
   const b = e.target.closest("[data-cv]");
@@ -895,13 +900,13 @@ async function openBlockDialog(id) {
     } catch (err) { $("#bkErr").textContent = err.message; }
   };
 }
-// ---- карточка человека ----
+// ---- управление человеком ----
 async function openUserCard(id) {
   try {
     const u = await api(`/api/admin/users/${encodeURIComponent(id)}/card`);
     current = "usercard";
     document.querySelectorAll("#tabs button").forEach((b) => b.classList.remove("active"));
-    $("#title").textContent = "Карточка " + (u.name || "ID " + u.tg_id);
+    $("#title").textContent = "Управление: " + (u.name || "ID " + u.tg_id);
     const blocked = u.blocked ? `<span class="bad">заблокирован${u.blocked_until ? " до " + esc(fmt(u.blocked_until)) : " бессрочно"}</span>${u.block_reason ? " · " + esc(u.block_reason) : ""}` : '<span class="good">активен</span>';
     $("#main").innerHTML = `<div class="row"><button class="act gray" data-backlist>← К списку людей</button></div><div class="card" data-uid="${esc(u.tg_id)}"><div class="kv">
       <b>ID</b><span>${esc(u.tg_id)}</span><b>Имя</b><span>${esc(u.name || "—")}</span><b>Город</b><span>${esc(u.city)}</span><b>Виза</b><span>${esc(u.visa || "—")}</span>
@@ -977,7 +982,7 @@ async function loadUsers() {
   const r = await api("/api/admin/users-list?" + qs);
   $("#userTotal").textContent = "Найдено: " + r.total;
   $("#usersList").innerHTML = (r.items.length ? `<table><tr>${userCols.map((k) => `<th>${USER_COLS[k][0]}</th>`).join("")}<th></th></tr>${r.items.map((u) => `<tr data-uid="${esc(u.tg_id)}">${userCols.map((k) => `<td>${USER_COLS[k][1](u)}</td>`).join("")}
-    <td style="white-space:nowrap"><button class="act gray" data-ux="card">Карточка</button>${u.blocked ? '<button class="act ok" data-ux="unblock">Разблок.</button>' : '<button class="act no" data-ux="blockterms">Блок…</button>'}</td></tr>`).join("")}</table>`
+    <td style="white-space:nowrap"><button class="act gray" data-ux="card">Управление</button>${u.blocked ? '<button class="act ok" data-ux="unblock">Разблок.</button>' : '<button class="act no" data-ux="blockterms">Блок…</button>'}</td></tr>`).join("")}</table>`
     : '<div class="card muted">Никого не нашли.</div>') + (r.total > r.items.length ? '<button class="act gray" id="userMore">Показать ещё</button>' : "");
 }
 $("#main").addEventListener("change", (e) => {

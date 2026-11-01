@@ -20,7 +20,12 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Tests (SQLite only, never production DB)
+      - name: Browser for the UI tests
+        run: |
+          pip install playwright==1.49.1
+          playwright install --with-deps chromium
+
+      - name: Tests (SQLite only, never production DB; includes the admin panel in a real browser)
         run: pytest -q
 
       - name: Validate docker-compose
