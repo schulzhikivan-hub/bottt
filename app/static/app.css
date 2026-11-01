@@ -776,3 +776,7 @@ img.co-ava{object-fit:cover}
 
 .pricehint{background:#fff8e1;color:#5c4400;border-radius:12px;padding:10px 12px;font-size:13px;line-height:1.35;margin:6px 0}
 .hist button{margin-top:6px;justify-self:start}
+
+/* кабинет знакомств: регион и город по одному в строке: подписи не обрезаются */
+#datingGeo{grid-template-columns:1fr !important}
+.fsec select{text-overflow:ellipsis}

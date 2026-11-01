@@ -504,7 +504,8 @@ def public_company(company_id: int, db: Session = Depends(get_db)):
     rows = db.scalars(select(Listing).where(Listing.company_id == c.id, Listing.status == "approved").order_by(Listing.id.desc()).limit(50)).all()
     live = [x for x in rows if x.expires_at is None or aware(x.expires_at) > now()]
     return {"id": c.id, "name": c.name, "logo": photos.url(c.logo_key) if c.logo_key else None, "description": c.description, "website": c.website, "city": c.city, "verified": True,
-            "since": c.created_at.date().isoformat(), "listings": [o.model_dump(mode="json") for o in catalog.with_promo(db, live)]}
+            "since": c.created_at.date().isoformat(), "listings": [o.model_dump(mode="json") for o in catalog.with_promo(db, live)],
+            **__import__("app.companypage", fromlist=["public_extra"]).public_extra(db, c.id)}
 
 
 # ---------- administrators ----------

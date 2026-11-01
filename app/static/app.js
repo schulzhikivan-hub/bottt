@@ -2551,6 +2551,7 @@ async function showCompany(id) {
     : ov.status === "suspended" ? `<div class="dalert bad"><b>Компания приостановлена</b><span>${esc(ov.note || "Объявления скрыты.")} Напишите в поддержку.</span></div>` : "";
   const tabs = [["overview", "Обзор"], ["listings", "Объявления"], ["apps", `Отклики${ov.applications.new ? " (" + ov.applications.new + ")" : ""}`], ["team", "Команда"], ["profile", "Профиль"]];
   tabs.splice(4, 0, ["stats", "Аналитика"]);
+  if (ov.status === "verified") tabs.splice(5, 0, ["reviews", "Отзывы"]);
   if (ov.role === "owner" || ov.role === "admin") tabs.push(["log", "История"]);
   if (ov.balance !== undefined) tabs.push(["money", "Баланс"]);
   body.innerHTML = `<div class="dcab">
@@ -2660,6 +2661,7 @@ async function renderCoPane(ov) {
         : '<div class="empty">Объявлений от компании пока нет.</div>';
     }
     if (coState.tab === "stats") pane.innerHTML = await coAnalyticsHtml(ov);
+    if (coState.tab === "reviews") { const c = await api(`/api/companies/${ov.id}`, {quiet: true}); pane.innerHTML = companyReviewsHtml(c.reviews, team); }
     if (coState.tab === "log") pane.innerHTML = await coActivityHtml(ov);
     if (coState.tab === "apps") {
       const rows = await api(`/api/company/${ov.id}/applications`);
@@ -2695,6 +2697,7 @@ async function renderCoPane(ov) {
     if (coState.tab === "profile") {
       if (!team) { pane.innerHTML = `<article class="dcard2"><h3>${esc(ov.name)}</h3><p>${esc(ov.description || "Описания нет")}</p><p class="muted">${esc(ov.city || "")} ${esc(ov.website || "")}</p><p class="muted">Менять профиль могут владелец и админы.</p></article>`; return; }
       renderCompanyForm($("#coPane"), ov);
+      $("#coPane").insertAdjacentHTML("beforeend", await coPageFormHtml(ov));
       $("#coPane").insertAdjacentHTML("afterbegin", `<article class="dcard2"><h3>Логотип</h3><div class="co-head">${coAvatar(ov)}<div class="actions">
         <label class="btn secondary dfile">Загрузить<input type="file" id="coLogo" accept="image/jpeg,image/png,image/webp" hidden></label>${ov.logo ? '<button class="secondary" id="coLogoDel">Убрать</button>' : ""}</div></div></article>`);
       $("#coLogo").onchange = async (e) => {
@@ -2722,6 +2725,12 @@ async function renderCoPane(ov) {
     }
   } catch (err) { pane.innerHTML = `<div class="empty">${esc(err.message)}</div>`; }
 }
+function companyReviewsHtml(r, canReply) {
+  const stars = (n) => "★".repeat(n) + "☆".repeat(5 - n);
+  return `<article class="dcard2"><div class="dcard2-head"><h3 style="margin:0">Отзывы</h3><b class="rating">${r.count ? "★ " + r.rating + " (" + r.count + ")" : "пока нет"}</b></div>
+    ${r.items.map((x) => `<div class="drun" style="display:block"><b class="rating">${stars(x.rating)}</b> <small class="muted">${esc(x.at)}</small>${x.text ? `<p>${esc(x.text)}</p>` : ""}
+      ${x.reply ? `<p class="muted"><b>Ответ компании:</b> ${esc(x.reply)}</p>` : canReply ? `<button class="secondary" data-coreply="${x.id}">Ответить</button>` : ""}</div>`).join("") || '<p class="muted">Отзыв может оставить тот, кто откликался на вакансию или писал компании.</p>'}</article>`;
+}
 async function showPublicCompany(id) {
   SUB_TITLES.copublic = "Компания";
   openSub("copublic");
@@ -2729,10 +2738,17 @@ async function showPublicCompany(id) {
   body.innerHTML = '<div class="skeleton"></div>';
   try {
     const c = await api(`/api/companies/${id}`, {quiet: true});
-    body.innerHTML = `<div class="dcab"><article class="dcard2 co-head"><div class="co-ava">${coInitial(c.name)}</div><div style="flex:1"><h3 style="margin:0">${esc(c.name)} <span class="dpill ok">✔ Проверена</span></h3>
-      <p class="muted">${esc(c.city || "")} · на сайте с ${esc(c.since)}</p></div></article>
-      ${c.description ? `<article class="dcard2"><p>${esc(c.description)}</p>${c.website ? `<p><a href="${esc(c.website)}" target="_blank" rel="noopener">${esc(c.website)}</a></p>` : ""}</article>` : ""}
-      <h3 class="muted" style="margin:6px 4px">Объявления компании (${c.listings.length})</h3><div class="listings">${c.listings.map(listingCard).join("") || '<div class="empty">Сейчас открытых вакансий нет</div>'}</div></div>`;
+    const pg = c.page || {}, links = [pg.telegram ? `<a href="https://t.me/${esc(pg.telegram)}" target="_blank" rel="noopener">Telegram</a>` : "", pg.instagram ? `<a href="https://instagram.com/${esc(pg.instagram)}" target="_blank" rel="noopener">Instagram</a>` : "",
+      pg.kakao ? `KakaoTalk: ${esc(pg.kakao)}` : "", c.website ? `<a href="${esc(c.website)}" target="_blank" rel="noopener">Сайт</a>` : ""].filter(Boolean);
+    let state = {can: false};
+    try { state = await api(`/api/companies/${id}/review-state`, {quiet: true}); } catch (e) { /* гость: отзыв не оставить */ }
+    body.innerHTML = `<div class="dcab"><article class="dcard2 co-head">${coAvatar(c)}<div style="flex:1"><h3 style="margin:0">${esc(c.name)} <span class="dpill ok">✔ Проверена</span></h3>
+      ${pg.tagline ? `<p>${esc(pg.tagline)}</p>` : ""}<p class="muted">${esc(c.city || "")} · на сайте с ${esc(c.since)}${c.reviews?.count ? ` · ★ ${c.reviews.rating} (${c.reviews.count})` : ""}</p></div></article>
+      ${pg.benefits?.length ? `<div class="chips">${pg.benefits.map((k) => `<span class="chip">✔ ${esc(c.benefits_titles[k] || k)}</span>`).join("")}</div>` : ""}
+      ${c.description || links.length || pg.address || pg.hours ? `<article class="dcard2">${c.description ? `<p>${esc(c.description)}</p>` : ""}${pg.address ? `<p>📍 ${esc(pg.address)}</p>` : ""}${pg.hours ? `<p>🕘 ${esc(pg.hours)}</p>` : ""}${links.length ? `<p>${links.join(" · ")}</p>` : ""}</article>` : ""}
+      ${state.can ? `<div class="actions"><button data-coreview="${id}">⭐ Оставить отзыв</button></div>` : ""}
+      <h3 class="muted" style="margin:6px 4px">Объявления компании (${c.listings.length})</h3><div class="listings">${c.listings.map(listingCard).join("") || '<div class="empty">Сейчас открытых вакансий нет</div>'}</div>
+      ${companyReviewsHtml(c.reviews || {count: 0, rating: 0, items: []}, false)}</div>`;
   } catch (err) { body.innerHTML = `<div class="empty">${esc(err.message)}</div>`; }
 }
 document.addEventListener("click", async (e) => {
@@ -3431,3 +3447,41 @@ function priceHint() {
 }
 document.addEventListener("input", (e) => { if (e.target.closest("#listingForm") && ["price_amount", "employment", "housing_type", "goods_category"].includes(e.target.name)) priceHint(); });
 document.addEventListener("change", (e) => { if (e.target.closest("#listingForm") && ["region_code", "employment", "housing_type", "goods_category"].includes(e.target.name)) priceHint(); });
+
+document.addEventListener("click", async (e) => {
+  const rv = e.target.closest("[data-coreview]"), rp = e.target.closest("[data-coreply]");
+  try {
+    if (rv) {
+      const k = await chooseDialog("Ваша оценка компании", [5, 4, 3, 2, 1].map((n) => ({key: n, label: "★".repeat(n) + "☆".repeat(5 - n)})));
+      if (!k) return;
+      const text = (await askText("Что рассказать другим? (необязательно)", "Как с вами общались, всё ли как в объявлении")) || "";
+      await api(`/api/companies/${rv.dataset.coreview}/reviews`, {method: "POST", body: JSON.stringify({rating: Number(k), text})});
+      toast("Спасибо! Отзыв опубликован"); showPublicCompany(Number(rv.dataset.coreview));
+    }
+    if (rp) {
+      const text = await askText("Ответ на отзыв", "Спасибо, учтём");
+      if (!text) return;
+      await api(`/api/company/${coState.id}/reviews/${rp.dataset.coreply}/reply`, {method: "POST", body: JSON.stringify({text})});
+      toast("Ответ опубликован"); renderCoPane(await api(`/api/company/${coState.id}`));
+    }
+  } catch (err) { toast(err.message); }
+});
+async function coPageFormHtml(ov) {
+  const p = await api(`/api/company/${ov.id}/page`);
+  return `<article class="dcard2" id="coPageBox"><h3>Публичная страница</h3><p class="muted">Так компанию увидят соискатели: коротко о вас, контакты и что вы предлагаете.</p>
+    <div class="gridform"><label class="wide">Одной строкой о компании<input data-pg="tagline" maxlength="120" value="${esc(p.tagline)}" placeholder="Корейская кухня в Сеуле, берём без опыта"></label>
+    <label>Telegram<input data-pg="telegram" maxlength="80" value="${esc(p.telegram)}" placeholder="username без @"></label><label>Instagram<input data-pg="instagram" maxlength="80" value="${esc(p.instagram)}"></label>
+    <label>KakaoTalk<input data-pg="kakao" maxlength="80" value="${esc(p.kakao)}"></label><label>Часы работы<input data-pg="hours" maxlength="80" value="${esc(p.hours)}" placeholder="Пн–Сб 9:00–18:00"></label>
+    <label class="wide">Адрес<input data-pg="address" maxlength="160" value="${esc(p.address)}"></label></div>
+    <div class="chips">${Object.entries(p.all_benefits).map(([k, t]) => `<label class="chip"><input type="checkbox" data-pgb="${k}" ${p.benefits.includes(k) ? "checked" : ""}> ${esc(t)}</label>`).join("")}</div>
+    <div class="actions"><button id="coPageSave">💾 Сохранить страницу</button></div></article>`;
+}
+document.addEventListener("click", async (e) => {
+  if (e.target.id !== "coPageSave") return;
+  try {
+    const body = {benefits: [...document.querySelectorAll("#coPageBox [data-pgb]:checked")].map((c) => c.dataset.pgb)};
+    document.querySelectorAll("#coPageBox [data-pg]").forEach((i) => { body[i.dataset.pg] = i.value; });
+    await api(`/api/company/${coState.id}/page`, {method: "PUT", body: JSON.stringify(body)});
+    toast("Страница сохранена");
+  } catch (err) { toast(err.message); }
+});

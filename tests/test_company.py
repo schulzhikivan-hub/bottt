@@ -296,3 +296,29 @@ def test_templates_personal_and_company(client):
     assert client.delete(f"/api/me/templates/{c['id']}", headers=as_user(2)).status_code == 404       # a recruiter does not delete the team's
     assert client.delete(f"/api/me/templates/{c['id']}", headers=as_user(1)).status_code == 200
     assert client.post("/api/me/templates", json={"name": "Без раздела", "data": {"title": "x"}}, headers=as_user(3)).status_code == 400
+
+
+def test_public_page_extras_and_company_reviews(client):
+    cid = verified_company(client)
+    lid = approved_company_listing(client, cid)
+    team_member(client, cid, 2, "recruiter")
+    assert client.put(f"/api/company/{cid}/page", json={"tagline": "Берём без опыта", "telegram": "@cafe_seoul", "benefits": ["housing", "bogus", "meals"]},
+                      headers=as_user(2)).status_code == 403                                  # a recruiter does not edit the face of the company
+    r = client.put(f"/api/company/{cid}/page", json={"tagline": "Берём без опыта", "telegram": "@cafe_seoul", "benefits": ["housing", "bogus", "meals"]}, headers=as_user(1))
+    assert r.status_code == 200 and r.json()["benefits"] == ["housing", "meals"] and r.json()["telegram"] == "cafe_seoul"
+    pub = client.get(f"/api/companies/{cid}").json()
+    assert pub["page"]["tagline"] == "Берём без опыта" and pub["reviews"]["count"] == 0
+    assert client.get(f"/api/companies/{cid}/review-state", headers=as_user(3)).json()["can"] is False          # never dealt with them
+    assert client.post(f"/api/companies/{cid}/reviews", json={"rating": 5}, headers=as_user(3)).status_code == 403
+    client.post(f"/api/listings/{lid}/apply", json={"contact": "@cook", "message": "Здравствуйте"}, headers=as_user(3))
+    assert client.get(f"/api/companies/{cid}/review-state", headers=as_user(3)).json()["can"] is True
+    assert client.post(f"/api/companies/{cid}/reviews", json={"rating": 5, "text": "Всё как в объявлении"}, headers=as_user(3)).status_code == 201
+    assert client.post(f"/api/companies/{cid}/reviews", json={"rating": 1}, headers=as_user(3)).status_code == 409          # once
+    assert client.post(f"/api/companies/{cid}/reviews", json={"rating": 5}, headers=as_user(1)).status_code == 403          # not about yourself
+    pub = client.get(f"/api/companies/{cid}").json()
+    rid = pub["reviews"]["items"][0]["id"]
+    assert pub["reviews"]["rating"] == 5.0 and pub["reviews"]["count"] == 1
+    assert client.post(f"/api/company/{cid}/reviews/{rid}/reply", json={"text": "Спасибо!"}, headers=as_user(2)).status_code == 403
+    assert client.post(f"/api/company/{cid}/reviews/{rid}/reply", json={"text": "Спасибо!"}, headers=as_user(1)).status_code == 200
+    assert client.post(f"/api/admin/company-reviews/{rid}/hide", headers=ADMIN).status_code == 200
+    assert client.get(f"/api/companies/{cid}").json()["reviews"]["count"] == 0

@@ -32,7 +32,7 @@ from app.guard import rate_limit, check_text, duplicate_note, notify_user
 from app import admin_ops as ops
 from app import catalog
 from app import photos, applications, searches, inbox, promos, adminx, observe, site
-from app import geo, reviews, resumes, referrals, support, extras, adminplus, adminview, datingsvc, ads, rules, adminreports, account, refunds, blocks, reportsflow, batches, security, duty, searchdict, searchlog, views, adminsys, adminmanage, adminedit, listingtools, exchange, pipeline, listingtemplates, chatextras
+from app import geo, reviews, resumes, referrals, support, extras, adminplus, adminview, datingsvc, ads, rules, adminreports, account, refunds, blocks, reportsflow, batches, security, duty, searchdict, searchlog, views, adminsys, adminmanage, adminedit, listingtools, exchange, pipeline, listingtemplates, chatextras, companypage
 from app import fields as listing_fields
 from app.users import get_or_create_user, writer, is_blocked_pair
 from app.models import Admin, AuditLog, ConvHide, DatingProfile, TypingMark
@@ -96,6 +96,7 @@ app.include_router(exchange.router)
 app.include_router(pipeline.router)
 app.include_router(listingtemplates.router)
 app.include_router(chatextras.router)
+app.include_router(companypage.router)
 app.include_router(listing_fields.router)
 STATIC = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
@@ -513,7 +514,14 @@ def person_name(db: Session, tg_id: str, conv: Conversation | None = None) -> st
             if co is not None:
                 return co.name
     user = db.get(User, tg_id)
-    return (user.display_name if user and user.display_name else "") or "Пользователь"
+    if user and user.display_name:
+        return user.display_name
+    if conv is not None and conv.listing_id:           # no name: say who this is in this chat
+        listing = db.get(Listing, conv.listing_id)
+        if tg_id == conv.seller_tg_id:
+            return "Автор объявления"
+        return "Соискатель" if listing is not None and listing.category == "job" else "Покупатель"
+    return "Пользователь"
 
 
 def conversation_card(db: Session, conv: Conversation, user_id: str, last: Message | None = None, unread: int = 0) -> ConversationOut:
