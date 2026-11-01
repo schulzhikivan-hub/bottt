@@ -400,7 +400,7 @@ def create_listing(payload: ListingCreate, user_id: str = Depends(writer), db: S
         db.commit()
     if item.status == "pending" and support.maybe_auto_approve(db, item):
         db.refresh(item)
-    return item
+    return catalog.with_promo(db, [item], owner=True)[0]
 
 
 @app.get("/api/me/listings", response_model=list[ListingOut])

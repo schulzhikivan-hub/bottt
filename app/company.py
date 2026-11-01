@@ -413,6 +413,23 @@ def admin_companies(status: str = "pending", actor: str = Depends(staff(*MOD)), 
     return out
 
 
+class CreditIn(BaseModel):
+    stars: int = Field(ge=1, le=100000)
+    note: str = Field(default="", max_length=200)
+
+
+@router.post("/api/admin/companies/{company_id}/credit")
+def admin_company_credit(company_id: int, payload: CreditIn, actor: str = Depends(staff(*ADM)), db: Session = Depends(get_db)):
+    c = db.get(Company, company_id)
+    if c is None:
+        raise HTTPException(404, "Компания не найдена")
+    c.balance_stars = (c.balance_stars or 0) + payload.stars
+    log_action(db, actor, "company.credit", "company", c.id, f"+{payload.stars} {payload.note}".strip())
+    db.commit()
+    guard.notify_user(db, c.owner_tg_id, f"На баланс компании «{c.name}» зачислено {payload.stars} ⭐." + (f" {payload.note}" if payload.note else ""), "payments")
+    return {"balance": c.balance_stars}
+
+
 class DecisionIn(BaseModel):
     reason: str = Field(default="", max_length=300)
 
@@ -445,20 +462,3 @@ def admin_company_decide(company_id: int, decision: str, payload: DecisionIn, ac
     db.commit()
     guard.notify_user(db, c.owner_tg_id, text, "moderation")
     return {"id": c.id, "status": c.status}
-
-
-class CreditIn(BaseModel):
-    stars: int = Field(ge=1, le=100000)
-    note: str = Field(default="", max_length=200)
-
-
-@router.post("/api/admin/companies/{company_id}/credit")
-def admin_company_credit(company_id: int, payload: CreditIn, actor: str = Depends(staff(*ADM)), db: Session = Depends(get_db)):
-    c = db.get(Company, company_id)
-    if c is None:
-        raise HTTPException(404, "Компания не найдена")
-    c.balance_stars = (c.balance_stars or 0) + payload.stars
-    log_action(db, actor, "company.credit", "company", c.id, f"+{payload.stars} {payload.note}".strip())
-    db.commit()
-    guard.notify_user(db, c.owner_tg_id, f"На баланс компании «{c.name}» зачислено {payload.stars} ⭐." + (f" {payload.note}" if payload.note else ""), "payments")
-    return {"balance": c.balance_stars}
