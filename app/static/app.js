@@ -2038,7 +2038,7 @@ async function openMyDating() {
       f.birth_date.value = mine.birth_date || "";
       $("#ageNote").textContent = mine.age_confirmed ? "Возраст подтверждён селфи." : "Возраст не подтверждён: в анкете будет пометка. Пройдите подтверждение селфи.";
       f.gender.value = mine.gender; f.seeking.value = mine.seeking || ""; f.goal.value = mine.goal || ""; f.height.value = mine.height || ""; f.visa.value = mine.visa || "";
-      f.first_name.value = mine.name || "";
+      f.first_name.value = mine.name || ""; f.bio.value = mine.bio || "";
       await setGeo("#datingGeo", mine.region_code || "", mine.district_id || "");
     }
   } catch (e) { toast(e.message); }
