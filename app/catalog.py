@@ -258,6 +258,9 @@ def catalog(q: str = Query(default="", max_length=100), category: str | None = N
         # «2 из 5», 30% страницы, не больше двух закреплённых: одни правила для всех списков (app/policy.py)
         items = policy.arrange(items, lambda o: "promo" if o.promo_free else (o.promo if o.promo in {"pin", "vip", "bump"} else ""))
     out = {"items": items, "total": total, "has_more": offset + len(rows) < total}
+    if q.strip() and offset == 0:
+        from app import searchlog
+        searchlog.record(db, q, total)                           # the cleaned text and the count only, no person
     if total == 0 and offset == 0:
         out["relax"] = _relax(db, dict(
             q=q, category=category, city=city, region=region, district_id=district_id, price_min=price_min, price_max=price_max,

@@ -199,4 +199,7 @@ def migrate() -> None:
         conn.execute(text("ALTER TABLE payments ADD COLUMN IF NOT EXISTS refunded_amount INTEGER NOT NULL DEFAULT 0"))
         conn.execute(text("ALTER TABLE listings ADD COLUMN IF NOT EXISTS quarantine BOOLEAN NOT NULL DEFAULT FALSE"))
         conn.execute(text("ALTER TABLE listings ADD COLUMN IF NOT EXISTS dispute BOOLEAN NOT NULL DEFAULT FALSE"))
+        for ddl in ("title_b VARCHAR(80) NOT NULL DEFAULT ''", "text_b VARCHAR(200) NOT NULL DEFAULT ''", "shows_b INTEGER NOT NULL DEFAULT 0",
+                    "clicks_b INTEGER NOT NULL DEFAULT 0", "winner VARCHAR(1) NOT NULL DEFAULT ''"):
+            conn.execute(text(f"ALTER TABLE ads ADD COLUMN IF NOT EXISTS {ddl}"))
         conn.execute(text("ALTER TABLE notifications ADD COLUMN IF NOT EXISTS tg_pending BOOLEAN NOT NULL DEFAULT FALSE"))

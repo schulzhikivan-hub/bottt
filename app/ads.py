@@ -39,6 +39,11 @@ class Ad(Base):
     ends_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     max_shows: Mapped[int | None] = mapped_column(Integer, nullable=True)   # the budget: switched off when reached
+    title_b: Mapped[str] = mapped_column(String(80), default="")             # variant B of an A/B test (empty: no test)
+    text_b: Mapped[str] = mapped_column(String(200), default="")
+    shows_b: Mapped[int] = mapped_column(Integer, default=0)
+    clicks_b: Mapped[int] = mapped_column(Integer, default=0)
+    winner: Mapped[str] = mapped_column(String(1), default="")               # empty = running; a or b = decided
     shows: Mapped[int] = mapped_column(Integer, default=0)
     clicks: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
@@ -112,9 +117,29 @@ def visible_ads(db: Session, viewer: str | None, where: str = "list") -> list[Ad
     return out
 
 
-def ad_view(ad: Ad) -> dict:
+def variant_for(ad: Ad) -> str:
+    """A/B: a or b. While the test runs the two take turns (half and half); when a winner is known only it is shown."""
+    if not ad.title_b:
+        return "a"
+    return ad.winner or ("b" if (ad.shows or 0) % 2 else "a")
+
+
+def ad_view(ad: Ad, variant: str = "a") -> dict:
     link = f"/?listing={ad.listing_id}" if ad.listing_id else ad.link
-    return {"id": ad.id, "title": ad.title, "text": ad.text, "link": link, "label": "Реклама", "adult": ad.adult_only}
+    b = variant == "b" and bool(ad.title_b)
+    return {"id": ad.id, "title": ad.title_b if b else ad.title, "text": ad.text_b if b else ad.text, "link": link, "label": "Реклама",
+            "adult": ad.adult_only, "variant": "b" if b else "a"}
+
+
+def judge(ad: Ad) -> str:
+    """Decide the A/B test: both variants shown 200+ times and one clicked at least 20% better. Returns a, b or empty."""
+    sa, sb = (ad.shows or 0) - (ad.shows_b or 0), ad.shows_b or 0
+    if not ad.title_b or ad.winner or sa < 200 or sb < 200:
+        return ""
+    ca, cb = ((ad.clicks or 0) - (ad.clicks_b or 0)) / sa, (ad.clicks_b or 0) / sb
+    if max(ca, cb) == 0 or max(ca, cb) < 1.2 * min(ca, cb):
+        return ""
+    return "b" if cb > ca else "a"
 
 
 @router.get("/api/ads")
@@ -131,8 +156,11 @@ def ads_for_list(organic: int = 0, page: int = 0, where: str = "list", viewer: s
     out = []
     spent = []
     for at_index, ad in zip(slots, chosen):
+        variant = variant_for(ad)
         ad.shows += 1
-        out.append({"at": at_index, "ad": ad_view(ad)})
+        if variant == "b":
+            ad.shows_b += 1
+        out.append({"at": at_index, "ad": ad_view(ad, variant)})
         if ad.max_shows and ad.shows >= ad.max_shows:          # the budget is spent: off, and the staff is told
             ad.is_active = False
             spent.append(ad.title)
@@ -145,10 +173,17 @@ def ads_for_list(organic: int = 0, page: int = 0, where: str = "list", viewer: s
 
 
 @router.post("/api/ads/{ad_id}/click", status_code=204)
-def ad_click(ad_id: int, db: Session = Depends(get_db)):
+def ad_click(ad_id: int, v: str = "a", db: Session = Depends(get_db)):
     ad = db.get(Ad, ad_id)
     if ad is not None:
         ad.clicks += 1
+        if v == "b" and ad.title_b:
+            ad.clicks_b += 1
+        won = judge(ad)
+        if won:
+            ad.winner = won
+            from app import adminplus
+            adminplus.notify_staff(db, f"🏆 A/B-тест рекламы «{ad.title}»: победил вариант {won.upper()}, дальше показывается только он.", "adab", ("admin", "super_admin"))
         db.commit()
 
 
@@ -161,6 +196,8 @@ class AdIn(BaseModel):
     place: str = Field(default="both", pattern="^(list|home|both)$")
     days: int | None = Field(default=None, ge=1, le=365)
     max_shows: int | None = Field(default=None, ge=1, le=10_000_000)
+    title_b: str = Field(default="", max_length=80)
+    text_b: str = Field(default="", max_length=200)
 
 
 def _words(db: Session, key: str) -> list[str]:
@@ -213,6 +250,7 @@ def ad_lists_save(payload: AdListsIn, actor: str = Depends(staff(*ADM)), db: Ses
 def ad_admin_view(ad: Ad, db: Session) -> dict:
     at = now()
     return {**ad_view(ad), "active": ad.is_active, "live": is_live(ad, at) and target_alive(db, ad, at), "place": ad.place,
+            "ab": ({"shows_a": ad.shows - ad.shows_b, "clicks_a": ad.clicks - ad.clicks_b, "shows_b": ad.shows_b, "clicks_b": ad.clicks_b, "winner": ad.winner, "title_b": ad.title_b} if ad.title_b else None),
             "shows": ad.shows, "max_shows": ad.max_shows, "clicks": ad.clicks, "ends_at": ad.ends_at.isoformat() if ad.ends_at else None,
             "ctr": round(100 * ad.clicks / ad.shows, 1) if ad.shows else 0.0}
 
@@ -229,7 +267,7 @@ def admin_ad_create(payload: AdIn, actor: str = Depends(staff(*ADM)), db: Sessio
     if payload.listing_id is not None and db.get(Listing, payload.listing_id) is None:
         raise HTTPException(404, "Объявление не найдено")
     check_ad_text(db, payload)
-    ad = Ad(max_shows=payload.max_shows, title=payload.title.strip(), text=payload.text.strip(), link=payload.link.strip(), listing_id=payload.listing_id,
+    ad = Ad(max_shows=payload.max_shows, title_b=payload.title_b.strip(), text_b=payload.text_b.strip(), title=payload.title.strip(), text=payload.text.strip(), link=payload.link.strip(), listing_id=payload.listing_id,
             adult_only=payload.adult_only, place=payload.place, starts_at=now(),
             ends_at=now() + dt.timedelta(days=payload.days) if payload.days else None)
     db.add(ad)
@@ -414,3 +452,36 @@ def housekeeping(db: Session) -> list[tuple[str, str, str]]:
                         continue
     db.commit()
     return out
+
+
+@router.get("/api/admin/calendar")
+def calendar(days: int = 60, actor: str = Depends(staff(*ADM)), db: Session = Depends(get_db)):
+    """Ads and promotions on one time line, with the places where they clash: too many ads at once for the free places on a page,
+    or two promotions of the same service for the same people at the same time."""
+    from app import rules
+    from_ = now()
+    to_ = from_ + dt.timedelta(days=max(1, min(days, 180)))
+    items = []
+    for a in db.scalars(select(Ad).where(Ad.is_active.is_(True))).all():
+        s, e = (aware(a.starts_at) if a.starts_at else from_), (aware(a.ends_at) if a.ends_at else to_)
+        if e >= from_ and s <= to_:
+            items.append({"kind": "ad", "id": a.id, "title": a.title, "from": s.isoformat(), "to": e.isoformat(), "where": a.place, "audience": "18+" if a.adult_only else "все", "conflicts": []})
+    for c in db.scalars(select(PromoCampaign).where(PromoCampaign.is_active.is_(True))).all():
+        s, e = aware(c.starts_at), (aware(c.ends_at) if c.ends_at else to_)
+        if e >= from_ and s <= to_:
+            items.append({"kind": "promo", "id": c.id, "title": c.title, "from": s.isoformat(), "to": e.isoformat(), "where": c.service_code, "audience": c.audience, "conflicts": []})
+    cap = rules.val("search.ad_on_page")
+
+    def overlap(x, y):
+        return x["from"] < y["to"] and y["from"] < x["to"]
+    ads = [i for i in items if i["kind"] == "ad"]
+    for i in ads:
+        same = [j for j in ads if overlap(i, j) and (j["where"] == i["where"] or "both" in (i["where"], j["where"]))]
+        if len(same) > cap:
+            i["conflicts"].append(f"одновременно {len(same)} реклам на {cap} мест")
+    promos = [i for i in items if i["kind"] == "promo"]
+    for i in promos:
+        for j in promos:
+            if i is not j and i["where"] == j["where"] and overlap(i, j) and ("all" in (i["audience"], j["audience"]) or i["audience"] == j["audience"]):
+                i["conflicts"].append(f"пересекается с акцией «{j['title']}» по той же услуге")
+    return sorted(items, key=lambda x: x["from"])

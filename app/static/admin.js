@@ -1038,6 +1038,7 @@ $("#main").addEventListener("click", async (e) => {
 
 // ---- рассылки и баннеры ----
 async function loadMarketing() {
+  const cal = await api("/api/admin/calendar?days=60").catch(() => []);
   const [banners, casts, geo, ads, camps] = await Promise.all([api("/api/admin/banners"), api("/api/admin/broadcasts"), fetch("/api/geo").then((r) => r.json()).then((g) => g.regions),
     api("/api/admin/ads").catch(() => []), api("/api/admin/campaigns").catch(() => [])]);
   const price = await api("/api/admin/pricing").catch(() => []);
@@ -1045,18 +1046,21 @@ async function loadMarketing() {
   const SERVICES = Object.fromEntries(price.map((x) => [x.code, x.title]));
   if (!price.length) Object.assign(SERVICES, {dating_vip: "VIP-анкета", dating_invisible: "Невидимка", dating_viewers: "Кто видел анкету", dating_super: "Супер-симпатия"});
   $("#main").innerHTML = `
+    <div class="card"><h3>Календарь рекламы и акций (60 дней)</h3>${cal.length ? `<table><tr><th>Что</th><th>Где / для кого</th><th>С</th><th>До</th><th>Конфликты</th></tr>${cal.map((i) => `<tr><td>${i.kind === "ad" ? "📣" : "🎁"} ${esc(i.title)}</td><td>${esc(i.where)} · ${esc(i.audience)}</td><td>${esc(fmt(i.from))}</td><td>${esc(fmt(i.to))}</td>
+      <td>${i.conflicts.length ? '<span class="bad">' + i.conflicts.map(esc).join("<br>") + "</span>" : '<span class="good">нет</span>'}</td></tr>`).join("")}</table>` : '<p class="muted">Ничего не запланировано.</p>'}</div>
     <div class="card"><h3>Реклама в лентах</h3><p class="muted">Всегда с пометкой «Реклама», не выше третьего места, одна на экран. 18+ видят только люди с подтверждённым возрастом. Реклама на объявление исчезает вместе с ним.</p>
       <div class="row"><input id="adTitle" placeholder="Заголовок" maxlength="80"><input id="adText" placeholder="Текст" maxlength="200" style="flex:1;min-width:200px">
       <input id="adLink" placeholder="Ссылка https://… или номер объявления" style="min-width:220px">
       <select id="adPlace"><option value="both">Лента и главная</option><option value="list">Лента</option><option value="home">Главная</option></select>
-      <label><input type="checkbox" id="adAdult"> 18+</label><input id="adDays" type="number" min="1" max="365" placeholder="дней" style="width:80px"><input id="adBudget" type="number" min="1" placeholder="бюджет, показов" style="width:130px"><button class="act" id="adAdd">Добавить</button></div>
+      <label><input type="checkbox" id="adAdult"> 18+</label><input id="adDays" type="number" min="1" max="365" placeholder="дней" style="width:80px"><input id="adBudget" type="number" min="1" placeholder="бюджет, показов" style="width:130px">
+      <input id="adTitleB" placeholder="Вариант B: заголовок (A/B-тест)" maxlength="80"><input id="adTextB" placeholder="Вариант B: текст" maxlength="200"><button class="act" id="adAdd">Добавить</button></div>
       <details><summary class="muted">Запрещённые темы и ссылки</summary>
         <label>Запрещённые слова (через запятую)<textarea id="adBanW" rows="2">${esc(adLists.banned_words)}</textarea></label>
         <label>Запрещённые сайты (через запятую)<textarea id="adBanH" rows="2">${esc(adLists.banned_hosts)}</textarea></label>
         <label>Разрешённые сайты — если заполнено, другие нельзя<textarea id="adAllH" rows="2">${esc(adLists.allowed_hosts)}</textarea></label>
         <button class="act" id="adListsSave">Сохранить списки</button></details>
       <table><tr><th>№</th><th>Заголовок</th><th>Показы / бюджет</th><th>Клики</th><th>CTR</th><th>Идёт</th><th></th></tr>${ads.map((a) => `<tr data-adid="${a.id}"><td>${a.id}</td><td>${esc(a.title)}${a.adult ? " 🔞" : ""}</td>
-        <td>${a.shows}${a.max_shows ? " / " + a.max_shows : ""}</td><td>${a.clicks}</td><td>${a.ctr}%</td><td>${a.live ? "да" : "нет"}</td>
+        <td>${a.shows}${a.max_shows ? " / " + a.max_shows : ""}${a.ab ? `<br><small>A: ${a.ab.shows_a}/${a.ab.clicks_a} · B: ${a.ab.shows_b}/${a.ab.clicks_b}${a.ab.winner ? " · победил " + a.ab.winner.toUpperCase() : " · идёт тест"}</small>` : ""}</td><td>${a.clicks}</td><td>${a.ctr}%</td><td>${a.live ? "да" : "нет"}</td>
         <td><button class="act ${a.active ? "gray" : "ok"}" data-adtoggle>${a.active ? "Выключить" : "Включить"}</button><button class="act no" data-addel>Удалить</button></td></tr>`).join("")}</table></div>
     <div class="card"><h3>Акции (бесплатные услуги)</h3><p class="muted">Выдаётся с пометкой «по акции» и без подъёма в ленте. Досрочная остановка не отбирает уже выданное. У человека одновременно одна акция на услугу.</p>
       <div class="row"><input id="pcTitle" placeholder="Название акции" maxlength="80"><select id="pcService">${Object.entries(SERVICES).map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select>
@@ -1087,7 +1091,7 @@ async function loadMarketing() {
       const link = $("#adLink").value.trim(), isId = /^\d+$/.test(link);
       await post("/api/admin/ads", {title: $("#adTitle").value.trim(), text: $("#adText").value.trim(), link: isId ? "" : link, listing_id: isId ? Number(link) : null,
         place: $("#adPlace").value, adult_only: $("#adAdult").checked, days: $("#adDays").value ? Number($("#adDays").value) : null,
-        max_shows: $("#adBudget").value ? Number($("#adBudget").value) : null}); reload();
+        max_shows: $("#adBudget").value ? Number($("#adBudget").value) : null, title_b: $("#adTitleB").value.trim(), text_b: $("#adTextB").value.trim()}); reload();
     } catch (err) { say(err.message); }
   };
   $("#adListsSave").onclick = async () => {
@@ -1342,6 +1346,14 @@ async function loadSearchTest() {
     ${["admin", "super_admin"].includes(role()) ? `<div class="card"><h3>Синонимы и стоп-слова</h3><p class="muted">Синонимы: одна группа в строке, через «=» или запятую: <code>квартира = 원룸, студия</code>. Запрос на любое слово группы находит и остальные. Стоп-слова пропускаются в запросе: <code>в, на, и</code>.</p>
       <label>Синонимы<textarea id="sdSyn" rows="5" placeholder="квартира = 원룸, студия"></textarea></label><label>Стоп-слова (через запятую)<input id="sdStop" style="width:100%"></label>
       <button class="act" id="sdSave">Сохранить</button> <span class="muted">Действует сразу, проверьте выше.</span></div>` : ""}`;
+  if ($("#stOut")) api("/api/admin/search-log?days=7").then((d) => {
+    $("#stOut").insertAdjacentHTML("afterend", `<div class="card" id="slCard"><h3>Что ищут люди (7 дней, без личных данных)</h3><p class="muted">Запросов: ${d.total}. Хранится 90 дней, номера, почта и @имена вырезаются.</p>
+      <div class="cols"><div><b>Частые</b>${d.top.map((x) => `<div class="drun" style="display:flex;justify-content:space-between"><span>${esc(x.q)}</span><span class="muted">${x.n}</span></div>`).join("") || '<p class="muted">Пока пусто</p>'}</div>
+      <div><b>Ничего не нашли (что добавить?)</b>${d.empty.map((x) => `<div style="display:flex;justify-content:space-between"><span>${esc(x.q)}</span><span class="muted">${x.n}</span></div>`).join("") || '<p class="muted">Таких нет</p>'}</div></div>
+      <button class="act gray" id="slReindex">Пересобрать текст поиска</button>${role() === "super_admin" ? '<button class="act gray" id="slCsv">⬇ Выгрузка (суперадмин)</button>' : ""}</div>`);
+    $("#slReindex").onclick = async () => { try { const r = await post("/api/admin/search/reindex"); say(`Обновлено объявлений: ${r.updated}`); } catch (err) { say(err.message); } };
+    if ($("#slCsv")) $("#slCsv").onclick = async () => { const r = await fetch("/api/admin/search-log/export", {headers: {"X-Admin-Session": session()}}); const a = document.createElement("a"); a.href = URL.createObjectURL(await r.blob()); a.download = "search-log.csv"; a.click(); };
+  }).catch(() => {});
   if ($("#sdSyn")) api("/api/admin/search-dict").then((d) => { $("#sdSyn").value = d.synonyms; $("#sdStop").value = d.stopwords; }).catch(() => {});
   if ($("#sdSave")) $("#sdSave").onclick = async () => { try { await api("/api/admin/search-dict", {method: "PUT", body: JSON.stringify({synonyms: $("#sdSyn").value, stopwords: $("#sdStop").value})}); say("Сохранено"); } catch (err) { say(err.message); } };
   const go = async () => {

@@ -34,7 +34,7 @@ def test_retention_removes_only_what_is_old(client):
         db.add(TicketMessage(ticket_id=t.id, text="x"))
         db.commit()
         out = retention.purge(db)
-        assert out == {"notifications": 1, "views": 1, "tickets": 1}
+        assert out == {"notifications": 1, "views": 1, "searches": 0, "tickets": 1}
         assert [n.text for n in db.query(Notification)] == ["new"]
         assert db.query(TicketMessage).count() == 0
 

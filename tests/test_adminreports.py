@@ -101,3 +101,46 @@ def test_complaints_push_a_listing_down_inside_its_group(client):
         client.post("/api/reports", json={"target_type": "listing", "target_id": str(second), "reason": "fake"}, headers=as_user(u))
     ids = [x["id"] for x in client.get("/api/catalog", params={"q": "cook"}).json()["items"]]
     assert ids == [first, second]                                          # two different people complained: it sinks
+
+
+def test_search_log_keeps_no_personal_data_and_shows_empty_queries(client):
+    make(client, title="Cook in cafe", category="job")
+    client.get("/api/catalog", params={"q": "cook"})
+    client.get("/api/catalog", params={"q": "welder +82 10 1234 5678 ivan@mail.com @ivan_kr"})
+    client.get("/api/catalog", params={"q": "welder"})
+    log = client.get("/api/admin/search-log?days=7", headers=ADMIN).json()
+    texts = {x["q"] for x in log["top"]}
+    assert "cook" in texts and "welder" in texts
+    assert not any("ivan" in t or "1234" in t or "@" in t for t in texts)                    # cleaned before saving
+    assert any("<номер>" in t and "<email>" in t for t in texts)
+    assert {x["q"] for x in log["empty"]} >= {"welder"}
+    assert client.get("/api/admin/search-log/export", headers=ADMIN).status_code == 200      # the test admin is the super administrator
+    assert client.get("/api/admin/search-log?days=7").status_code == 401
+    assert client.post("/api/admin/search/reindex", headers=ADMIN).status_code == 200
+
+
+def test_ab_test_alternates_and_picks_a_winner(client):
+    from app import ads
+    r = client.post("/api/admin/ads", json={"title": "Вариант А", "text": "a", "link": "https://good.com/x", "title_b": "Вариант Б", "text_b": "b"}, headers=ADMIN)
+    aid = r.json()["id"]
+    seen = [client.get("/api/ads?organic=10", headers=as_user(1)).json()[0]["ad"] for _ in range(4)]
+    assert [s["variant"] for s in seen] == ["a", "b", "a", "b"] and seen[1]["title"] == "Вариант Б"
+    with SessionLocal() as db:
+        ad = db.get(ads.Ad, aid)
+        ad.shows, ad.shows_b, ad.clicks, ad.clicks_b = 400, 200, 30, 20                       # A: 10/200 clicks 5%, B: 20/200 = 10%
+        db.commit()
+    assert client.post(f"/api/ads/{aid}/click?v=b").status_code == 204
+    row = client.get("/api/admin/ads", headers=ADMIN).json()[0]
+    assert row["ab"]["winner"] == "b"
+    assert client.get("/api/ads?organic=10", headers=as_user(1)).json()[0]["ad"]["variant"] == "b"       # only the winner is shown now
+
+
+def test_calendar_marks_clashes(client):
+    for i in range(5):
+        client.post("/api/admin/ads", json={"title": f"Реклама {i}", "link": "https://good.com/x", "place": "list", "days": 10}, headers=ADMIN)
+    for t in ("Акция 1", "Акция 2"):
+        client.post("/api/admin/campaigns", json={"title": t, "service_code": "dating_vip", "audience": "all", "last_days": 5}, headers=ADMIN)
+    cal = client.get("/api/admin/calendar", headers=ADMIN).json()
+    assert len(cal) == 7
+    assert any("мест" in c for i in cal if i["kind"] == "ad" for c in i["conflicts"])
+    assert any("пересекается" in c for i in cal if i["kind"] == "promo" for c in i["conflicts"])
