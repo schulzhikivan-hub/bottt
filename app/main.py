@@ -26,7 +26,7 @@ from app.seed import seed_reference
 from app.admin_auth import router as admin_auth_router, bootstrap_admins
 from app.webauth import router as webauth_router
 from app.audit import log_action
-from app.admin_auth import staff, SUPPORT, MOD, ADM, SUP
+from app.admin_auth import staff, SUPPORT, MOD, ADM, SUP, FIN
 from app.manage import router as manage_router
 from app.guard import rate_limit, check_text, duplicate_note, notify_user
 from app import admin_ops as ops
@@ -955,7 +955,7 @@ def admin_set_price(code: str, payload: PricingIn, actor: str = Depends(staff(*A
 
 
 @app.get("/api/admin/payments")
-def admin_payments(actor: str = Depends(staff(*ADM)), db: Session = Depends(get_db)):
+def admin_payments(actor: str = Depends(staff(*FIN)), db: Session = Depends(get_db)):
     rows = db.scalars(select(Payment).order_by(desc(Payment.id)).limit(200)).all()
     return [{"id": p.id, "user": p.user_tg_id, "listing_id": p.listing_id, "service": p.service_code,
              "stars": p.stars, "status": p.status, "charge_id": p.telegram_payment_charge_id,
@@ -964,7 +964,7 @@ def admin_payments(actor: str = Depends(staff(*ADM)), db: Session = Depends(get_
 
 @app.post("/api/admin/payments/{payment_id}/refund")
 def admin_refund(payment_id: int, reason: str = Query(default="", max_length=300), mode: str = Query(default="full", pattern="^(full|balance)$"),
-                 actor: str = Depends(staff(*ADM)), db: Session = Depends(get_db)):
+                 actor: str = Depends(staff(*FIN)), db: Session = Depends(get_db)):
     """mode=full: the whole payment goes back to the person (Telegram). mode=balance: only the unused part of the service,
     as Stars on the balance (Telegram can not return a part)."""
     credit = None

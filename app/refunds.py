@@ -22,7 +22,7 @@ from sqlalchemy import Integer, String, Text, DateTime, func, select
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from app import guard, payments, rules
-from app.admin_auth import ADM, staff
+from app.admin_auth import FIN, staff
 from app.audit import log_action
 from app.database import Base, get_db
 from app.models import Admin, AuditLog, Payment, User, _now
@@ -89,7 +89,7 @@ def my_refunds(user_id: str = Depends(writer), db: Session = Depends(get_db)):
 
 
 @router.get("/api/admin/refunds")
-def admin_refunds(status: str = Query(default="open"), user: str = Query(default="", max_length=40), actor: str = Depends(staff(*ADM)),
+def admin_refunds(status: str = Query(default="open"), user: str = Query(default="", max_length=40), actor: str = Depends(staff(*FIN)),
                   db: Session = Depends(get_db)):
     stmt = select(Refund).order_by(Refund.id.desc()).limit(200)
     if status == "open":
@@ -109,7 +109,7 @@ def _get(db: Session, refund_id: int) -> Refund:
 
 
 @router.post("/api/admin/refunds/{refund_id}/take")
-def take(refund_id: int, actor: str = Depends(staff(*ADM)), db: Session = Depends(get_db)):
+def take(refund_id: int, actor: str = Depends(staff(*FIN)), db: Session = Depends(get_db)):
     r = _get(db, refund_id)
     if r.status != "new":
         raise HTTPException(409, "Заявка уже взята или закрыта")
@@ -136,7 +136,7 @@ class ApproveIn(BaseModel):
 
 
 @router.post("/api/admin/refunds/{refund_id}/approve")
-def approve(refund_id: int, payload: ApproveIn, actor: str = Depends(staff(*ADM)), db: Session = Depends(get_db)):
+def approve(refund_id: int, payload: ApproveIn, actor: str = Depends(staff(*FIN)), db: Session = Depends(get_db)):
     r = _get(db, refund_id)
     if r.status not in OPEN:
         raise HTTPException(409, "Заявка уже закрыта")
@@ -169,7 +169,7 @@ class RejectIn(BaseModel):
 
 
 @router.post("/api/admin/refunds/{refund_id}/reject")
-def reject(refund_id: int, payload: RejectIn, actor: str = Depends(staff(*ADM)), db: Session = Depends(get_db)):
+def reject(refund_id: int, payload: RejectIn, actor: str = Depends(staff(*FIN)), db: Session = Depends(get_db)):
     r = _get(db, refund_id)
     if r.status not in OPEN:
         raise HTTPException(409, "Заявка уже закрыта")
@@ -181,7 +181,7 @@ def reject(refund_id: int, payload: RejectIn, actor: str = Depends(staff(*ADM)),
 
 
 @router.post("/api/admin/refunds/{refund_id}/cancel")
-def cancel(refund_id: int, actor: str = Depends(staff(*ADM)), db: Session = Depends(get_db)):
+def cancel(refund_id: int, actor: str = Depends(staff(*FIN)), db: Session = Depends(get_db)):
     """Take back a refund to the balance within 24 hours (super administrator only). A refund that went to Telegram can not be
     taken back by us."""
     boss = db.get(Admin, actor)
@@ -206,7 +206,7 @@ def cancel(refund_id: int, actor: str = Depends(staff(*ADM)), db: Session = Depe
 
 
 @router.get("/api/admin/refunds/export")
-def export(actor: str = Depends(staff(*ADM)), db: Session = Depends(get_db)):
+def export(actor: str = Depends(staff(*FIN)), db: Session = Depends(get_db)):
     out = io.StringIO()
     w = csv.writer(out)
     w.writerow(["id", "payment", "user", "status", "mode", "amount", "reason", "answer", "created", "decided"])

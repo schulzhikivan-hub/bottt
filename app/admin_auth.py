@@ -23,10 +23,11 @@ from app.models import Admin, AdminCode, AdminSession
 from app.payments import now, aware
 
 router = APIRouter()
-ROLES = ("support", "moderator", "admin", "super_admin")
+ROLES = ("support", "moderator", "accountant", "admin", "super_admin")
 SUPPORT = ("support", "moderator", "admin", "super_admin")  # reports, users and blocks
 MOD = ("moderator", "admin", "super_admin")
 ADM = ("admin", "super_admin")
+FIN = ("accountant", "admin", "super_admin")      # money: payments, refunds, reports (no moderation, no people)
 SUP = ("super_admin",)
 CODE_TTL = dt.timedelta(minutes=5)
 SESSION_TTL = dt.timedelta(hours=12)

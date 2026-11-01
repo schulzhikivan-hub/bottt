@@ -60,3 +60,16 @@ def test_super_admin_can_be_limited_to_trusted_addresses_without_locking_himself
     assert client.get("/api/admin/stats", headers={**ADMIN, "X-Forwarded-For": "8.8.8.8"}).status_code == 403          # another address
     assert client.get("/api/admin/counters", headers=MOD).status_code == 200                                           # others are not affected
     assert client.put("/api/admin/security/ips", json={"ips": ""}, headers=ADMIN).status_code == 200                   # switch off
+
+
+def test_accountant_sees_money_but_not_moderation_or_people(client):
+    with SessionLocal() as db:
+        db.add(Admin(tg_id="556", role="accountant", active=True, created_at=now()))
+        db.add(AdminSession(token_hash=_hash("acc-token"), tg_id="556", expires_at=now() + dt.timedelta(hours=1)))
+        db.commit()
+    acc = {"X-Admin-Session": "acc-token"}
+    for ok in ("/api/admin/payments", "/api/admin/refunds", "/api/admin/reports/money", "/api/admin/vip/history"):
+        assert client.get(ok, headers=acc).status_code == 200, ok
+    for no in ("/api/admin/listings", "/api/admin/users-list", "/api/admin/stats", "/api/admin/rules", "/api/admin/security/pii-views"):
+        assert client.get(no, headers=acc).status_code == 403, no
+    assert client.put("/api/admin/admins/556", json={"role": "accountant", "active": True}, headers=ADMIN).status_code == 200

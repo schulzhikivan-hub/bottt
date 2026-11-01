@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app import catalog, guard, policy, rules
 from app.audit import log_action
-from app.admin_auth import ADM, MOD, staff
+from app.admin_auth import ADM, FIN, MOD, staff
 from app.database import get_db
 from app.models import Admin, AuditLog, Listing, Payment, Pricing, User
 from app.payments import aware, now
@@ -18,7 +18,7 @@ router = APIRouter()
 
 
 @router.get("/api/admin/reports/money")
-def money_report(days: int = Query(default=30, ge=1, le=366), actor: str = Depends(staff(*ADM)), db: Session = Depends(get_db)):
+def money_report(days: int = Query(default=30, ge=1, le=366), actor: str = Depends(staff(*FIN)), db: Session = Depends(get_db)):
     """Revenue, refunds and free grants for the last `days` days, by section and by service."""
     since = now() - dt.timedelta(days=days)
     names = {p.code: p for p in db.scalars(select(Pricing)).all()}
@@ -49,7 +49,7 @@ def money_report(days: int = Query(default=30, ge=1, le=366), actor: str = Depen
 
 
 @router.get("/api/admin/vip/history")
-def vip_history(limit: int = Query(default=100, ge=1, le=500), actor: str = Depends(staff(*ADM)), db: Session = Depends(get_db)):
+def vip_history(limit: int = Query(default=100, ge=1, le=500), actor: str = Depends(staff(*FIN)), db: Session = Depends(get_db)):
     """Every VIP activation: who, when, for how long, how much, paid or given (and by whom, see the note)."""
     vip = {p.code: p for p in db.scalars(select(Pricing).where(Pricing.kind == "vip")).all()}
     if not vip:

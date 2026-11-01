@@ -83,6 +83,7 @@ $("#webLoginBtn").onclick = async () => {
 const SUPPORT = ["support", "moderator", "admin", "super_admin"];
 const MOD = ["moderator", "admin", "super_admin"];
 const ADM = ["admin", "super_admin"];
+const FIN = ["accountant", "admin", "super_admin"];
 const SUP = ["super_admin"];
 const TABS = [
   {key: "dash", label: "📊 Главная", roles: ADM, title: "Главная"},
@@ -104,11 +105,11 @@ const TABS = [
   {key: "guide", label: "📘 Гид", roles: ADM, title: "Статьи гида"},
   {key: "texts", label: "📝 Тексты, FAQ, курс", roles: ADM, title: "Тексты, вопросы и ответы, настройки"},
   {key: "marketing", label: "📣 Рассылки и баннеры", roles: ADM, title: "Рассылки и баннеры"},
-  {sep: "Деньги", roles: ADM},
-  {key: "payments", label: "💳 Платежи", roles: ADM, title: "Платежи и промокоды"},
-  {key: "refunds", label: "↩️ Возвраты", roles: ADM, title: "Возвраты: заявки, решения, история"},
+  {sep: "Деньги", roles: FIN},
+  {key: "payments", label: "💳 Платежи", roles: FIN, title: "Платежи и промокоды"},
+  {key: "refunds", label: "↩️ Возвраты", roles: FIN, title: "Возвраты: заявки, решения, история"},
   {key: "pricing", label: "💰 Цены", roles: ADM, title: "Цены услуг"},
-  {key: "reportsm", label: "📈 Отчёты и VIP", roles: ADM, title: "Деньги: отчёты, VIP, возвраты, подарки"},
+  {key: "reportsm", label: "📈 Отчёты и VIP", roles: FIN, title: "Деньги: отчёты, VIP, возвраты, подарки"},
   {key: "stest", label: "🔎 Тест поиска", roles: MOD, title: "Тест поиска: почему объект на этом месте или не показан"},
   {key: "rules", label: "📐 Правила", roles: ADM, title: "Правила: выдача, платные места, сроки, хранение"},
   {sep: "Система", roles: ADM},
@@ -1306,7 +1307,7 @@ $("#main").addEventListener("click", async (e) => {
 });
 async function loadAdmins() {
   const rows = await api("/api/admin/admins");
-  const ROLES = ["support", "moderator", "admin", "super_admin"];
+  const ROLES = ["support", "moderator", "accountant", "admin", "super_admin"];
   $("#main").innerHTML = `<p class="muted">Роли: support — жалобы, пользователи и блокировки; moderator — + модерация объявлений, анкет и работодателей;
     admin — + цены, платежи, контент, рассылки, статистика, журнал; super_admin — + сотрудники.</p>
     <table><tr><th>Telegram ID</th><th>Роль</th><th>Доступ</th><th></th></tr>
