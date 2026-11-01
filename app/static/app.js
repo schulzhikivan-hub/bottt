@@ -1944,16 +1944,34 @@ $("#promoApply").onclick = async () => {
   $("#promoNote").textContent = applied ? `✔ Промокод ${applied} применён: цены ниже уже со скидкой` : "";
   renderServices(servicesData);
 };
+// Оплата Stars. Внутри Telegram с версией 6.1+ счёт открывается окном; на сайте и в старом Telegram метод openInvoice
+// бросает WebAppMethodUnsupported, поэтому там счёт открывается ссылкой в приложении Telegram, а страница ждёт оплату сама.
+let payPoll = null;
+async function openPay(url, paymentId, done) {
+  clearInterval(payPoll);
+  const native = Boolean(tg?.initData) && typeof tg?.openInvoice === "function" && (tg.isVersionAtLeast ? tg.isVersionAtLeast("6.1") : false);
+  if (native) {
+    try {
+      tg.openInvoice(url, (st) => { toast(st === "paid" ? "Оплата прошла" : st === "failed" ? "Оплата не прошла" : "Оплата отменена"); done(st); });
+      return;
+    } catch (e) { /* ниже: откроем ссылкой */ }
+  }
+  window.open(url, "_blank");
+  toast("Оплатите в Telegram и вернитесь сюда: страница обновится сама");
+  const started = Date.now();
+  payPoll = setInterval(async () => {
+    if (Date.now() - started > 180000) { clearInterval(payPoll); return; }
+    try {
+      const rows = await api("/api/me/payments", {quiet: true});
+      const p = rows.find((x) => x.id === paymentId);
+      if (p && p.status !== "pending") { clearInterval(payPoll); toast(p.status === "paid" ? "Оплата прошла" : "Оплата не прошла"); done(p.status); }
+    } catch (e) { /* подождём ещё */ }
+  }, 3000);
+}
 async function buy(listingId, code, useBalance = false) {
   const r = await api("/api/payments/invoice", {method: "POST", body: JSON.stringify({listing_id: Number(listingId), service_code: code, promo_code: promoCode, use_balance: useBalance})});
   if (r.paid) { toast("Готово: услуга включена"); $("#services").classList.add("hidden"); loadProfile(); return; }
-  if (!tg?.openInvoice) { toast("Оплата открывается только внутри Telegram"); return; }
-  tg.openInvoice(r.invoice_url, (status) => {
-    $("#services").classList.add("hidden");
-    if (status === "paid") toast("Оплата прошла. Услуга активируется");
-    else if (status === "failed") toast("Оплата не прошла");
-    loadProfile();
-  });
+  openPay(r.invoice_url, r.payment_id, () => { $("#services").classList.add("hidden"); loadProfile(); });
 }
 $("#closeServices").onclick = () => $("#services").classList.add("hidden");
 
@@ -2305,8 +2323,7 @@ document.addEventListener("click", async (e) => {
     if (buy) {
       const r = await api("/api/dating/invoice", {method: "POST", body: JSON.stringify({service_code: buy.dataset.dbuy, use_balance: Boolean(buy.dataset.bal)})});
       if (r.paid) { toast("Готово: услуга включена"); return showDatingCabinet(); }
-      if (!tg?.openInvoice) { toast("Оплата открывается только внутри Telegram"); return; }
-      tg.openInvoice(r.invoice_url, (st) => { toast(st === "paid" ? "Оплата прошла" : st === "failed" ? "Оплата не прошла" : "Оплата отменена"); showDatingCabinet(); });
+      openPay(r.invoice_url, r.payment_id, () => showDatingCabinet());
     }
     const lclaim = e.target.closest("[data-lclaim]");
     if (lclaim) {
@@ -2407,10 +2424,6 @@ function topupHtml(prefix) {
     <div class="actions"><input id="${prefix}TopupN" type="number" min="10" max="10000" placeholder="Своя сумма, ⭐" style="flex:1"><button data-topup-go="${prefix}">Пополнить</button></div>
     <p class="muted">Оплата Telegram Stars. От 10 до 10 000 ⭐ за раз.</p>`;
 }
-async function payInvoice(url, done) {
-  if (tg?.openInvoice) tg.openInvoice(url, (st) => { toast(st === "paid" ? "Оплата прошла, баланс обновится через несколько секунд" : st === "failed" ? "Оплата не прошла" : "Оплата отменена"); setTimeout(done, 1500); });
-  else { window.open(url, "_blank"); toast("Оплатите в Telegram и вернитесь сюда"); }
-}
 document.addEventListener("click", async (e) => {
   const pick = e.target.closest("[data-topup-pick]"), go = e.target.closest("[data-topup-go]");
   if (pick) { $(`#${pick.dataset.for}TopupN`).value = pick.dataset.topupPick; return; }
@@ -2420,10 +2433,10 @@ document.addEventListener("click", async (e) => {
   try {
     if (go.dataset.topupGo === "co") {
       const r = await api(`/api/company/${coState.id}/topup`, {method: "POST", body: JSON.stringify({stars})});
-      payInvoice(r.invoice_url, () => { coState.tab = "money"; showCompany(coState.id); });
+      openPay(r.invoice_url, r.payment_id, () => { coState.tab = "money"; showCompany(coState.id); });
     } else {
       const r = await api("/api/me/balance/topup", {method: "POST", body: JSON.stringify({stars})});
-      payInvoice(r.invoice_url, () => showDatingCabinet());
+      openPay(r.invoice_url, r.payment_id, () => showDatingCabinet());
     }
   } catch (err) { toast(err.message); }
 });
