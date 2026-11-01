@@ -327,6 +327,8 @@ class Admin(Base):
     role: Mapped[str] = mapped_column(String(20), default="moderator")
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    base_role: Mapped[str | None] = mapped_column(String(20), nullable=True)               # the role to return to when a temporary one ends
+    elevated_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class AdminCode(Base):

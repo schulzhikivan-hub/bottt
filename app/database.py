@@ -202,4 +202,6 @@ def migrate() -> None:
         for ddl in ("title_b VARCHAR(80) NOT NULL DEFAULT ''", "text_b VARCHAR(200) NOT NULL DEFAULT ''", "shows_b INTEGER NOT NULL DEFAULT 0",
                     "clicks_b INTEGER NOT NULL DEFAULT 0", "winner VARCHAR(1) NOT NULL DEFAULT ''"):
             conn.execute(text(f"ALTER TABLE ads ADD COLUMN IF NOT EXISTS {ddl}"))
+        conn.execute(text("ALTER TABLE admins ADD COLUMN IF NOT EXISTS base_role VARCHAR(20)"))
+        conn.execute(text("ALTER TABLE admins ADD COLUMN IF NOT EXISTS elevated_until TIMESTAMPTZ"))
         conn.execute(text("ALTER TABLE notifications ADD COLUMN IF NOT EXISTS tg_pending BOOLEAN NOT NULL DEFAULT FALSE"))

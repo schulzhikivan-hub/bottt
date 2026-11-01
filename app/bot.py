@@ -388,7 +388,8 @@ def _expire_once() -> list[tuple[str, str]]:
         messages.extend((tg, text, "searches") for tg, text in searches.new_matches(db))
         from app import datingsvc
         from app import ads, reportsflow
-        from app import duty
+        from app import admin_auth, duty
+        admin_auth.revert_all(db)                     # temporary rights that ran out go back
         duty.escalate(db)                             # a duty alert nobody saw goes up
         reportsflow.auto_close(db)                    # complaints nobody decided in time are closed by the rules
         messages.extend(ads.housekeeping(db))        # promotions: day-before notice, automatic start

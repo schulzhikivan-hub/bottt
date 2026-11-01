@@ -1310,8 +1310,8 @@ async function loadAdmins() {
   $("#main").innerHTML = `<p class="muted">Роли: support — жалобы, пользователи и блокировки; moderator — + модерация объявлений, анкет и работодателей;
     admin — + цены, платежи, контент, рассылки, статистика, журнал; super_admin — + сотрудники.</p>
     <table><tr><th>Telegram ID</th><th>Роль</th><th>Доступ</th><th></th></tr>
-    ${rows.map((a) => `<tr data-staff="${esc(a.tg_id)}"><td>${esc(a.tg_id)}</td><td><select data-role>${ROLES.map((r) => `<option value="${r}" ${r === a.role ? "selected" : ""}>${r}</option>`).join("")}</select></td>
-      <td><input type="checkbox" data-active ${a.active ? "checked" : ""}></td><td><button class="act" data-staff-save>Сохранить</button> <button class="act gray" data-staff-out>Выйти со всех устройств</button></td></tr>`).join("")}</table>
+    ${rows.map((a) => `<tr data-staff="${esc(a.tg_id)}"><td>${esc(a.tg_id)}${a.elevated_until ? `<br><small class="muted">временно до ${esc(fmt(a.elevated_until))}, потом ${esc(a.base_role || "")}</small>` : ""}</td><td><select data-role>${ROLES.map((r) => `<option value="${r}" ${r === a.role ? "selected" : ""}>${r}</option>`).join("")}</select></td>
+      <td><input type="checkbox" data-active ${a.active ? "checked" : ""}></td><td><button class="act" data-staff-save>Сохранить</button> <button class="act gray" data-staff-out>Выйти со всех устройств</button> ${a.role !== "super_admin" && a.role !== "admin" ? '<button class="act warn" data-staff-up>Повысить на срок</button>' : ""}</td></tr>`).join("")}</table>
     <div class="card"><h3>Работа сотрудников за 30 дней</h3><div id="staffDetail" class="muted">Загрузка…</div></div>
     <div class="card"><h3>Входы и действия с доступом</h3><div id="staffLogins" class="muted">Загрузка…</div></div>
     <p><input id="newStaffId" inputmode="numeric" placeholder="Telegram ID сотрудника"><select id="newStaffRole">${ROLES.map((r) => `<option>${r}</option>`).join("")}</select>
@@ -1321,6 +1321,12 @@ async function loadAdmins() {
 $("#main").addEventListener("click", async (e) => {
   const row = e.target.closest("[data-staff]");
   try {
+    if (e.target.closest("[data-staff-up]")) {
+      const role = prompt("Какая роль? admin или moderator", "admin"); if (!role) return;
+      const days = Number(prompt("На сколько дней? (1–14)", "7")); if (!days) return;
+      const why = ask("Причина (запишется в журнал):"); if (!why) return;
+      await post(`/api/admin/admins/${row.dataset.staff}/elevate`, {role: role.trim(), days, reason: why}); say("Права выданы, вернутся сами"); reload(); return;
+    }
     if (e.target.closest("[data-staff-save]")) {
       await api(`/api/admin/admins/${row.dataset.staff}`, {method: "PUT", body: JSON.stringify({role: row.querySelector("[data-role]").value, active: row.querySelector("[data-active]").checked})});
       say("Сохранено (запись в журнале)"); reload();
@@ -1477,14 +1483,21 @@ $("#main").addEventListener("click", async (e) => {
 
 // ---- безопасность ----
 async function loadSecurity() {
+  api("/api/admin/security/ips").then((r) => { if ($("#ipMine")) { $("#ipMine").textContent = r.your_ip; $("#ipList").value = r.ips; } }).catch(() => {});
   const [flags, pii, logins] = await Promise.all([api("/api/admin/flags"), api("/api/admin/security/pii-views?limit=60"), api("/api/admin/security/logins?limit=40")]);
   $("#main").innerHTML = `<div class="card"><h3>Функции: включить без релиза</h3><p class="muted">«Только сотрудникам» — чтобы проверить на себе до запуска для всех. Каждое переключение записывается в журнал.</p>
     ${flags.map((f) => `<div class="row" style="justify-content:space-between;border-bottom:1px solid var(--line);padding:8px 0"><div><b>${esc(f.title)}</b><div class="muted">${esc(f.hint)}</div></div>
       <select data-flag="${esc(f.key)}">${Object.entries(f.states).map(([k, v]) => `<option value="${k}" ${k === f.state ? "selected" : ""}>${esc(v)}</option>`).join("")}</select></div>`).join("")}</div>
+    <div class="card"><h3>Доверенные адреса суперадмина</h3><p class="muted">Если заполнить, суперадмин сможет работать в панели только с этих адресов (через запятую). Ваш адрес сейчас: <b id="ipMine">…</b>. Он должен быть в списке.</p>
+      <div class="row"><input id="ipList" placeholder="например: 203.0.113.5, 198.51.100.7" style="flex:1;min-width:240px"><button class="act" id="ipSave">Сохранить</button></div></div>
     <div class="card"><h3>Кто смотрел личные данные</h3>${pii.by_staff.length ? `<p class="muted">Всего в списке: ${pii.items.length}. Больше всех: ${pii.by_staff.slice(0, 3).map((x) => "…" + esc(x.staff.slice(-4)) + " — " + x.views).join(", ")}</p>` : '<p class="muted">Пока никто.</p>'}
       <table><tr><th>Когда</th><th>Сотрудник</th><th>Что открыл</th></tr>${pii.items.map((i) => `<tr><td>${esc(fmt(i.at))}</td><td>…${esc(i.staff.slice(-4))}</td><td>${esc(i.kind === "listing" ? "объявление №" : i.kind === "user" ? "человек " : i.kind)}${esc(i.id)}</td></tr>`).join("")}</table></div>
     <div class="card"><h3>Входы сотрудников</h3><table><tr><th>Когда</th><th>Кто</th><th>Как</th><th>Адрес</th><th>Устройство</th></tr>${logins.map((l) => `<tr><td>${esc(fmt(l.at))}</td><td>…${esc(l.staff.slice(-4))}</td><td>${esc(l.how)}</td><td>${esc(l.ip)}</td><td>${esc(l.device)}</td></tr>`).join("")}</table></div>`;
 }
+$("#main").addEventListener("click", async (e) => {
+  if (e.target.id !== "ipSave") return;
+  try { await api("/api/admin/security/ips", {method: "PUT", body: JSON.stringify({ips: $("#ipList").value})}); say("Сохранено"); } catch (err) { say(err.message); }
+});
 $("#main").addEventListener("change", async (e) => {
   const f = e.target.closest("[data-flag]");
   if (!f) return;
