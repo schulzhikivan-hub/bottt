@@ -120,6 +120,9 @@ def ad_view(ad: Ad) -> dict:
 @router.get("/api/ads")
 def ads_for_list(organic: int = 0, page: int = 0, where: str = "list", viewer: str | None = Depends(optional_user_id),
                  db: Session = Depends(get_db)):
+    from app import security
+    if not security.flag_on(db, "ads", viewer):
+        return []
     """Where to put ads in a list of `organic` items: [{at: index, ad: {...}}]. Never in the first three places."""
     if where not in {"list", "home"}:
         raise HTTPException(400, "where: list или home")

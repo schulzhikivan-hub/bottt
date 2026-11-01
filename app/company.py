@@ -174,6 +174,8 @@ def _view(db: Session, c: Company, role: str) -> dict:
 
 @router.post("/api/company", status_code=201)
 def create_company(payload: CompanyIn, user_id: str = Depends(writer), db: Session = Depends(get_db)):
+    from app import security
+    security.require_flag(db, "company", user_id)
     guard.rate_limit(user_id, "company_create", 5, 86400)
     guard.check_text(payload.name, payload.description)
     mine = db.scalar(select(func.count()).select_from(Company).where(Company.owner_tg_id == user_id)) or 0

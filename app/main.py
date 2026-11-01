@@ -32,7 +32,7 @@ from app.guard import rate_limit, check_text, duplicate_note, notify_user
 from app import admin_ops as ops
 from app import catalog
 from app import photos, applications, searches, inbox, promos, adminx, observe, site
-from app import geo, reviews, resumes, referrals, support, extras, adminplus, adminview, datingsvc, ads, rules, adminreports, account, refunds, blocks, reportsflow, batches
+from app import geo, reviews, resumes, referrals, support, extras, adminplus, adminview, datingsvc, ads, rules, adminreports, account, refunds, blocks, reportsflow, batches, security
 from app import fields as listing_fields
 from app.users import get_or_create_user, writer, is_blocked_pair
 from app.models import Admin, AuditLog, ConvHide, DatingProfile, TypingMark
@@ -53,6 +53,7 @@ with startup_lock():   # with several workers only one prepares the database at 
         _company_boot.migrate_employers(_db)      # people who were employers before get a company
 
 app = FastAPI(title="KOREA HUB API", version="0.4.0")
+app.include_router(security.router)
 app.include_router(batches.router)
 app.include_router(reportsflow.router)
 app.include_router(blocks.router)
@@ -897,6 +898,7 @@ def admin_listing(listing_id: int, actor: str = Depends(staff(*MOD)), db: Sessio
     if item is None:
         raise HTTPException(404, "Объявление не найдено")
     shown = catalog.with_promo(db, [item], owner=True)[0]
+    security.note_pii_view(db, actor, "listing", str(listing_id))            # the contact of the listing is personal data
     return {**shown.model_dump(mode="json"), "pending_changes": item.pending_changes, "author_id": item.author_telegram_id,
             "flags": adminx.listing_flags(db, item)}
 

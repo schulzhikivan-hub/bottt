@@ -139,6 +139,10 @@ class PasswordLogin(BaseModel):
 
 @router.post("/api/auth/password-login")
 def password_login(payload: PasswordLogin, request: Request, db: Session = Depends(get_db)):
+    from app import security
+    state = security.flag_state(db, "pwlogin")
+    if state == "off":
+        raise HTTPException(403, "Вход по e-mail и паролю сейчас недоступен: войдите через Telegram")
     forwarded = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
     ip = forwarded or (request.client.host if request.client else "")
     email = (payload.email or "").strip().lower()
@@ -159,6 +163,8 @@ def password_login(payload: PasswordLogin, request: Request, db: Session = Depen
         raise wrong
     if user.blocked or user.deleted_at is not None:
         raise HTTPException(403, "Аккаунт недоступен")
+    if state == "staff" and not security.flag_on(db, "pwlogin", user.tg_id):
+        raise HTTPException(403, "Вход по e-mail и паролю пока открыт только сотрудникам: войдите через Telegram")
     user.pw_fails, user.pw_locked_until = 0, None
     session = secrets.token_urlsafe(32)
     db.add(WebSession(token_hash=_hash(session), tg_id=user.tg_id, expires_at=now() + WEB_SESSION_TTL))

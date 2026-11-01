@@ -101,6 +101,8 @@ def user_card(tg_id: str, actor: str = Depends(staff(*SUPPORT)), db: Session = D
     user = db.get(User, tg_id)
     if user is None:
         raise HTTPException(404, "Пользователь не найден")
+    from app import security
+    security.note_pii_view(db, actor, "user", tg_id)
     listings = db.scalars(select(Listing).where(Listing.author_telegram_id == tg_id).order_by(Listing.id.desc()).limit(30)).all()
     c = lambda stmt: db.scalar(stmt) or 0   # noqa: E731
     paid = c(select(func.coalesce(func.sum(Payment.stars), 0)).where(Payment.user_tg_id == tg_id, Payment.status == "paid"))

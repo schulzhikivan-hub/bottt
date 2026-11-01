@@ -93,7 +93,7 @@ def start_login(request: Request, db: Session = Depends(get_db)):
 
 
 @router.get("/api/auth/poll/{token}")
-def poll_login(token: str, db: Session = Depends(get_db)):
+def poll_login(token: str, request: Request, db: Session = Depends(get_db)):
     row = db.get(LoginRequest, _hash(token))
     if row is None or aware(row.expires_at) < now() or row.status == "used":
         return {"status": "expired"}
@@ -111,7 +111,9 @@ def poll_login(token: str, db: Session = Depends(get_db)):
         admin_token = secrets.token_urlsafe(32)
         db.add(AdminSession(token_hash=_hash(admin_token), tg_id=row.tg_id,
                             expires_at=now() + ADMIN_SESSION_TTL))
-        log_action(db, row.tg_id, "auth.login", "admin", row.tg_id, "через бота на сайте")
+        db.flush()
+        from app import security
+        security.record_login(db, request, row.tg_id, "через бота на сайте")
         result.update({"admin_session": admin_token, "role": admin.role})
     db.commit()
     return result
@@ -130,7 +132,7 @@ def logout_web(x_web_session: str | None = Header(default=None), db: Session = D
 # ---- administrators opening the panel inside Telegram ----
 
 @router.post("/api/admin/auth/telegram")
-def admin_auto_login(x_telegram_init_data: str | None = Header(default=None),
+def admin_auto_login(request: Request, x_telegram_init_data: str | None = Header(default=None),
                      db: Session = Depends(get_db)):
     try:
         user = validate_init_data(x_telegram_init_data or "", settings.bot_token)
@@ -142,6 +144,7 @@ def admin_auto_login(x_telegram_init_data: str | None = Header(default=None),
         raise HTTPException(403, "У вас нет доступа к админ-панели")
     token = secrets.token_urlsafe(32)
     db.add(AdminSession(token_hash=_hash(token), tg_id=tg, expires_at=now() + ADMIN_SESSION_TTL))
-    log_action(db, tg, "auth.login", "admin", tg, "из Telegram")
     db.commit()
+    from app import security
+    security.record_login(db, request, tg, "из Telegram")
     return {"token": token, "role": admin.role, "tg_id": tg}
