@@ -32,7 +32,7 @@ from app.guard import rate_limit, check_text, duplicate_note, notify_user
 from app import admin_ops as ops
 from app import catalog
 from app import photos, applications, searches, inbox, promos, adminx, observe, site
-from app import geo, reviews, resumes, referrals, support, extras, adminplus, adminview, datingsvc, ads, rules, adminreports, account
+from app import geo, reviews, resumes, referrals, support, extras, adminplus, adminview, datingsvc, ads, rules, adminreports, account, refunds
 from app import fields as listing_fields
 from app.users import get_or_create_user, writer, is_blocked_pair
 from app.models import Admin, AuditLog, ConvHide, DatingProfile, TypingMark
@@ -53,6 +53,7 @@ with startup_lock():   # with several workers only one prepares the database at 
         _company_boot.migrate_employers(_db)      # people who were employers before get a company
 
 app = FastAPI(title="KOREA HUB API", version="0.4.0")
+app.include_router(refunds.router)
 app.include_router(account.router)
 app.include_router(company_mod_router)
 app.include_router(adminreports.router)
@@ -973,6 +974,8 @@ def admin_refund(payment_id: int, reason: str = Query(default="", max_length=300
     except PaymentError as exc:
         raise HTTPException(400, str(exc))
     log_action(db, actor, "payment.refund", "payment", payment_id, f"{mode} {p.telegram_payment_charge_id or ''} {reason}".strip())
+    db.add(refunds.Refund(payment_id=p.id, user_tg_id=p.user_tg_id, status="approved" if credit is None else "partially_refunded", mode=mode, amount=p.refunded_amount or 0,
+                          reason=reason or "возврат из админки", decided_by=actor, decided_at=now(), note=refunds.NOTE))
     db.commit()
     text = ("Платёж возвращён." if credit is None else f"Неиспользованная часть услуги вернулась на ваш баланс: {credit} ⭐.") + (f" Причина: {reason}" if reason else "")
     notify_user(db, p.user_tg_id, text, "payments")

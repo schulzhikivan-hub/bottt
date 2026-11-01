@@ -1232,7 +1232,7 @@ function renderPayments(rows) {
     <p>${p.gift ? "0" : p.stars} ⭐${p.from_balance ? ` + ${p.from_balance} ⭐ с баланса` : ""}${p.promo ? " (промокод " + esc(p.promo) + ")" : ""} · ${esc(STATUS[p.status] || p.status)}${p.profile ? " · анкета знакомств" : p.listing_id ? " · объявление #" + p.listing_id : ""}</p>
     ${p.note ? `<p class="muted">${esc(p.note)}</p>` : ""}
     <p class="muted">${esc(p.number)} · ${fmtDate(p.paid_at || p.created_at)}</p>
-    ${["paid", "refunded", "granted"].includes(p.status) ? `<div class="actions"><button class="secondary" data-receipt="${p.id}">Квитанция</button></div>` : ""}</article>`).join("")
+    ${["paid", "refunded", "granted"].includes(p.status) ? `<div class="actions"><button class="secondary" data-receipt="${p.id}">Квитанция</button>${p.status === "paid" && p.service !== "Пополнение баланса" ? `<button class="secondary" data-refundask="${p.id}">Вернуть</button>` : ""}</div>` : ""}</article>`).join("")
     : '<div class="empty">Платежей пока нет.<br>Продвижение объявления покупается в «Мои объявления» → «Продвинуть».</div>';
 }
 async function showReceipt(id) {
@@ -2691,6 +2691,14 @@ document.addEventListener("click", async (e) => {
   }
   const coPage = e.target.closest("[data-company]");
   if (coPage) { showPublicCompany(Number(coPage.dataset.company)); return; }
+  const rq = e.target.closest("[data-refundask]");
+  if (rq) {
+    const reason = await askText("Почему хотите вернуть?", "Коротко, чтобы мы могли помочь");
+    if (!reason) return;
+    try { await api(`/api/me/payments/${rq.dataset.refundask}/refund-request`, {method: "POST", body: JSON.stringify({reason})}); toast("Заявка отправлена. Мы ответим в приложении"); }
+    catch (err) { toast(err.message); }
+    return;
+  }
   const au = e.target.closest("[data-author]");
   if (au) {
     try {

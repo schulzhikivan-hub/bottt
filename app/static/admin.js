@@ -105,6 +105,7 @@ const TABS = [
   {key: "marketing", label: "📣 Рассылки и баннеры", roles: ADM, title: "Рассылки и баннеры"},
   {sep: "Деньги", roles: ADM},
   {key: "payments", label: "💳 Платежи", roles: ADM, title: "Платежи и промокоды"},
+  {key: "refunds", label: "↩️ Возвраты", roles: ADM, title: "Возвраты: заявки, решения, история"},
   {key: "pricing", label: "💰 Цены", roles: ADM, title: "Цены услуг"},
   {key: "reportsm", label: "📈 Отчёты и VIP", roles: ADM, title: "Деньги: отчёты, VIP, возвраты, подарки"},
   {key: "stest", label: "🔎 Тест поиска", roles: MOD, title: "Тест поиска: почему объект на этом месте или не показан"},
@@ -1345,9 +1346,47 @@ $("#main").addEventListener("click", async (e) => {
     }
   } catch (err) { say(err.message); }
 });
+
+// ---- возвраты ----
+let refundFilter = "open";
+async function loadRefunds() {
+  const rows = await api(`/api/admin/refunds?status=${refundFilter}`);
+  const ST = {new: "новая", in_progress: "в работе", approved: "возвращено", partially_refunded: "возвращено частично", rejected: "отказано", cancelled: "отменён"};
+  $("#main").innerHTML = `<div class="card"><div class="row">${[["open", "Открытые"], ["all", "Все"], ["approved", "Возвращённые"], ["rejected", "Отказы"]].map(([k, n]) => `<button class="act ${k === refundFilter ? "" : "gray"}" data-rff="${k}">${n}</button>`).join("")}
+    <a class="act gray" style="text-decoration:none" href="#" id="refundCsv">⬇ Выгрузка CSV</a></div>
+    ${rows.length ? `<table><tr><th>№</th><th>Платёж</th><th>Человек</th><th>Сумма платежа</th><th>Причина</th><th>Статус</th><th></th></tr>${rows.map((r) => `<tr data-rid="${r.id}"><td>${r.id}</td><td>#${r.payment_id}<br><small class="muted">${esc(r.service)}</small></td>
+      <td><a href="#" data-gu="${esc(r.user)}">${esc(r.user)}</a></td><td>${r.paid ?? "—"} ⭐${r.amount ? `<br><small>возвращено ${r.amount}</small>` : ""}</td><td>${esc(r.reason)}${r.answer ? `<br><small class="muted">Ответ: ${esc(r.answer)}</small>` : ""}</td>
+      <td>${esc(ST[r.status] || r.status)}</td><td>
+      ${r.status === "new" ? '<button class="act gray" data-rf="take">Взять</button>' : ""}
+      ${["new", "in_progress"].includes(r.status) ? '<button class="act ok" data-rf="approve-balance">На баланс (остаток)</button><button class="act warn" data-rf="approve-full">Всё в Telegram</button><button class="act no" data-rf="reject">Отказать</button>' : ""}
+      ${["approved", "partially_refunded"].includes(r.status) && r.mode === "balance" ? '<button class="act gray" data-rf="cancel">Отменить (24 ч)</button>' : ""}</td></tr>`).join("")}</table>` : '<p class="muted">Заявок нет.</p>'}</div>`;
+}
+$("#main").addEventListener("click", async (e) => {
+  const f = e.target.closest("[data-rff]");
+  if (f) { refundFilter = f.dataset.rff; reload(); return; }
+  if (e.target.id === "refundCsv") {
+    e.preventDefault();
+    const r = await fetch("/api/admin/refunds/export", {headers: {"X-Admin-Session": session()}});
+    const url = URL.createObjectURL(await r.blob()); const a = document.createElement("a"); a.href = url; a.download = "refunds.csv"; a.click(); return;
+  }
+  const b = e.target.closest("[data-rf]");
+  if (!b) return;
+  const id = b.closest("[data-rid]").dataset.rid;
+  try {
+    const act = b.dataset.rf;
+    if (act === "take") await post(`/api/admin/refunds/${id}/take`);
+    if (act === "approve-balance" || act === "approve-full") {
+      if (!confirm(act === "approve-full" ? "Вернуть ВСЮ сумму платежа в Telegram? Это нельзя отменить." : "Вернуть неиспользованную часть на баланс человека?")) return;
+      await post(`/api/admin/refunds/${id}/approve`, {mode: act === "approve-full" ? "full" : "balance", comment: askOpt("Комментарий человеку") || ""});
+    }
+    if (act === "reject") { const why = ask("Причина отказа (человек её увидит):"); if (!why) return; await post(`/api/admin/refunds/${id}/reject`, {reason: why}); }
+    if (act === "cancel") { if (!confirm("Забрать возврат обратно с баланса человека?")) return; await post(`/api/admin/refunds/${id}/cancel`); }
+    say("Готово"); reload();
+  } catch (err) { say(err.message); }
+});
 const LOADERS = {dash: loadDash, listings: loadListings, jobs: loadSection, housing: loadSection, market: loadSection, dating: loadDating,
                  employers: loadEmployers, reports: loadReports, reviews: loadReviews, resumes: loadResumes, support: loadSupport, texts: loadTexts, users: loadUsers, community: loadCommunity, guide: loadGuide,
-                 marketing: loadMarketing, payments: loadPayments, pricing: loadPricing, rules: loadRules, companies: loadCompanies, reportsm: loadMoneyReports, stest: loadSearchTest, audit: loadAudit, errors: loadErrors, settings: loadSettings, admins: loadAdmins};
+                 marketing: loadMarketing, payments: loadPayments, pricing: loadPricing, rules: loadRules, refunds: loadRefunds, companies: loadCompanies, reportsm: loadMoneyReports, stest: loadSearchTest, audit: loadAudit, errors: loadErrors, settings: loadSettings, admins: loadAdmins};
 
 // Старт: есть сессия — открываем; открыто из Telegram — входим сами; иначе показываем кнопку
 if (session()) startApp();

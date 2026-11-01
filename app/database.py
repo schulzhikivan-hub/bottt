@@ -196,4 +196,5 @@ def migrate() -> None:
             conn.execute(text(f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {ddl}"))
         conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_email ON users (email)"))
         conn.execute(text("ALTER TABLE companies ADD COLUMN IF NOT EXISTS logo_key VARCHAR(40)"))
+        conn.execute(text("ALTER TABLE payments ADD COLUMN IF NOT EXISTS refunded_amount INTEGER NOT NULL DEFAULT 0"))
         conn.execute(text("ALTER TABLE notifications ADD COLUMN IF NOT EXISTS tg_pending BOOLEAN NOT NULL DEFAULT FALSE"))

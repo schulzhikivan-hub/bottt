@@ -268,6 +268,7 @@ class Payment(Base):
     note: Mapped[str] = mapped_column(String(200), default="", server_default="")             # «подарок», «компенсация», comments
     balance_used: Mapped[int] = mapped_column(Integer, default=0, server_default="0")        # stars taken from the person's balance
     company_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)       # paid for a company listing: the COMPANY balance is used
+    refunded_amount: Mapped[int] = mapped_column(Integer, default=0, server_default="0")      # Stars already given back (to Telegram or to a balance)
     service_code: Mapped[str] = mapped_column(String(40))
     stars: Mapped[int] = mapped_column(Integer)
     payload: Mapped[str] = mapped_column(String(64), unique=True)

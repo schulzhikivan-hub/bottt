@@ -421,6 +421,7 @@ def refund(db: Session, payment_id: int) -> Payment:
         if user is not None:
             user.balance_stars = (user.balance_stars or 0) + payment.balance_used
     payment.status = "refunded"
+    payment.refunded_amount = (payment.stars or 0) + (payment.balance_used or 0)
     for placement in db.scalars(select(Placement).where(Placement.payment_id == payment.id)).all():
         placement.status = "refunded"
     if payment.profile_id:
@@ -466,6 +467,7 @@ def refund_to_balance(db: Session, payment_id: int, reason: str = "") -> tuple[P
     if user is not None and credit > 0:
         user.balance_stars = (user.balance_stars or 0) + credit
     payment.status = "refunded"
+    payment.refunded_amount = credit
     payment.note = (payment.note + f" возврат на баланс {credit} ⭐ ({int(fraction * 100)}% остатка) {reason}").strip()
     for placement in db.scalars(select(Placement).where(Placement.payment_id == payment.id)).all():
         placement.status = "refunded"
