@@ -196,11 +196,12 @@ def grant(db: Session, actor: str, tg_id: str, service_code: str, listing_id: in
     if pricing is None:
         raise PaymentError("Услуга не найдена")
     at = now()
+    for_profile = pricing.category == "dating"             # 'bump' exists for listings too: the service code decides, not the kind
     if days is not None:
         pricing = types.SimpleNamespace(kind=pricing.kind, duration_days=days, code=pricing.code)
     pay = Payment(user_tg_id=tg_id, listing_id=listing_id, service_code=service_code, stars=0, payload=f"grant-{secrets.token_hex(10)}",
                   status="granted", created_at=at, paid_at=at, note=(("🎁 По акции" if promo else "🎁 Подарок") + (f": {note}" if note else "")))
-    if pricing.kind in {"vip", "invisible", "viewers", "super", "bump"}:
+    if for_profile:
         p = profile_of(db, tg_id)
         if p is None:
             raise PaymentError("У человека нет анкеты")
