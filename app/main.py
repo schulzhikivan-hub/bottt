@@ -32,7 +32,7 @@ from app.guard import rate_limit, check_text, duplicate_note, notify_user
 from app import admin_ops as ops
 from app import catalog
 from app import photos, applications, searches, inbox, promos, adminx, observe, site
-from app import geo, reviews, resumes, referrals, support, extras, adminplus, adminview, datingsvc, ads, rules, adminreports, account, refunds, blocks, reportsflow, batches, security, duty, searchdict, searchlog, views, adminsys, adminmanage, adminedit, listingtools
+from app import geo, reviews, resumes, referrals, support, extras, adminplus, adminview, datingsvc, ads, rules, adminreports, account, refunds, blocks, reportsflow, batches, security, duty, searchdict, searchlog, views, adminsys, adminmanage, adminedit, listingtools, exchange
 from app import fields as listing_fields
 from app.users import get_or_create_user, writer, is_blocked_pair
 from app.models import Admin, AuditLog, ConvHide, DatingProfile, TypingMark
@@ -92,6 +92,7 @@ app.include_router(adminplus.router)
 app.include_router(adminview.router)
 app.include_router(adminedit.router)
 app.include_router(listingtools.router)
+app.include_router(exchange.router)
 app.include_router(listing_fields.router)
 STATIC = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
@@ -743,17 +744,18 @@ def create_invoice(payload: InvoiceIn, user_id: str = Depends(writer), db: Sessi
 
 
 class TopupIn(BaseModel):
-    stars: int
+    kh: int = 0            # how much KH to put on the balance
+    stars: int = 0         # older clients: the same number
 
 
 @app.post("/api/me/balance/topup")
 def topup_my_balance(payload: TopupIn, user_id: str = Depends(writer), db: Session = Depends(get_db)):
     """Put Stars on the personal balance (one for dating, your own listings and everything personal)."""
     try:
-        pay, url = payments.create_topup(db, user_id, payload.stars)
+        pay, url = payments.create_topup(db, user_id, payload.kh or payload.stars)
     except PaymentError as exc:
         raise HTTPException(400, str(exc))
-    return {"payment_id": pay.id, "invoice_url": url, "stars": pay.stars}
+    return {"payment_id": pay.id, "invoice_url": url, "stars": pay.stars, "kh": pay.list_stars}
 
 
 @app.get("/api/me/balance")

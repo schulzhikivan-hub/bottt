@@ -169,21 +169,52 @@ def _purse(db: Session, user_id: str, company_id: int | None):
 
 
 TOPUP_CODE = "topup"
-TOPUP_MIN, TOPUP_MAX = 10, 10000
+TOPUP_MIN, TOPUP_MAX = 10, 10000       # in KH, the site's own currency (balances and prices are in KH)
+
+
+def kh_per_star() -> float:
+    """The exchanger: how many KH one Telegram Star gives. The rate is free only while services are paid from the KH balance
+    (otherwise a service could be paid in Stars directly and the two currencies would have two prices)."""
+    from app import rules
+    return rules.val("kh.per_100_stars") / 100 if rules.val("kh.balance_only") else 1.0
+
+
+def stars_for_kh(kh: int) -> int:
+    """Telegram Stars that buy `kh` KH (rounded up, at least one)."""
+    import math
+    return max(1, math.ceil(kh / kh_per_star() - 1e-9))
+
+
+def balance_only() -> bool:
+    from app import rules
+    return bool(rules.val("kh.balance_only"))
+
+
+def require_kh(db: Session, user_id: str, kh: int, company_id: int | None = None) -> None:
+    """With «services only for KH» the balance must cover the price: no direct Stars invoice."""
+    from app import rules
+    if not rules.val("kh.balance_only") or kh <= 0:
+        return
+    owner = _purse(db, user_id, company_id)
+    have = (owner.balance_stars if owner is not None else 0) or 0
+    if have < kh:
+        raise PaymentError(f"Недостаточно KH: нужно {kh}, на балансе {have}. Пополните баланс (1 ⭐ = {kh_per_star():g} KH)")
 
 
 def create_topup(db: Session, user_id: str, stars: int, company_id: int | None = None) -> tuple[Payment, str]:
     """An invoice that puts Stars on a balance: the person's own (company_id None) or a company's own. Paid in Telegram Stars."""
-    if not TOPUP_MIN <= stars <= TOPUP_MAX:
-        raise PaymentError(f"Сумма пополнения: от {TOPUP_MIN} до {TOPUP_MAX} ⭐")
-    payment = Payment(user_tg_id=user_id, listing_id=None, service_code=TOPUP_CODE, stars=stars, list_stars=stars,
+    kh = stars                                  # the argument is the amount of KH the person wants on the balance
+    if not TOPUP_MIN <= kh <= TOPUP_MAX:
+        raise PaymentError(f"Сумма пополнения: от {TOPUP_MIN} до {TOPUP_MAX} KH")
+    stars = stars_for_kh(kh)                    # what the person pays in Telegram Stars
+    payment = Payment(user_tg_id=user_id, listing_id=None, service_code=TOPUP_CODE, stars=stars, list_stars=kh,
                       payload=secrets.token_urlsafe(24), status="pending", created_at=now(), company_id=company_id,
                       note="Пополнение баланса компании" if company_id else "Пополнение личного баланса")
     db.add(payment)
     db.commit()
     db.refresh(payment)
     url = telegram_call("createInvoiceLink", {
-        "title": "Пополнение баланса", "description": f"{stars} ⭐ на баланс" + (" компании" if company_id else ""),
+        "title": "Пополнение баланса", "description": f"{kh} KH на баланс" + (" компании" if company_id else "") + f" ({stars} ⭐)",
         "payload": payment.payload, "provider_token": "", "currency": CURRENCY, "prices": [{"label": "Пополнение", "amount": stars}]})
     return payment, url
 
@@ -193,10 +224,11 @@ def _finish_topup(db: Session, payment: Payment, charge_id: str):
     purse = _purse(db, payment.user_tg_id, payment.company_id)
     if purse is None:
         raise PaymentError("Баланс не найден")
-    purse.balance_stars = (purse.balance_stars or 0) + payment.stars
+    credited = payment.list_stars or payment.stars            # KH (older top-ups: the same number as the Stars)
+    purse.balance_stars = (purse.balance_stars or 0) + credited
     payment.status, payment.telegram_payment_charge_id, payment.paid_at = "paid", charge_id, now()
     db.commit()
-    return types.SimpleNamespace(kind="topup", ends_at=now(), listing_id=None, credited=payment.stars, company_id=payment.company_id)
+    return types.SimpleNamespace(kind="topup", ends_at=now(), listing_id=None, credited=credited, company_id=payment.company_id)
 
 
 def take_from_balance(db: Session, user_id: str, stars: int, use_balance: bool, company_id: int | None = None) -> tuple[int, int]:
@@ -261,7 +293,8 @@ def create_invoice(db: Session, user_id: str, listing_id: int, service_code: str
     if promo_code.strip():
         promo, stars = check_promo(db, user_id, promo_code, pricing.stars)
         used_code = promo.code
-    taken, cash = take_from_balance(db, user_id, stars, use_balance, listing.company_id)
+    require_kh(db, user_id, stars, listing.company_id)
+    taken, cash = take_from_balance(db, user_id, stars, use_balance or balance_only(), listing.company_id)
     payment = Payment(user_tg_id=user_id, listing_id=listing_id, service_code=service_code,
                       stars=cash, payload=secrets.token_urlsafe(24), status="pending",
                       created_at=current, promo_code=used_code, list_stars=pricing.stars, balance_used=taken, company_id=listing.company_id)
@@ -328,7 +361,7 @@ def process_successful_payment(db: Session, user_id: str, payload: str,
     done = db.scalar(select(Payment).where(Payment.telegram_payment_charge_id == charge_id))
     if done is not None and done.service_code == TOPUP_CODE:        # a repeated notice of the same charge: nothing is added twice
         import types
-        return types.SimpleNamespace(kind="topup", ends_at=now(), listing_id=None, credited=done.stars, company_id=done.company_id)
+        return types.SimpleNamespace(kind="topup", ends_at=now(), listing_id=None, credited=done.list_stars or done.stars, company_id=done.company_id)
     if done is not None and done.profile_id:
         from app import datingsvc
         return datingsvc.result_of(db, done)

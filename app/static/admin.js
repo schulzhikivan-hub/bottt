@@ -99,7 +99,7 @@ const SECTIONS = [
   {key: "support", icon: "🚩", name: "Жалобы и поддержка", tabs: ["reports", "support", "duty"]},
   {key: "catalog", icon: "🗂", name: "Каталог и контент", tabs: ["community", "guide", "texts"]},
   {key: "marketing", icon: "📣", name: "Маркетинг", tabs: ["marketing"]},
-  {key: "money", icon: "💰", name: "Деньги", tabs: ["payments", "refunds", "pricing", "reportsm"]},
+  {key: "money", icon: "💰", name: "Деньги", tabs: ["payments", "exchange", "refunds", "pricing", "reportsm"]},
   {key: "rules", icon: "📐", name: "Поиск и правила", tabs: ["rules", "stest"]},
   {key: "system", icon: "⚙️", name: "Система", tabs: ["audit", "errors", "security", "settings"]},
 ];
@@ -123,6 +123,7 @@ const TABS = [
   {key: "texts", label: "Тексты и FAQ", roles: ADM, title: "Каталог: тексты, вопросы и ответы, настройки"},
   {key: "marketing", label: "Баннеры, рассылки, реклама, акции", roles: ADM, title: "Маркетинг: баннеры, рассылки, реклама, акции"},
   {key: "payments", label: "Платежи и промокоды", roles: FIN, title: "Деньги: платежи и промокоды"},
+  {key: "exchange", label: "Обменник KH", roles: FIN, title: "Деньги: обменник звёзд Telegram на KH (валюта сайта)"},
   {key: "refunds", label: "Возвраты", roles: FIN, title: "Деньги: возвраты"},
   {key: "pricing", label: "Цены на услуги", roles: ADM, title: "Деньги: цены услуг"},
   {key: "reportsm", label: "Отчёты и VIP", roles: FIN, title: "Деньги: отчёты, VIP, подарки"},
@@ -176,7 +177,7 @@ function palRender() {
     return {ic: SECTIONS.find((x) => x.key === TAB_SECTION[t.key])?.icon || "•", name: t.label, hint: t.title, run: () => show(t.key)};
   });
   const actions = [
-    {ic: "⭐", name: "Выдать звёзды человеку", hint: "найдите человека и откройте управление", run: () => { $("#palQ").value = "?"; palRender(); }},
+    {ic: "KH", name: "Выдать KH человеку", hint: "найдите человека и откройте управление", run: () => { $("#palQ").value = "?"; palRender(); }},
     {ic: "🌓", name: "Сменить тему", hint: "светлая / тёмная", run: () => $("#themeBtn").click()},
     {ic: "🔄", name: "Обновить раздел", hint: "перезагрузить данные", run: () => reload()},
   ];
@@ -977,13 +978,13 @@ async function openUserCard(id) {
       <b>Регистрация</b><span>${esc(fmt(u.created_at))}</span><b>Был в сети</b><span>${esc(fmt(u.last_seen_at) || "—")}</span><b>Согласие с правилами</b><span>${u.consent ? "да" : "нет"}</span>
       <b>Объявлений</b><span>${u.listings.length}</span><b>Откликов</b><span>${u.applications}</span><b>Чатов</b><span>${u.chats}</span><b>В избранном</b><span>${u.favorites}</span>
       <b>Жалоб на него / от него</b><span>${u.reports_against} / ${u.reports_made}</span><b>Отзывов получено / написано</b><span>${u.reviews_got} / ${u.reviews_written}</span>
-      <b>Личный баланс</b><span>${u.balance} ⭐</span>
+      <b>Личный баланс</b><span>${u.balance} KH</span>
       <b>Знакомства</b><span>${u.dating ? `анкета #${u.dating.id} · ${esc(u.dating.status)}${u.dating.paused ? " · на паузе" : ""}${u.dating.selfie === "approved" ? " · ✔ подтверждена" : ""}` : "анкеты нет"}</span>
       <b>Компании</b><span>${u.companies.length ? u.companies.map((c) => `${esc(c.name)} (${esc(c.role)}, ${esc(c.status)})`).join("; ") : "нет"}</span>
       <b>Вход на сайт</b><span>${u.email ? esc(u.email) + (u.has_password ? " · пароль задан" : " · без пароля") : "не настроен (только Telegram)"}</span>
       <b>Заплатил</b><span>${u.stars_paid} ⭐</span><b>Резюме</b><span>${u.has_resume ? "есть" : "нет"}</span></div>
       <div style="margin-top:10px">${u.blocked ? '<button class="act ok" data-ux="unblock">Разблокировать</button>' : '<button class="act no" data-ux="blockterms">🚫 Заблокировать…</button>'}
-        <button class="act ok" data-ux="stars">⭐ Выдать / списать звёзды</button>
+        <button class="act ok" data-ux="stars">KH Выдать / списать KH</button>
         ${u.email || u.has_password ? '<button class="act warn" data-ux="resetpw">Сбросить пароль</button><button class="act warn" data-ux="resetmail">Сбросить e-mail и пароль</button>' : ""}
         <button class="act gray" data-ux="${u.trusted ? "untrust" : "trust"}">${u.trusted ? "Снять «проверенный автор»" : "Отметить «проверенный автор»"}</button></div></div>
       <div class="card"><h3>Править профиль</h3><div class="gridform" id="ueForm">
@@ -1026,7 +1027,7 @@ const USER_COLS = {name: ["Имя", (u) => `${u.name ? esc(u.name) : "<i>без 
   status: ["Статус", (u) => u.deleted ? "удалён" : u.blocked ? `<b class="bad">блок${u.blocked_until ? " до " + esc(fmt(u.blocked_until).slice(0, 10)) : ""}</b>` : '<span class="good">активен</span>'],
   created: ["Регистрация", (u) => esc(fmt(u.created_at).slice(0, 10))], seen: ["Был в сети", (u) => esc(u.last_seen_at ? fmt(u.last_seen_at) : "—")],
   listings: ["Объявл.", (u) => u.listings], reports: ["Жалобы", (u) => u.reports_against ? `<b class="bad">${u.reports_against}</b>` : "0"],
-  balance: ["Баланс ⭐", (u) => u.balance], company: ["Компания", (u) => esc(u.employer_status === "approved" ? u.company : "—")], consent: ["Правила", (u) => (u.consent ? "приняты" : "нет")]};
+  balance: ["Баланс KH", (u) => u.balance], company: ["Компания", (u) => esc(u.employer_status === "approved" ? u.company : "—")], consent: ["Правила", (u) => (u.consent ? "приняты" : "нет")]};
 const USER_COLS_DEFAULT = ["name", "city", "status", "created", "seen", "listings", "reports"];
 let userCols = (() => { try { const c = JSON.parse(localStorage.getItem("adminUserCols") || "null"); return Array.isArray(c) && c.length ? c.filter((k) => USER_COLS[k]) : USER_COLS_DEFAULT; } catch (e) { return USER_COLS_DEFAULT; } })();
 async function loadUsers() {
@@ -1091,12 +1092,12 @@ $("#main").addEventListener("click", async (e) => {
     if (btn.dataset.ux === "card") { openUserCard(id); return; }
     if (btn.dataset.ux === "blockterms") { openBlockDialog(id); return; }
     if (btn.dataset.ux === "stars") {
-      const n = Number(prompt("Сколько ⭐ выдать? (минус — списать ошибочно начисленное)", "50"));
+      const n = Number(prompt("Сколько KH выдать? (минус — списать ошибочно начисленное)", "50"));
       if (!n) return;
       const why = ask("Причина (человек её увидит):");
       if (!why) return;
       const r = await post(`/api/admin/users/${id}/stars`, {stars: n, reason: why});
-      say(`Готово. Баланс человека: ${r.balance} ⭐`); openUserCard(id); return;
+      say(`Готово. Баланс человека: ${r.balance} KH`); openUserCard(id); return;
     }
     if (btn.dataset.ux === "resetpw" || btn.dataset.ux === "resetmail") {
       const why = ask("Причина сброса (запишется в журнал):");
@@ -1304,7 +1305,7 @@ async function loadPayments() {
       <input id="pPercent" type="number" min="1" max="90" placeholder="% скидки" style="width:100px"><input id="pFixed" type="number" min="1" placeholder="или звёзд" style="width:100px">
       <input id="pMax" type="number" min="1" placeholder="лимит" style="width:90px"><input id="pDays" type="number" min="1" placeholder="дней" style="width:80px"><button class="act" id="pAdd">Создать</button></div>
       <table><tr><th>Код</th><th>Скидка</th><th>Использовано</th><th>До</th><th></th></tr>${promos.map((p) => `<tr data-pid="${p.id}"><td>${esc(p.code)}</td>
-      <td>${p.percent ? "−" + p.percent + "%" : "−" + p.fixed_stars + " ⭐"}</td><td>${p.used}${p.max_uses ? "/" + p.max_uses : ""}</td><td>${esc(fmt(p.valid_until) || "без срока")}</td>
+      <td>${p.percent ? "−" + p.percent + "%" : "−" + p.fixed_stars + " KH"}</td><td>${p.used}${p.max_uses ? "/" + p.max_uses : ""}</td><td>${esc(fmt(p.valid_until) || "без срока")}</td>
       <td><button class="act ${p.active ? "gray" : "ok"}" data-ptoggle>${p.active ? "Выключить" : "Включить"}</button></td></tr>`).join("")}</table></div>
     <form id="payFilter" class="filters"><input name="q" placeholder="Имя или ID" value="${esc(payFilter.q)}" style="width:140px">
       <select name="status"><option value="">Любой статус</option>${Object.entries(PAY_RU).map(([k, v]) => `<option value="${k}" ${payFilter.status === k ? "selected" : ""}>${v}</option>`).join("")}</select>
@@ -1343,7 +1344,7 @@ $("#main").addEventListener("click", async (e) => {
 // ---- цены ----
 async function loadPricing() {
   const rows = await api("/api/admin/pricing");
-  $("#main").innerHTML = `<table><tr><th>Услуга</th><th>Раздел</th><th>⭐</th><th>Дней</th><th>Активна</th><th></th></tr>
+  $("#main").innerHTML = `<table><tr><th>Услуга</th><th>Раздел</th><th>Цена, KH</th><th>Дней</th><th>Активна</th><th></th></tr>
     ${rows.map((p) => `<tr data-code="${esc(p.code)}"><td>${esc(p.title)}</td><td>${esc(CAT[p.category] || p.category)}</td>
       <td><input type="number" min="1" max="10000" value="${p.stars}" data-stars style="width:90px"></td><td>${p.duration_days}</td>
       <td><input type="checkbox" data-active ${p.is_active ? "checked" : ""}></td><td><button class="act" data-save>Сохранить</button></td></tr>`).join("")}</table>`;
@@ -1501,7 +1502,7 @@ $("#main").addEventListener("click", async (e) => {
 let reportDays = 30;
 async function loadMoneyReports() {
   const [rep, vip] = await Promise.all([api(`/api/admin/reports/money?days=${reportDays}`), api("/api/admin/vip/history")]);
-  const line = (r) => `<td>${r.paid}</td><td>${r.stars} ⭐</td><td>${r.from_balance} ⭐</td><td>${r.refunded} (${r.refunded_stars} ⭐)</td><td>${r.granted}</td><td>${r.saved_stars} ⭐</td>`;
+  const line = (r) => `<td>${r.paid}</td><td>${r.stars} ⭐</td><td>${r.from_balance} KH</td><td>${r.refunded} (${r.refunded_stars} ⭐)</td><td>${r.granted}</td><td>${r.saved_stars} ⭐</td>`;
   const head = "<tr><th></th><th>Оплат</th><th>Выручка</th><th>С баланса</th><th>Возвратов</th><th>Подарков</th><th>Сэкономлено людям</th></tr>";
   const SEC = {job: "Работа", housing: "Жильё", marketplace: "Барахолка", dating: "Знакомства", balance: "Пополнения балансов"};
   $("#main").innerHTML = `<div class="card"><div class="row"><b>Период:</b>${[7, 30, 90, 365].map((d) => `<button class="act ${d === reportDays ? "" : "gray"}" data-rdays="${d}">${d} дн.</button>`).join("")}</div>
@@ -1554,7 +1555,7 @@ async function loadCompanies() {
   $("#main").innerHTML = `<div class="card"><div class="row">${[["pending", "На проверке"], ["verified", "Проверенные"], ["suspended", "Приостановленные"], ["rejected", "Отклонённые"], ["all", "Все"]]
     .map(([k, n]) => `<button class="act ${k === coFilter ? "" : "gray"}" data-cof="${k}">${n}</button>`).join("")}</div>
     <table><tr><th>№</th><th>Компания</th><th>Рег. номер</th><th>Владелец</th><th>Объявл.</th><th>Команда</th><th>Баланс</th><th>Статус</th><th></th></tr>${rows.map((c) => `<tr data-coid="${c.id}"><td>${c.id}</td><td>${esc(c.name)}</td><td>${esc(c.reg_no)}</td>
-      <td>${esc(c.owner_name || c.owner)}</td><td>${c.listings}</td><td>${c.members}</td><td>${c.balance} ⭐</td><td>${esc(ST[c.status] || c.status)}${c.note ? `<br><small>${esc(c.note)}</small>` : ""}</td>
+      <td>${esc(c.owner_name || c.owner)}</td><td>${c.listings}</td><td>${c.members}</td><td>${c.balance} KH</td><td>${esc(ST[c.status] || c.status)}${c.note ? `<br><small>${esc(c.note)}</small>` : ""}</td>
       <td>${["pending", "suspended", "rejected"].includes(c.status) ? '<button class="act ok" data-codec="approve">Подтвердить</button>' : ""}
       ${["pending"].includes(c.status) ? '<button class="act no" data-codec="reject">Отказать</button>' : ""}${c.status === "verified" ? '<button class="act no" data-codec="suspend">Приостановить</button>' : ""}
       <button class="act gray" data-cocredit>+ баланс</button> <button class="act" data-coedit>✏ Править</button></td></tr>`).join("") || '<tr><td colspan="9" class="muted">Пусто</td></tr>'}</table></div>`;
@@ -1586,7 +1587,7 @@ $("#main").addEventListener("click", async (e) => {
         <label class="wide">Описание<textarea data-cof2="description" rows="4" maxlength="2000">${esc(c.description || "")}</textarea></label>
         <label class="wide">Комментарий владельцу<input data-cof2="note" value="${esc(c.note || "")}" maxlength="300"></label></div>
         <div class="row" data-cobox="${c.id}"><button class="act ok" data-cosave>💾 Сохранить</button><button class="act gray" data-cologo>Убрать логотип</button></div>
-        <p class="muted">Владелец: <a href="#" data-gu="${esc(c.owner)}">${esc(c.owner_name || c.owner)}</a> · объявлений ${c.listings} · команда ${c.members} · баланс ${c.balance} ⭐</p>`);
+        <p class="muted">Владелец: <a href="#" data-gu="${esc(c.owner)}">${esc(c.owner_name || c.owner)}</a> · объявлений ${c.listings} · команда ${c.members} · баланс ${c.balance} KH</p>`);
       return;
     }
     if (d) {
@@ -1595,7 +1596,7 @@ $("#main").addEventListener("click", async (e) => {
       await post(`/api/admin/companies/${id}/${d.dataset.codec}`, {reason}); say("Готово"); reload();
     }
     if (e.target.closest("[data-cocredit]")) {
-      const n = Number(prompt("Сколько ⭐ зачислить на баланс компании?"));
+      const n = Number(prompt("Сколько KH зачислить на баланс компании?"));
       if (!n) return;
       const note = prompt("Комментарий (необязательно)") || "";
       await post(`/api/admin/companies/${id}/credit`, {stars: n, note}); say("Зачислено"); reload();
@@ -1918,10 +1919,33 @@ $("#main").addEventListener("click", async (e) => {
     }
   } catch (err) { say(err.message); }
 });
-const LOADERS = {dash: loadDash, listings: loadListings, jobs: loadSection, housing: loadSection, market: loadSection, dating: loadDating,
+const LOADERS = {exchange: () => loadExchange(), dash: loadDash, listings: loadListings, jobs: loadSection, housing: loadSection, market: loadSection, dating: loadDating,
                  employers: loadEmployers, reports: loadReports, reviews: loadReviews, resumes: loadResumes, support: loadSupport, texts: loadTexts, users: loadUsers, community: loadCommunity, guide: loadGuide,
                  marketing: loadMarketing, payments: loadPayments, pricing: loadPricing, rules: loadRules, alllist: loadAllListings, datingall: loadDatingAll, duty: loadDuty, security: loadSecurity, batches: loadBatches, refunds: loadRefunds, companies: loadCompanies, reportsm: loadMoneyReports, stest: loadSearchTest, audit: loadAudit, errors: loadErrors, settings: loadSettings, admins: loadAdmins};
 
 // Старт: есть сессия — открываем; открыто из Telegram — входим сами; иначе показываем кнопку
 if (session()) startApp();
 else if (tgApp?.initData) autoLogin();
+
+// ---- обменник: звёзды Telegram → KH (валюта сайта) ----
+async function loadExchange() {
+  const x = await api("/api/admin/exchange");
+  const rate = x.per_100_stars / 100;
+  $("#main").innerHTML = `<div class="card"><h3>Обменник KH</h3>
+    <p class="muted">KH — валюта сайта: баланс людей и компаний и цены услуг считаются в KH. Звёзды Telegram — способ купить KH.</p>
+    <div class="gridform"><label>Сколько KH даёт 1 ⭐<input id="exRate" type="number" step="0.1" min="0.1" max="10" value="${rate}"></label>
+      <label class="chk"><input type="checkbox" id="exOnly" ${x.balance_only ? "checked" : ""}> Услуги только за KH с баланса (звёзды лишь пополняют баланс)</label></div>
+    <p class="muted">Сейчас: 1 ⭐ = ${x.kh_per_star} KH. Курс не 1:1 работает только при включённой галочке: иначе цена услуги была бы разной в звёздах и в KH.</p>
+    <div class="row"><button class="act ok" id="exSave">💾 Сохранить курс</button></div></div>
+    <div class="card"><h3>Что увидят люди</h3><table><tr><th>KH</th><th>Заплатят звёздами</th></tr>${[10, 50, 100, 500, 1000, 10000].map((n) => `<tr><td>${n} KH</td><td>${Math.max(1, Math.ceil(n / x.kh_per_star - 1e-9))} ⭐</td></tr>`).join("")}</table></div>
+    <div class="card"><h3>В обращении</h3><p>У людей: <b>${fmtN(x.in_circulation.people)} KH</b> · у компаний: <b>${fmtN(x.in_circulation.companies)} KH</b> · всего <b>${fmtN(x.in_circulation.total)} KH</b></p>
+      <p class="muted">В этом месяце: пополнений ${x.month.topups}, получено ${fmtN(x.month.stars)} ⭐, выдано ${fmtN(x.month.kh)} KH.</p></div>`;
+}
+$("#main").addEventListener("click", async (e) => {
+  if (e.target.id !== "exSave") return;
+  try {
+    const per = Math.round(Number($("#exRate").value) * 100);
+    await api("/api/admin/exchange", {method: "PUT", body: JSON.stringify({per_100_stars: per, balance_only: $("#exOnly").checked})});
+    say("Курс сохранён"); reload();
+  } catch (err) { say(err.message); }
+});

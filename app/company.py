@@ -446,7 +446,8 @@ def notify_team(db: Session, listing: Listing, text: str, kind: str, skip: str =
 
 # ---------- money of the company ----------
 class TopupIn(BaseModel):
-    stars: int
+    kh: int = 0
+    stars: int = 0
 
 
 @router.post("/api/company/{company_id}/topup")
@@ -457,10 +458,10 @@ def company_topup(company_id: int, payload: TopupIn, user_id: str = Depends(writ
     if c.status == "closed":
         raise HTTPException(409, "Компания закрыта")
     try:
-        pay, url = payments.create_topup(db, user_id, payload.stars, c.id)
+        pay, url = payments.create_topup(db, user_id, payload.kh or payload.stars, c.id)
     except payments.PaymentError as exc:
         raise HTTPException(400, str(exc))
-    return {"payment_id": pay.id, "invoice_url": url, "stars": pay.stars}
+    return {"payment_id": pay.id, "invoice_url": url, "stars": pay.stars, "kh": pay.list_stars}
 
 
 @router.get("/api/companies/{company_id}/logo")

@@ -97,6 +97,9 @@ function toast(msg) {
   tg?.HapticFeedback?.notificationOccurred("success");
 }
 const fmtDate = (s) => (s ? new Date(s.replace(" ", "T")).toLocaleString("ru-RU") : "");
+// KH — внутренняя валюта сайта: баланс и цены в KH; звёзды Telegram (⭐) покупают KH по курсу обменника
+let khInfo = {kh_per_star: 1, balance_only: false, min: 10, max: 10000};
+const starsFor = (kh) => Math.max(1, Math.ceil(kh / (khInfo.kh_per_star || 1) - 1e-9));
 const fmtKRW = (n) => new Intl.NumberFormat("ru-RU").format(n) + " ₩";
 
 // Своё окно подтверждения: системные окна Telegram бывают заняты или недоступны и тогда дают ошибку
@@ -1267,11 +1270,11 @@ function showProfileChips() {
 }
 // «Мои кабинеты»: личный, компания, знакомства: у каждого свой баланс и своя страница
 async function fillCabinets() {
-  try { const b = await api("/api/me/balance", {quiet: true}); $("#cabPersonSub").textContent = `Баланс: ${b.balance} ⭐`; } catch (e) { /* без баланса */ }
+  try { const b = await api("/api/me/balance", {quiet: true}); $("#cabPersonSub").textContent = `Баланс: ${b.balance} KH`; } catch (e) { /* без баланса */ }
   try {
     const cos = await api("/api/company/mine", {quiet: true});
     const c = cos[0];
-    $("#cabCompanySub").textContent = c ? `${c.name} · ${c.balance_stars ?? c.balance ?? 0} ⭐` : "Для работодателей";
+    $("#cabCompanySub").textContent = c ? `${c.name} · ${c.balance_stars ?? c.balance ?? 0} KH` : "Для работодателей";
     document.querySelector("#cabCompany .cab-act").textContent = c ? "Открыть" : "Создать";
   } catch (e) { /* без компании */ }
 }
@@ -1308,7 +1311,7 @@ function renderPayments(rows) {
   const STATUS = {pending: "ожидает оплаты", paid: "оплачено", refunded: "возврат выполнен", failed: "ошибка", granted: "подарок"};
   return rows.length ? rows.map((p) => `
     <article class="listing"><h3>${esc(p.service)}${p.gift ? ' <span class="adlabel">🎁 бесплатно</span>' : ""}</h3>
-    <p>${p.gift ? "0" : p.stars} ⭐${p.from_balance ? ` + ${p.from_balance} ⭐ с баланса` : ""}${p.promo ? " (промокод " + esc(p.promo) + ")" : ""} · ${esc(STATUS[p.status] || p.status)}${p.profile ? " · анкета знакомств" : p.listing_id ? " · объявление #" + p.listing_id : ""}</p>
+    <p>${p.gift ? "0" : p.stars} ⭐${p.from_balance ? ` + ${p.from_balance} KH с баланса` : ""}${p.promo ? " (промокод " + esc(p.promo) + ")" : ""} · ${esc(STATUS[p.status] || p.status)}${p.profile ? " · анкета знакомств" : p.listing_id ? " · объявление #" + p.listing_id : ""}</p>
     ${p.note ? `<p class="muted">${esc(p.note)}</p>` : ""}
     <p class="muted">${esc(p.number)} · ${fmtDate(p.paid_at || p.created_at)}</p>
     ${["paid", "refunded", "granted"].includes(p.status) ? `<div class="actions"><button class="secondary" data-receipt="${p.id}">Квитанция</button>${p.status === "paid" && p.service !== "Пополнение баланса" ? `<button class="secondary" data-refundask="${p.id}">Вернуть</button>` : ""}</div>` : ""}</article>`).join("")
@@ -1319,10 +1322,10 @@ async function showReceipt(id) {
   SUB_TITLES.receipt = "Квитанция " + r.number;
   openSub("receipt");
   const rows = [["Номер", r.number], ["Дата", fmtDate(r.date)], ["Услуга", r.service + (r.days > 1 ? ` (${r.days} дн.)` : "")],
-    [r.profile ? "Анкета" : "Объявление", r.profile ? "знакомства" : `#${r.listing_id} ${r.listing_title}`], ["Цена", r.list_stars + " ⭐"],
-    ...(r.discount ? [["Скидка", `−${r.discount} ⭐ (промокод ${r.promo})`]] : []), ["Оплачено", r.stars + " ⭐"],
+    [r.profile ? "Анкета" : "Объявление", r.profile ? "знакомства" : `#${r.listing_id} ${r.listing_title}`], ["Цена", r.list_stars + " KH"],
+    ...(r.discount ? [["Скидка", `−${r.discount} KH (промокод ${r.promo})`]] : []), ["Оплачено", r.stars + " ⭐"],
     ["Статус", {paid: "оплачено", refunded: "возврат выполнен", pending: "ожидает оплаты", failed: "ошибка", granted: "подарок"}[r.status] || r.status],
-    ...(r.from_balance ? [["С баланса", r.from_balance + " ⭐"]] : []), ...(r.note ? [["Примечание", r.note]] : []),
+    ...(r.from_balance ? [["С баланса", r.from_balance + " KH"]] : []), ...(r.note ? [["Примечание", r.note]] : []),
     ["Платёж Telegram", r.charge_id || "—"]];
   $("#subBody").innerHTML = `<article class="listing receipt"><dl>${rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(String(v))}</dd>`).join("")}</dl>
     <div class="actions"><button id="copyReceipt">Скопировать</button></div></article>`;
@@ -1466,7 +1469,11 @@ async function openMenu(key) {
   openSub(key);
   const body = $("#subBody");
   body.innerHTML = '<div class="skeleton"></div>';
-  if (key === "payments") body.innerHTML = renderPayments(await api("/api/me/payments"));
+  if (key === "payments") {
+    const [rows, bal] = await Promise.all([api("/api/me/payments"), api("/api/me/balance")]);
+    body.innerHTML = `<article class="dcard2"><div class="dcard2-head"><h3>Мой баланс</h3><b>${bal.balance} KH</b></div>
+      <p class="muted">KH — валюта сайта: ею платят за поднятие, VIP и услуги знакомств.</p>${topupHtml("me")}</article>` + renderPayments(rows);
+  }
   if (key === "applications") {
     const rows = await api("/api/me/applications");
     body.innerHTML = rows.length ? rows.map((a) => `<article class="listing" data-open="${a.listing_id}">
@@ -1611,7 +1618,7 @@ async function openMenu(key) {
     body.innerHTML = `<article class="listing"><h3>Как пользоваться</h3>
       <p>1. Опубликуйте объявление: модератор проверит его обычно в течение суток.</p>
       <p>2. Общение внутри приложения: телефон указывайте по желанию, только в поле «Контакт».</p>
-      <p>3. Оплата услуг продвижения — в звёздах Telegram (⭐). Возврат — через поддержку.</p>
+      <p>3. Услуги оплачиваются в KH — валюте сайта. KH покупаются за звёзды Telegram (⭐) в разделе «История платежей». Возврат — через поддержку.</p>
       <p>4. Жалобы на объявления и людей — кнопка «Пожаловаться».</p>
       <p>5. Объявление живёт 30 дней. За 3 дня и за день мы напомним, продлить можно в один шаг.</p>
       <p>Вопросы: команда /help в боте.</p></article>`;
@@ -1997,18 +2004,18 @@ let promoPrices = {};      // service code -> цена со скидкой
 const SAMPLE = {bump: ["⬆ Поднято", ""], vip: ["VIP", ""], pin: ["📌 Закреплено", ""], highlight: ["★ Выделено", "hl"]};
 function renderServices(data) {
   $("#serviceFor").textContent = "Для объявления: " + data.title;
-  const balNote = data.balance ? `<p class="muted">Баланс ${data.balance_of === "company" ? "компании" : "личный"}: ${data.balance} ⭐</p>` : "";
+  const balNote = data.balance ? `<p class="muted">Баланс ${data.balance_of === "company" ? "компании" : "личный"}: ${data.balance} KH</p>` : "";
   const gifts = balNote + (data.promos || []).map((x) => `<article class="listing hl"><h3>🎁 ${esc(x.title)}</h3><p>${esc(x.service)}, ${x.days} дн. бесплатно</p>
     <div class="actions"><button data-lclaim="${x.id}">Получить бесплатно</button></div></article>`).join("");
   $("#serviceList").innerHTML = gifts + data.options.map((o) => {
     const price = promoPrices[o.code] != null && promoPrices[o.code] !== o.stars
-      ? `<s>${o.stars}</s>${promoPrices[o.code]} ⭐` : `${o.stars} ⭐`;
+      ? `<s>${o.stars}</s>${promoPrices[o.code]} KH` : `${o.stars} KH`;
     const [badge, cls] = SAMPLE[o.kind] || ["", ""];
     const until = o.active_until ? ` до ${fmtDate(o.active_until).split(",")[0]}` : "";
     return `<article class="listing svc"><div class="svc-head"><h3>${esc(o.title)}</h3><span class="svc-price">${price}</span></div>
       <p>${esc(o.what)}${o.days > 1 ? " · " + o.days + " дн." : ""}</p>
       <div class="sample ${cls}"><span class="promo ${o.kind}" style="margin:0">${badge}</span> так выглядит в ленте</div>
-      ${o.available ? `<div class="actions"><button data-buy="${esc(o.code)}" data-listing="${servicesFor}">Оплатить ${promoPrices[o.code] ?? o.stars} ⭐</button>${data.balance > 0 && data.can_pay !== false ? `<button class="secondary" data-buy="${esc(o.code)}" data-listing="${servicesFor}" data-bal="1">С баланса</button>` : ""}</div>`
+      ${o.available ? `<div class="actions"><button data-buy="${esc(o.code)}" data-listing="${servicesFor}">Оплатить ${promoPrices[o.code] ?? o.stars} KH</button>${data.balance > 0 && data.can_pay !== false ? `<button class="secondary" data-buy="${esc(o.code)}" data-listing="${servicesFor}" data-bal="1">С баланса</button>` : ""}</div>`
         : `<p class="why">${esc(o.reason)}${until}</p>`}</article>`;
   }).join("") || '<div class="empty">Для этого раздела услуг пока нет</div>';
 }
@@ -2313,7 +2320,7 @@ async function showDatingCabinet() {
   const svcTile = (kind) => {
     const o = opt(kind);
     if (!o) return "";
-    return `<div class="dsvc"><div class="dsvc-head"><span class="dsvc-ic">${D_ICON[kind] || "✨"}</span><div><b>${esc(D_SHORT[kind] || o.title)}</b><small>${o.stars} ⭐${o.days > 1 ? " · " + o.days + " дн." : o.days === 1 ? " · 24 часа" : ""}</small></div></div>
+    return `<div class="dsvc"><div class="dsvc-head"><span class="dsvc-ic">${D_ICON[kind] || "✨"}</span><div><b>${esc(D_SHORT[kind] || o.title)}</b><small>${o.stars} KH${o.days > 1 ? " · " + o.days + " дн." : o.days === 1 ? " · 24 часа" : ""}</small></div></div>
       <p>${esc(o.what)}</p>${o.active_until ? `<p class="dok">✔ Действует ${untilText(o.active_until)}</p>` : ""}
       ${o.available ? `<div class="actions"><button data-dbuy="${esc(o.code)}">${o.active_until ? "Продлить" : "Включить"}</button>${svc.balance >= o.stars ? `<button class="secondary" data-dbuy="${esc(o.code)}" data-bal="1">С баланса</button>` : ""}</div>` : `<p class="muted">${esc(o.reason)}</p>`}</div>`;
   };
@@ -2345,7 +2352,7 @@ async function showDatingCabinet() {
       <article class="dcard2"><h3>Сейчас действует</h3>${running.length ? running.map((t) => `<div class="drun">${esc(t)}</div>`).join("") : '<p class="muted">Ничего не включено: анкета в обычной ленте.</p>'}</article>
       ${gifts}
       <div class="dsvc-grid">${["bump", "vip", "super", "invisible", "viewers"].map(svcTile).join("")}</div>
-      <article class="dcard2"><div class="dcard2-head"><h3>Баланс</h3><b>${svc.balance} ⭐</b></div>
+      <article class="dcard2"><div class="dcard2-head"><h3>Баланс</h3><b>${svc.balance} KH</b></div>
         <p class="muted">Сюда возвращается неиспользованная часть услуг. Баланс можно потратить на любую услугу.</p>
         <p class="muted">Это ваш личный баланс: один на знакомства и ваши личные объявления. У компании баланс отдельный.</p>${topupHtml("me")}</article>
     </section>
@@ -2514,23 +2521,24 @@ function renderCompanyForm(body, ov) {
 }
 // пополнение баланса звёздами Telegram: пресеты и своя сумма; для компании или для личного баланса
 function topupHtml(prefix) {
-  return `<div class="chips">${[50, 100, 300, 500, 1000].map((n) => `<button class="chip" data-topup-pick="${n}" data-for="${prefix}">${n} ⭐</button>`).join("")}</div>
-    <div class="actions"><input id="${prefix}TopupN" type="number" min="10" max="10000" placeholder="Своя сумма, ⭐" style="flex:1"><button data-topup-go="${prefix}">Пополнить</button></div>
-    <p class="muted">Оплата Telegram Stars. От 10 до 10 000 ⭐ за раз.</p>`;
+  const k = khInfo.kh_per_star || 1;
+  return `<div class="chips">${[50, 100, 300, 500, 1000].map((n) => `<button class="chip" data-topup-pick="${n}" data-for="${prefix}">${n} KH · ${starsFor(n)} ⭐</button>`).join("")}</div>
+    <div class="actions"><input id="${prefix}TopupN" type="number" min="${khInfo.min}" max="${khInfo.max}" placeholder="Сколько KH" style="flex:1"><button data-topup-go="${prefix}">Пополнить</button></div>
+    <p class="muted">Курс обменника: 1 ⭐ = ${k % 1 ? k.toFixed(2) : k} KH. Оплата звёздами Telegram. От ${khInfo.min} до ${khInfo.max} KH за раз.</p>`;
 }
 document.addEventListener("click", async (e) => {
   const pick = e.target.closest("[data-topup-pick]"), go = e.target.closest("[data-topup-go]");
   if (pick) { $(`#${pick.dataset.for}TopupN`).value = pick.dataset.topupPick; return; }
   if (!go) return;
-  const stars = Number($(`#${go.dataset.topupGo}TopupN`).value);
-  if (!stars) { toast("Выберите сумму"); return; }
+  const kh = Number($(`#${go.dataset.topupGo}TopupN`).value);
+  if (!kh) { toast("Выберите сумму"); return; }
   try {
     if (go.dataset.topupGo === "co") {
-      const r = await api(`/api/company/${coState.id}/topup`, {method: "POST", body: JSON.stringify({stars})});
+      const r = await api(`/api/company/${coState.id}/topup`, {method: "POST", body: JSON.stringify({kh})});
       openPay(r.invoice_url, r.payment_id, () => { coState.tab = "money"; showCompany(coState.id); });
     } else {
-      const r = await api("/api/me/balance/topup", {method: "POST", body: JSON.stringify({stars})});
-      openPay(r.invoice_url, r.payment_id, () => showDatingCabinet());
+      const r = await api("/api/me/balance/topup", {method: "POST", body: JSON.stringify({kh})});
+      openPay(r.invoice_url, r.payment_id, () => (currentSubKey === "payments" ? openMenu("payments") : showDatingCabinet()));
     }
   } catch (err) { toast(err.message); }
 });
@@ -2609,7 +2617,7 @@ async function renderCoPane(ov) {
     }
     if (coState.tab === "money") {
       const b = await api(`/api/company/${ov.id}/balance`);
-      pane.innerHTML = `<article class="dcard2"><div class="dcard2-head"><h3>Баланс компании</h3><b>${b.balance} ⭐</b></div><p class="muted">${esc(b.note)}</p>
+      pane.innerHTML = `<article class="dcard2"><div class="dcard2-head"><h3>Баланс компании</h3><b>${b.balance} KH</b></div><p class="muted">${esc(b.note)}</p>
         <p class="muted">Платить с баланса за продвижение объявлений компании могут владелец и админы. Личные балансы сотрудников сюда не попадают.</p></article>
         <article class="dcard2"><h3>Пополнить баланс компании</h3>${topupHtml("co")}</article>
         <article class="dcard2"><h3>Движение</h3>${b.history.length ? b.history.map((h) => `<div class="drun"><span><b>${esc(h.service)}</b>${h.listing ? " · «" + esc(h.listing) + "»" : ""}<br><small class="muted">${esc(fmtDate(h.at))}</small></span><span>${h.stars ? h.stars + " ⭐" : ""}${h.from_balance ? (h.stars ? " + " : "") + h.from_balance + " ⭐ с баланса" : ""}<br><small class="muted">${esc({pending: "ожидает оплаты", paid: "оплачено", refunded: "возврат выполнен", failed: "ошибка", granted: "подарок", abandoned: "не оплачено"}[h.status] || h.status)}</small></span></div>`).join("") : '<p class="muted">Платежей пока нет.</p>'}</article>`;
@@ -2662,7 +2670,7 @@ document.addEventListener("click", async (e) => {
   if (tgLink && tg?.openTelegramLink) { e.preventDefault(); tg.openTelegramLink(tgLink.href); return; }
 
   const buyBtn = e.target.closest("[data-buy]");
-  if (buyBtn) { try { await buy(buyBtn.dataset.listing, buyBtn.dataset.buy, Boolean(buyBtn.dataset.bal)); } catch (err) { toast(err.message); } return; }
+  if (buyBtn) { try { await buy(buyBtn.dataset.listing, buyBtn.dataset.buy, Boolean(buyBtn.dataset.bal)); } catch (err) { toast(err.message); if (/Недостаточно KH/.test(err.message)) openMenu("payments"); } return; }
 
   const btn = e.target.closest("[data-act]");
   if (btn) {
@@ -3062,7 +3070,7 @@ loadFavIds().then(() => {
   });
 });
 api("/api/me", {quiet: true})
-  .then((user) => { me = user; showCityChip(); showBell(user.unread || 0); if (!me.consent) $("#consent").classList.remove("hidden"); else setTimeout(maybeSignup, 1500); })
+  .then((user) => { api("/api/exchange", {quiet: true}).then((x) => { khInfo = x; }).catch(() => {}); me = user; showCityChip(); showBell(user.unread || 0); if (!me.consent) $("#consent").classList.remove("hidden"); else setTimeout(maybeSignup, 1500); })
   .catch(() => { if (!inTelegram) $("#loginTop").hidden = false; });
 
 // ---------- страница не двигается ----------

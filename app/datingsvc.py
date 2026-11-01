@@ -164,7 +164,8 @@ def profile_invoice(payload: ProfileInvoiceIn, user_id: str = Depends(writer), d
         if payload.promo_code.strip():
             promo, stars = payments.check_promo(db, user_id, payload.promo_code, pricing.stars)
             code = promo.code
-        taken, cash = payments.take_from_balance(db, user_id, stars, payload.use_balance)
+        payments.require_kh(db, user_id, stars)
+        taken, cash = payments.take_from_balance(db, user_id, stars, payload.use_balance or payments.balance_only())
         pay = Payment(user_tg_id=user_id, listing_id=None, profile_id=p.id, service_code=pricing.code, stars=cash,
                       payload=secrets.token_urlsafe(24), status="pending", created_at=now(), promo_code=code,
                       list_stars=pricing.stars, balance_used=taken)
