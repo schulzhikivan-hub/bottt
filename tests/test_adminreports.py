@@ -86,7 +86,8 @@ def test_synonyms_and_stop_words_are_edited_in_the_panel(client):
     searchdict.reset()
     found = {x["id"] for x in client.get("/api/catalog", params={"q": "apartment"}).json()["items"]}
     assert found == {lid, other}                                                         # «apartment» now means studio or flat
-    assert {x["id"] for x in client.get("/api/catalog", params={"q": "in studio"}).json()["items"]} == {lid}   # «in» is skipped
+    assert {x["id"] for x in client.get("/api/catalog", params={"q": "in studio"}).json()["items"]} == {lid, other}   # «in» is skipped, studio = flat
+    assert {x["id"] for x in client.get("/api/catalog", params={"q": "the subway"}).json()["items"]} == {lid}        # «the» is not needed in the text
     assert client.get("/api/admin/search-dict", headers=ADMIN).json()["stopwords"] == "the, in"
     assert client.get("/api/admin/search-dict").status_code == 401
     client.put("/api/admin/search-dict", json={"synonyms": "", "stopwords": ""}, headers=ADMIN)
