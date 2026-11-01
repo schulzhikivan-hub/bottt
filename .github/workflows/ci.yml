@@ -27,6 +27,16 @@ jobs:
 
       - name: Tests (SQLite only, never production DB; includes the admin panel in a real browser)
         run: pytest -q
+        env:
+          SHOTS_DIR: ${{ github.workspace }}/shots
+
+      - name: Screenshots of the phone screens
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phone-screens
+          path: shots
+          if-no-files-found: ignore
 
       - name: Validate docker-compose
         run: |
