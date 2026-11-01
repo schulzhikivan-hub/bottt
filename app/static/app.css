@@ -708,3 +708,8 @@ img.co-ava{object-fit:cover}
 .fw-row label{display:flex;gap:8px;align-items:center}
 .score{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:12px;margin:12px 0}
 .score ul{margin:6px 0 0;padding-left:18px;color:var(--hint);font-size:13px}
+
+.jphoto.nophoto{height:84px;font-size:34px}
+.fw-head{cursor:pointer}
+.fw-more{margin:2px 0 0;font-size:13px;cursor:pointer}
+.dgrid .hint-empty,.dgrid .empty{grid-column:1/-1}

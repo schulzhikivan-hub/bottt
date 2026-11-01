@@ -398,7 +398,7 @@ function jobCard(x) {
   if (x.schedule) bits.push(`<span class="pill">${esc(labelOf("schedule", x.schedule))}</span>`);
   if (x.housing_provided) bits.push('<span class="pill">🏠 Жильё</span>');
   return `<article class="jcard" data-id="${x.id}" data-cat="job" data-open="${x.id}">
-    <div class="jphoto">${x.cover ? `<img src="${esc(x.cover)}" alt="" loading="lazy">` : "💼"}${promoBadge(x)}</div>
+    <div class="jphoto${x.cover ? "" : " nophoto"}">${x.cover ? `<img src="${esc(x.cover)}" alt="" loading="lazy">` : "💼"}${promoBadge(x)}</div>
     <div class="jbody"><h3>${esc(x.title)}</h3><div class="meta">📍 ${esc(x.city)}</div>
     <div class="price">${esc(priceText(x))}</div><div class="pills">${bits.join("")}</div>
     <button class="more-btn" data-open-btn>Подробнее</button></div></article>`;
@@ -467,11 +467,12 @@ const weekDone = () => { try { return JSON.parse(localStorage.getItem("khWeek") 
 function renderWeek() {
   const box = $("#firstWeek");
   if (localStorage.getItem("khWeekHide")) { box.hidden = true; return; }
-  const done = weekDone(), n = WEEK_STEPS.filter(([k]) => done[k]).length;
+  const done = weekDone(), n = WEEK_STEPS.filter(([k]) => done[k]).length, open = Boolean(localStorage.getItem("khWeekOpen"));
   box.hidden = false;
-  box.innerHTML = `<div class="fw-head"><b>Первая неделя в Корее</b><span>${n} из ${WEEK_STEPS.length}</span><button type="button" class="link" data-weekhide>Скрыть</button></div>
+  box.innerHTML = `<div class="fw-head" data-weektoggle><b>Первая неделя в Корее</b><span>${n} из ${WEEK_STEPS.length}</span><button type="button" class="link" data-weekhide>Скрыть</button></div>
     <div class="fw-bar"><i style="width:${Math.round(100 * n / WEEK_STEPS.length)}%"></i></div>
-    ${WEEK_STEPS.map(([k, t, go]) => `<div class="fw-row"><label><input type="checkbox" data-weekck="${k}" ${done[k] ? "checked" : ""}> ${t}</label><button type="button" class="link" data-weekgo="${go}">Открыть ›</button></div>`).join("")}`;
+    ${!open ? '<p class="muted fw-more" data-weektoggle>Развернуть чек-лист ▾</p>' : ""}
+    ${!open ? "" : WEEK_STEPS.map(([k, t, go]) => `<div class="fw-row"><label><input type="checkbox" data-weekck="${k}" ${done[k] ? "checked" : ""}> ${t}</label><button type="button" class="link" data-weekgo="${go}">Открыть ›</button></div>`).join("")}`;
 }
 document.addEventListener("change", (e) => {
   const c = e.target.closest("[data-weekck]");
@@ -480,6 +481,7 @@ document.addEventListener("change", (e) => {
 });
 document.addEventListener("click", (e) => {
   if (e.target.closest("[data-weekhide]")) { localStorage.setItem("khWeekHide", "1"); renderWeek(); return; }
+  if (e.target.closest("[data-weektoggle]")) { if (localStorage.getItem("khWeekOpen")) localStorage.removeItem("khWeekOpen"); else localStorage.setItem("khWeekOpen", "1"); renderWeek(); return; }
   const g = e.target.closest("[data-weekgo]");
   if (!g) return;
   const v = g.dataset.weekgo;
@@ -1265,7 +1267,7 @@ async function fillCabinets() {
   try {
     const cos = await api("/api/company/mine", {quiet: true});
     const c = cos[0];
-    $("#cabCompanySub").textContent = c ? `${c.name} · ${c.balance_stars ?? c.balance ?? 0} ⭐` : "Для работодателей: создать компанию";
+    $("#cabCompanySub").textContent = c ? `${c.name} · ${c.balance_stars ?? c.balance ?? 0} ⭐` : "Для работодателей";
     document.querySelector("#cabCompany .cab-act").textContent = c ? "Открыть" : "Создать";
   } catch (e) { /* без компании */ }
 }
@@ -2888,6 +2890,7 @@ function openSignup(mode) {
 }
 async function maybeSignup() {
   try { if (!me) me = await api("/api/me", {quiet: true}); } catch (e) { return; }
+  if (!localStorage.getItem("welcomeSeen")) return;            // в первый заход только приветствие: не показываем сразу три окна
   if (me?.consent && me.account?.needs_setup) openSignup("first");
 }
 $("#signupClose").onclick = () => { if ($("#signupLater").hidden) $("#signupSheet").classList.add("hidden"); else $("#signupLater").click(); };
