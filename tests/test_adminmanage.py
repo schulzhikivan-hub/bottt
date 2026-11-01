@@ -58,3 +58,20 @@ def test_dating_list_filters_and_edit_and_delete(client):
     with SessionLocal() as db:
         assert db.get(DatingProfile, other) is None
         assert db.query(Notification).filter(Notification.user_tg_id == "2", Notification.text.like("%удалена модератором%")).count() == 1
+
+
+def test_listing_list_filters_by_author_and_flag(client):
+    a = make(client, user=1, title="Cook one", category="job")
+    b = make(client, user=2, title="Flat two", category="housing")
+    r = client.get("/api/admin/listing-list?author=1", headers=ADMIN).json()
+    assert [x["id"] for x in r["items"]] == [a]
+    client.post(f"/api/admin/listings/{b}/flags", json={"dispute": True, "reason": "спор об аренде"}, headers=ADMIN)
+    assert [x["id"] for x in client.get("/api/admin/listing-list?flag=dispute", headers=ADMIN).json()["items"]] == [b]
+    assert client.get("/api/admin/listing-list?flag=quarantine", headers=ADMIN).json()["total"] == 0
+
+
+def test_user_card_shows_payments_dating_and_companies(client):
+    publish(client, 1)
+    card = client.get("/api/admin/users/1/card", headers=ADMIN).json()
+    assert card["dating"]["status"] == "pending" or card["dating"]["status"] == "published"
+    assert card["payments"] == [] and card["companies"] == []

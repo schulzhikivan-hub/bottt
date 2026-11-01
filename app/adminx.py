@@ -88,6 +88,7 @@ def bulk(payload: BulkIn, actor: str = Depends(staff(*MOD)), db: Session = Depen
 
 @router.get("/api/admin/listing-list")
 def listing_list(category: str | None = None, status: str | None = None, q: str = Query(default="", max_length=60),
+                 author: str = Query(default="", max_length=40), flag: str = Query(default="", max_length=12),
                  limit: int = Query(default=30, ge=1, le=100), offset: int = Query(default=0, ge=0, le=10000),
                  actor: str = Depends(staff(*MOD)), db: Session = Depends(get_db)):
     """Any listings of one section with a status, for looking things up and hiding or restoring them."""
@@ -97,6 +98,16 @@ def listing_list(category: str | None = None, status: str | None = None, q: str 
         stmt = stmt.where(Listing.category == category)
     if status:
         stmt = stmt.where(Listing.status == status)
+    if author.strip():
+        stmt = stmt.where(Listing.author_telegram_id == author.strip())
+    if flag == "edit":
+        stmt = stmt.where(Listing.has_edit.is_(True))
+    elif flag == "quarantine":
+        stmt = stmt.where(Listing.quarantine.is_(True))
+    elif flag == "dispute":
+        stmt = stmt.where(Listing.dispute.is_(True))
+    elif flag == "company":
+        stmt = stmt.where(Listing.company_id.is_not(None))
     for word in q.lower().split()[:4]:
         stmt = stmt.where(Listing.search_text.like(catalog._like(word), escape="\\"))
     total = db.scalar(select(func.count()).select_from(stmt.subquery())) or 0

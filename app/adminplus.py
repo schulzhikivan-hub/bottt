@@ -103,6 +103,22 @@ class NoteIn(BaseModel):
     text: str = Field(min_length=2, max_length=500)
 
 
+def _dating_brief(db: Session, tg_id: str):
+    from app.models import DatingProfile
+    p = db.scalar(select(DatingProfile).where(DatingProfile.owner_tg_id == tg_id))
+    return None if p is None else {"id": p.id, "status": p.status, "selfie": p.selfie_status, "paused": p.paused}
+
+
+def _company_names(db: Session, tg_id: str):
+    from app.company import Company, CompanyMember
+    out = []
+    for m in db.scalars(select(CompanyMember).where(CompanyMember.tg_id == tg_id)).all():
+        c = db.get(Company, m.company_id)
+        if c is not None:
+            out.append({"id": c.id, "name": c.name, "role": m.role, "status": c.status})
+    return out
+
+
 @router.get("/api/admin/users/{tg_id}/card")
 def user_card(tg_id: str, actor: str = Depends(staff(*SUPPORT)), db: Session = Depends(get_db)):
     user = db.get(User, tg_id)
@@ -123,6 +139,9 @@ def user_card(tg_id: str, actor: str = Depends(staff(*SUPPORT)), db: Session = D
         "last_seen_at": user.last_seen_at.isoformat() if user.last_seen_at else None,
         "consent": user.consent_at is not None, "deleted": user.deleted_at is not None,
         "listings": [{"id": x.id, "title": x.title, "status": x.status, "category": x.category} for x in listings],
+        "payments": [{"id": p.id, "service": p.service_code, "stars": p.stars, "status": p.status, "at": str(p.paid_at or p.created_at)[:16]}
+                     for p in db.scalars(select(Payment).where(Payment.user_tg_id == tg_id).order_by(Payment.id.desc()).limit(8)).all()],
+        "dating": _dating_brief(db, tg_id), "companies": _company_names(db, tg_id),
         "applications": c(select(func.count()).select_from(Application).where(Application.applicant_tg_id == tg_id)),
         "chats": c(select(func.count()).select_from(Conversation).where(
             or_(Conversation.buyer_tg_id == tg_id, Conversation.seller_tg_id == tg_id))),

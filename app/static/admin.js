@@ -88,9 +88,10 @@ const SUP = ["super_admin"];
 // Структура по ТЗ (§2): разделы слева, внутри раздела подразделы сверху. Один смысл = один раздел.
 const SECTIONS = [
   {key: "home", icon: "📊", name: "Главная", tabs: ["dash"]},
-  {key: "mod", icon: "🛡", name: "Модерация", tabs: ["listings", "reports", "dating", "resumes", "reviews", "companies", "jobs", "housing", "market", "batches"]},
-  {key: "support", icon: "💬", name: "Поддержка", tabs: ["support", "duty"]},
-  {key: "people", icon: "👥", name: "Люди", tabs: ["users", "admins"]},
+  {key: "listings", icon: "📋", name: "Объявления", tabs: ["listings", "alllist", "batches"]},
+  {key: "people", icon: "👥", name: "Люди", tabs: ["users", "companies", "resumes", "reviews", "admins"]},
+  {key: "dating", icon: "💗", name: "Знакомства", tabs: ["dating", "datingall"]},
+  {key: "support", icon: "🚩", name: "Жалобы и поддержка", tabs: ["reports", "support", "duty"]},
   {key: "catalog", icon: "🗂", name: "Каталог и контент", tabs: ["community", "guide", "texts"]},
   {key: "marketing", icon: "📣", name: "Маркетинг", tabs: ["marketing"]},
   {key: "money", icon: "💰", name: "Деньги", tabs: ["payments", "refunds", "pricing", "reportsm"]},
@@ -98,21 +99,20 @@ const SECTIONS = [
   {key: "system", icon: "⚙️", name: "Система", tabs: ["audit", "errors", "security", "settings"]},
 ];
 const TABS = [
-  {key: "dash", label: "Обзор", roles: ADM, title: "Главная"},
-  {key: "listings", label: "Очередь объявлений", roles: MOD, title: "Модерация: очередь объявлений"},
-  {key: "reports", label: "Жалобы", roles: SUPPORT, title: "Модерация: жалобы"},
-  {key: "dating", label: "Анкеты знакомств", roles: MOD, title: "Модерация: анкеты знакомств"},
-  {key: "resumes", label: "Резюме", roles: MOD, title: "Модерация: резюме соискателей"},
-  {key: "reviews", label: "Отзывы", roles: MOD, title: "Модерация: отзывы"},
-  {key: "companies", label: "Компании и работодатели", roles: MOD, title: "Модерация: компании и работодатели (проверка, приостановка, баланс)"},
-  {key: "jobs", label: "Все вакансии", roles: MOD, title: "Все объявления: работа", cat: "job"},
-  {key: "housing", label: "Всё жильё", roles: MOD, title: "Все объявления: жильё", cat: "housing"},
-  {key: "market", label: "Вся барахолка", roles: MOD, title: "Все объявления: барахолка, авто, услуги", cat: "marketplace"},
-  {key: "batches", label: "Массовые действия", roles: MOD, title: "Модерация: массовые действия (посчитать, подтвердить, следить, отменить)"},
-  {key: "support", label: "Обращения и оспаривания", roles: SUPPORT, title: "Поддержка: обращения и оспаривания"},
-  {key: "duty", label: "Дежурства", roles: SUPPORT, title: "Поддержка: дежурства и эскалация"},
+  {key: "dash", label: "Рабочий стол", roles: ADM, title: "Главная"},
+  {key: "listings", label: "На проверке", roles: MOD, title: "Объявления: очередь на проверке"},
+  {key: "alllist", label: "Все объявления", roles: MOD, title: "Объявления: все, с правкой и решениями"},
+  {key: "batches", label: "Массовые действия", roles: MOD, title: "Объявления: массовые действия (посчитать, подтвердить, следить, отменить)"},
   {key: "users", label: "Пользователи", roles: SUPPORT, title: "Люди: пользователи"},
+  {key: "companies", label: "Компании и работодатели", roles: MOD, title: "Люди: компании и работодатели (проверка, приостановка, баланс)"},
+  {key: "resumes", label: "Резюме", roles: MOD, title: "Люди: резюме соискателей"},
+  {key: "reviews", label: "Отзывы", roles: MOD, title: "Люди: отзывы"},
   {key: "admins", label: "Сотрудники", roles: SUP, title: "Люди: сотрудники и права"},
+  {key: "dating", label: "На проверке", roles: MOD, title: "Знакомства: анкеты и селфи на проверке"},
+  {key: "datingall", label: "Все анкеты", roles: MOD, title: "Знакомства: все анкеты, правка и решения"},
+  {key: "reports", label: "Жалобы", roles: SUPPORT, title: "Жалобы и поддержка: жалобы"},
+  {key: "support", label: "Обращения и оспаривания", roles: SUPPORT, title: "Жалобы и поддержка: обращения и оспаривания"},
+  {key: "duty", label: "Дежурства", roles: SUPPORT, title: "Жалобы и поддержка: дежурства и эскалация"},
   {key: "community", label: "Сообщество", roles: ADM, title: "Каталог: группы сообщества"},
   {key: "guide", label: "Гид", roles: ADM, title: "Каталог: статьи гида"},
   {key: "texts", label: "Тексты и FAQ", roles: ADM, title: "Каталог: тексты, вопросы и ответы, настройки"},
@@ -208,16 +208,16 @@ async function logout() {
 }
 $("#logout").onclick = logout;
 
-const BADGE_KEYS = {listings: "listings", reports: "reports", support: "support", resumes: "resumes", companies: "employers", dating: "dating", errors: "errors"};
+const BADGE_KEYS = {listings: "listings", reports: "reports", support: "support", resumes: "resumes", companies: "employers", dating: "dating", errors: "errors", refunds: "refunds"};
 async function refreshBadges() {
   try {
     const c = await api("/api/admin/counters");
     const set = (k, n, late) => { const el = document.querySelector(`[data-badge="${k}"]`); if (el) { el.textContent = n; el.hidden = !n; el.classList.toggle("warn", !!late); } };
     for (const [tab, key] of Object.entries(BADGE_KEYS)) set(tab, c[key] || 0, (key === "listings" && c.listings_wait_h >= 24) || (key === "support" && c.support_wait_h >= 24));
     for (const sec of SECTIONS) {            // a section shows the sum of what waits inside it
-      const n = sec.tabs.reduce((sum, t) => sum + (BADGE_KEYS[t] ? (c[BADGE_KEYS[t]] || 0) : 0), 0) - (sec.key === "system" ? (c.errors || 0) : 0);
+      const n = sec.tabs.reduce((sum, t) => sum + (BADGE_KEYS[t] && t !== "errors" ? (c[BADGE_KEYS[t]] || 0) : 0), 0);
       const el = document.querySelector(`[data-sbadge="${sec.key}"]`);
-      if (el) { el.textContent = n; el.hidden = !n; el.classList.toggle("warn", (sec.key === "mod" && c.listings_wait_h >= 24) || (sec.key === "support" && c.support_wait_h >= 24)); }
+      if (el) { el.textContent = n; el.hidden = !n; el.classList.toggle("warn", (sec.key === "listings" && c.listings_wait_h >= 24) || (sec.key === "support" && c.support_wait_h >= 24)); }
     }
     document.title = (c.listings + c.support + c.reports > 0 ? `(${c.listings + c.support + c.reports}) ` : "") + "KOREA HUB · админка";
   } catch (e) { /* счётчики не обязательны */ }
@@ -383,7 +383,7 @@ async function loadDash() {
   $("#main").innerHTML = `
     <div class="dhead"><div><h2>${new Date().getHours() < 12 ? "Доброе утро" : new Date().getHours() < 18 ? "Добрый день" : "Добрый вечер"}</h2><p class="muted">${open ? `Ждут решения: <b>${open}</b>` : "Очередей нет"} · людей на сайте: <b>${fmtN(s.users)}</b> · платящих: <b>${s.payers}</b></p></div>
       <div class="quick2"><button class="pulse2" id="pulseBtn"><span class="dot" id="pulseDot"></span><span id="pulseText">проверяем…</span></button><button data-go="listings">📋 Очередь</button><button data-go="users">👥 Найти человека</button><button id="quickPal">⌘ Команды</button></div></div>
-    <div class="todaybar">${tod("Новые люди сегодня", "users", "users")}${tod("Новые объявления", "listings", "listings")}${tod("Отклики", "applications", "jobs")}${tod("Выручка сегодня", "stars", "reportsm", " ⭐")}</div>
+    <div class="todaybar">${tod("Новые люди сегодня", "users", "users")}${tod("Новые объявления", "listings", "listings")}${tod("Отклики", "applications", "alllist")}${tod("Выручка сегодня", "stars", "reportsm", " ⭐")}</div>
     <div class="cols2">
       <div class="card"><div class="sect2"><h3>Очереди: что делать сейчас</h3></div>
         <table class="queues"><tr><th></th><th>Очередь</th><th>Сейчас</th><th>Ждёт</th><th></th></tr>${rows.map((r) => `<tr class="${r.n ? "" : "zero"}"><td>${r.ic}</td><td><b>${r.name}</b><br><small class="muted">${r.hint}</small></td>
@@ -398,7 +398,7 @@ async function loadDash() {
       <div class="seg" id="dashMetric">${Object.entries(METRICS).map(([k, [n]]) => `<button class="${k === dashMetric ? "on" : ""}" data-dm="${k}">${n}</button>`).join("")}</div></div></div>
       ${bigChart(days, dashMetric)}<p class="muted" style="margin:6px 4px 0">За период: людей ${fmtN(a.totals.users)}, объявлений ${fmtN(a.totals.listings)}, откликов ${fmtN(a.totals.applications)}, выручка ${fmtN(a.totals.stars)} ⭐. Проведите по графику, чтобы увидеть день.</p></div>
     <div class="cols">
-      <div class="card"><h3>Путь человека: от просмотра до оплаты</h3>${[["👁 Просмотры", f.views, "listings"], ["💬 Чаты", f.chats, "listings"], ["📨 Отклики", f.applications, "jobs"], ["⭐ Оплаты", f.paid, "payments"]].map(([name, v, go], i, arr) => {
+      <div class="card"><h3>Путь человека: от просмотра до оплаты</h3>${[["👁 Просмотры", f.views, "listings"], ["💬 Чаты", f.chats, "listings"], ["📨 Отклики", f.applications, "alllist"], ["⭐ Оплаты", f.paid, "payments"]].map(([name, v, go], i, arr) => {
         const top = Math.max(1, f.views), prev = i ? arr[i - 1][1] : null;
         return `<button class="fstep" data-go="${go}"><span class="lab">${name}</span><span class="bar" style="width:${Math.max(6, Math.round(v / top * 100) * 0.62)}%">${fmtN(v)}</span><span class="cv">${prev ? (prev ? Math.round(v / prev * 1000) / 10 : 0) + "% от шага выше" : ""}</span></button>`; }).join("")}</div>
       <div class="card"><h3>Что происходит</h3><div class="feed">${audit.slice(0, 9).map((x, i) => `<button data-feed="${i}"><span class="fi">${ACT_ICON[x.object_type] || "•"}</span><span class="ft"><b>${esc(actorName(x.actor))}</b> ${esc(ACT_TEXT(x))} <span class="muted">${esc(x.object_type)} ${esc(x.object_id)}</span><small>${esc(fmt(x.created_at))}</small></span></button>`).join("") || '<p class="muted">Пока тихо.</p>'}</div></div>
@@ -903,13 +903,15 @@ async function openUserCard(id) {
     document.querySelectorAll("#tabs button").forEach((b) => b.classList.remove("active"));
     $("#title").textContent = "Карточка " + (u.name || "ID " + u.tg_id);
     const blocked = u.blocked ? `<span class="bad">заблокирован${u.blocked_until ? " до " + esc(fmt(u.blocked_until)) : " бессрочно"}</span>${u.block_reason ? " · " + esc(u.block_reason) : ""}` : '<span class="good">активен</span>';
-    $("#main").innerHTML = `<div class="card" data-uid="${esc(u.tg_id)}"><div class="kv">
+    $("#main").innerHTML = `<div class="row"><button class="act gray" data-backlist>← К списку людей</button></div><div class="card" data-uid="${esc(u.tg_id)}"><div class="kv">
       <b>ID</b><span>${esc(u.tg_id)}</span><b>Имя</b><span>${esc(u.name || "—")}</span><b>Город</b><span>${esc(u.city)}</span><b>Виза</b><span>${esc(u.visa || "—")}</span>
       <b>Статус</b><span>${blocked}${u.deleted ? " · аккаунт удалён" : ""}${u.trusted ? " · ✔ проверенный автор" : ""}${u.employer_status === "approved" ? " · работодатель " + esc(u.company) : ""}</span>
       <b>Регистрация</b><span>${esc(fmt(u.created_at))}</span><b>Был в сети</b><span>${esc(fmt(u.last_seen_at) || "—")}</span><b>Согласие с правилами</b><span>${u.consent ? "да" : "нет"}</span>
       <b>Объявлений</b><span>${u.listings.length}</span><b>Откликов</b><span>${u.applications}</span><b>Чатов</b><span>${u.chats}</span><b>В избранном</b><span>${u.favorites}</span>
       <b>Жалоб на него / от него</b><span>${u.reports_against} / ${u.reports_made}</span><b>Отзывов получено / написано</b><span>${u.reviews_got} / ${u.reviews_written}</span>
       <b>Личный баланс</b><span>${u.balance} ⭐</span>
+      <b>Знакомства</b><span>${u.dating ? `анкета #${u.dating.id} · ${esc(u.dating.status)}${u.dating.paused ? " · на паузе" : ""}${u.dating.selfie === "approved" ? " · ✔ подтверждена" : ""}` : "анкеты нет"}</span>
+      <b>Компании</b><span>${u.companies.length ? u.companies.map((c) => `${esc(c.name)} (${esc(c.role)}, ${esc(c.status)})`).join("; ") : "нет"}</span>
       <b>Вход на сайт</b><span>${u.email ? esc(u.email) + (u.has_password ? " · пароль задан" : " · без пароля") : "не настроен (только Telegram)"}</span>
       <b>Заплатил</b><span>${u.stars_paid} ⭐</span><b>Резюме</b><span>${u.has_resume ? "есть" : "нет"}</span></div>
       <div style="margin-top:10px">${u.blocked ? '<button class="act ok" data-ux="unblock">Разблокировать</button>' : '<button class="act no" data-ux="blockterms">🚫 Заблокировать…</button>'}
@@ -923,6 +925,7 @@ async function openUserCard(id) {
         ${u.employer_status === "approved" ? `<label>Компания<input data-ue="company_name" value="${esc(u.company || "")}" maxlength="160"></label>` : ""}</div>
         <label><input type="checkbox" id="ueAvatar"> убрать фото профиля</label><br>
         <button class="act ok" id="ueSave">Сохранить правку</button> <span class="muted">Человек получит уведомление</span></div>
+      <div class="card"><h3>Платежи</h3>${u.payments.length ? `<table><tr><th>№</th><th>Услуга</th><th>⭐</th><th>Статус</th><th>Когда</th></tr>${u.payments.map((x) => `<tr><td>${x.id}</td><td>${esc(x.service)}</td><td>${x.stars}</td><td>${esc(PAY_RU[x.status] || x.status)}</td><td>${esc(x.at)}</td></tr>`).join("")}</table>` : '<p class="muted">Платежей нет.</p>'}</div>
       <div class="card"><h3>Заметки сотрудников</h3>${u.notes.map((n) => `<div class="meta"><b>${esc(n.author)}</b> ${esc(fmt(n.at))} <button class="act gray" data-delnote="${n.id}">убрать</button></div><p>${esc(n.text)}</p>`).join("") || '<p class="muted">Заметок нет.</p>'}
         <textarea id="noteText" rows="2" maxlength="500" placeholder="Например: предупреждён о телефонах в описании"></textarea><button class="act ok" id="noteAdd">Добавить заметку</button></div>
       <div class="card"><h3>Объявления</h3>${u.listings.map((x) => `<div>#${x.id} ${esc(x.title)} <span class="badge">${esc(STATUS_RU[x.status] || x.status)}</span> <button class="act gray" data-gl="${x.id}">Открыть</button><div data-gbox></div></div>`).join("") || '<p class="muted">Нет.</p>'}</div>
@@ -1644,9 +1647,188 @@ $("#main").addEventListener("click", async (e) => {
     if (ack) { await post(`/api/admin/alerts/${ack.closest("[data-aid]").dataset.aid}/ack`); reload(); }
   } catch (err) { say(err.message); }
 });
+
+// ---- боковая панель для правки (список остаётся рядом) ----
+function openDrawer(title, html) {
+  closeDrawer();
+  const d = document.createElement("aside");
+  d.id = "drawer"; d.className = "drawer";
+  d.innerHTML = `<div class="dhd"><b>${title}</b><button class="act gray" data-drawer-close>✕ Закрыть</button></div><div class="dbody">${html}</div>`;
+  $("#main").appendChild(d);
+  return d;
+}
+function closeDrawer() { document.getElementById("drawer")?.remove(); }
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && document.getElementById("drawer") && $("#pal").classList.contains("hidden")) closeDrawer(); });
+async function adminImage(url) {
+  const r = await fetch(url, {headers: {"X-Admin-Session": session()}});
+  return r.ok ? URL.createObjectURL(await r.blob()) : "";
+}
+
+// ---- объявления: один список со всем нужным ----
+let allFilter = {category: "", status: "", q: "", author: "", flag: ""}, allLimit = 30;
+const ST_BADGE = {approved: "ok", pending: "warn", rejected: "bad", hidden: "bad", needs_fix: "warn"};
+async function loadAllListings() {
+  await loadClaims("listing");
+  TEMPLATES = TEMPLATES.length ? TEMPLATES : await api("/api/admin/templates");
+  const f = allFilter;
+  $("#main").innerHTML = `<form id="allForm" class="filters"><select name="category"><option value="">Все разделы</option>${Object.entries(CAT).map(([k, v]) => `<option value="${k}" ${f.category === k ? "selected" : ""}>${v}</option>`).join("")}</select>
+    <select name="status"><option value="">Любой статус</option>${Object.entries(STATUS_RU).map(([k, v]) => `<option value="${k}" ${f.status === k ? "selected" : ""}>${esc(v)}</option>`).join("")}</select>
+    <select name="flag">${[["", "Любые"], ["edit", "С правкой на проверке"], ["quarantine", "В карантине"], ["dispute", "В споре"], ["company", "От компаний"]].map(([k, v]) => `<option value="${k}" ${f.flag === k ? "selected" : ""}>${v}</option>`).join("")}</select>
+    <input name="q" placeholder="Слово в названии или тексте" value="${esc(f.q)}" style="width:210px"><input name="author" placeholder="ID автора" value="${esc(f.author)}" style="width:120px">
+    <button class="act" type="submit">Показать</button><span class="muted" id="allTotal"></span></form><div id="allList"></div>`;
+  const q = new URLSearchParams({limit: String(allLimit)});
+  Object.entries(f).forEach(([k, v]) => { if (v) q.set(k, v); });
+  const r = await api("/api/admin/listing-list?" + q);
+  $("#allTotal").textContent = "Найдено: " + r.total;
+  window.__alllist = Object.fromEntries(r.items.map((x) => [x.id, x]));
+  $("#allList").innerHTML = (r.items.length ? `<table><tr><th>№</th><th>Раздел</th><th>Название</th><th>Город</th><th>Цена</th><th>Статус</th><th>Автор</th><th>👁</th><th>Создано</th><th></th></tr>${r.items.map((x) => `<tr class="clickrow" data-lrow="${x.id}">
+    <td>${x.id}</td><td>${esc(CAT[x.category] || x.category)}</td><td><b>${esc(x.title)}</b>${x.company_name ? `<br><small class="muted">🏬 ${esc(x.company_name)}</small>` : ""}</td><td>${esc(x.city)}</td><td>${esc(x.price || "—")}</td>
+    <td><span class="badge ${ST_BADGE[x.status] || ""}">${esc(STATUS_RU[x.status] || x.status)}</span>${x.has_edit ? ' <span class="badge warn">правка</span>' : ""}${(x.flags || []).length ? " ⚠" : ""}</td>
+    <td>${esc(x.author_name || "…" + String(x.author_id || "").slice(-4))}</td><td>${x.views || 0}</td><td>${esc(fmt(x.created_at).slice(0, 10))}</td><td><button class="act gray">Открыть</button></td></tr>`).join("")}</table>`
+    : '<div class="card muted">Ничего не нашли.</div>') + (r.total > r.items.length ? '<button class="act gray" id="allMore">Показать ещё</button>' : "");
+}
+$("#main").addEventListener("submit", (e) => {
+  if (e.target.id !== "allForm") return;
+  e.preventDefault();
+  allFilter = Object.fromEntries(new FormData(e.target).entries()); allLimit = 30; reload();
+});
+const FIELD_DEFS = {
+  common: [["title", "Название", "text"], ["description", "Описание", "area"], ["city", "Место (город или район из списка)", "text"], ["price", "Пометка к цене", "text"], ["price_amount", "Сумма, ₩", "number"], ["contact", "Контакт", "text"]],
+  job: [["salary_period", "Период зарплаты", "select", {month: "в месяц", day: "в день", hour: "в час"}], ["employment", "Занятость", "select", {full: "полная", part: "частичная", daily: "подённая", contract: "контракт"}],
+        ["schedule", "График", "select", {day: "день", night: "ночь", shift: "сменный"}], ["housing_provided", "Жильё дают", "bool"], ["meals_provided", "Питание дают", "bool"]],
+  housing: [["housing_type", "Тип жилья", "select", {apartment: "квартира", studio: "студия", room: "комната", dorm: "общежитие", officetel: "офистель", house: "дом"}], ["deposit", "Залог, ₩", "number"], ["area_m2", "Площадь, м²", "number"],
+            ["rooms", "Комнат", "number"], ["pets_allowed", "Можно с животными", "bool"], ["furnished", "С мебелью", "bool"]],
+  marketplace: [["condition", "Состояние", "select", {new: "новое", used: "б/у"}], ["negotiable", "Торг возможен", "bool"]],
+};
+function editFormHtml(x) {
+  const defs = [...FIELD_DEFS.common, ...(FIELD_DEFS[x.category] || [])];
+  const input = ([k, label, type, opts]) => {
+    const v = x[k];
+    if (type === "area") return `<label class="wide">${label}<textarea data-lf="${k}" rows="5">${esc(v || "")}</textarea></label>`;
+    if (type === "bool") return `<label class="chk"><input type="checkbox" data-lf="${k}" ${v ? "checked" : ""}> ${label}</label>`;
+    if (type === "select") return `<label>${label}<select data-lf="${k}"><option value="">—</option>${Object.entries(opts).map(([o, t]) => `<option value="${o}" ${v === o ? "selected" : ""}>${t}</option>`).join("")}</select></label>`;
+    return `<label>${label}<input data-lf="${k}" type="${type}" value="${esc(v ?? "")}"></label>`;
+  };
+  const visas = x.category === "job" ? `<div class="wide"><small class="muted">Визы, которые подходят</small><div class="filters">${["E-9", "E-7", "F-2", "F-4", "F-5", "F-6", "D-2", "D-4", "H-2", "C-4", "G-1"].map((v) => `<label class="chk"><input type="checkbox" data-lvisa="${v}" ${(x.visas || []).includes(v) ? "checked" : ""}> ${v}</label>`).join("")}</div></div>` : "";
+  return `<div class="gridform lf">${defs.map(input).join("")}${visas}</div><div class="row"><button class="act ok" data-lfsave>💾 Сохранить правку</button><span class="muted">Применяется сразу, автор получит уведомление, изменения попадут в журнал.</span></div>`;
+}
+async function openListingDrawer(id) {
+  try {
+    const [x, h] = await Promise.all([api("/api/admin/listings/" + id), api(`/api/admin/listings/${id}/history`)]);
+    x.flags = x.flags || [];
+    const flags = `<div class="row"><b>Метки:</b> ${h.flags.quarantine ? '<span class="badge bad">🧪 карантин</span>' : ""}${h.flags.dispute ? '<span class="badge warn">⚖ спор</span>' : ""}${h.flags.company_id ? '<span class="badge">🏬 компания</span>' : ""}
+      <button class="act gray" data-flagset="quarantine" data-on="${h.flags.quarantine ? 0 : 1}">${h.flags.quarantine ? "Снять карантин" : "В карантин"}</button><button class="act gray" data-flagset="dispute" data-on="${h.flags.dispute ? 0 : 1}">${h.flags.dispute ? "Закрыть спор" : "Открыть спор"}</button></div>`;
+    const hist = `<h4>История</h4>${h.journal.map((j) => `<div class="drun"><span>${esc(j.action)} <small class="muted">${esc(actorName(j.who))}</small>${j.details ? `<br><small>${esc(j.details)}</small>` : ""}</span><span class="muted">${esc(fmt(j.at))}</span></div>`).join("") || '<p class="muted">Пока ничего.</p>'}
+      ${h.reports.length ? `<h4>Жалобы (${h.reports.length})</h4>${h.reports.map((r) => `<div class="drun"><span>${esc(REASON_RU[r.reason] || r.reason)} <small class="muted">${esc(r.comment || "")}</small></span><span class="muted">${esc(r.status)}</span></div>`).join("")}` : ""}
+      ${h.services.length ? `<h4>Платные услуги</h4>${h.services.map((s) => `<div class="drun"><span>${esc(s.kind)}${s.free ? " (по акции)" : ""} · ${esc(s.status)}</span><span class="muted">до ${esc(fmt(s.to).slice(0, 10))}</span></div>`).join("")}` : ""}`;
+    openDrawer(`#${x.id} · ${esc(x.title)}`, `${listingCardHtml(x)}${flags}<h4>Редактирование</h4><div data-lid="${x.id}">${editFormHtml(x)}</div>${hist}`);
+  } catch (err) { say(err.message); }
+}
+$("#main").addEventListener("click", async (e) => {
+  if (e.target.closest("[data-backlist]")) { show("users"); return; }
+  if (e.target.closest("[data-drawer-close]")) { closeDrawer(); return; }
+  const row = e.target.closest("[data-lrow]");
+  if (row) { openListingDrawer(row.dataset.lrow); return; }
+  if (e.target.id === "allMore") { allLimit += 30; reload(); return; }
+  const box = e.target.closest("[data-lid]");
+  try {
+    if (e.target.closest("[data-lfsave]") && box) {
+      const id = box.dataset.lid, orig = (window.__alllist || {})[id] || await api("/api/admin/listings/" + id), body = {};
+      box.querySelectorAll("[data-lf]").forEach((el) => {
+        const k = el.dataset.lf, v = el.type === "checkbox" ? el.checked : el.type === "number" ? (el.value === "" ? null : Number(el.value)) : el.value;
+        if (v !== null && v !== "" && v !== (orig[k] ?? (el.type === "checkbox" ? false : ""))) body[k] = v;
+      });
+      const visas = [...box.querySelectorAll("[data-lvisa]")].filter((c) => c.checked).map((c) => c.dataset.lvisa);
+      if (box.querySelector("[data-lvisa]") && visas.join() !== (orig.visas || []).join()) body.visas = visas;
+      if (!Object.keys(body).length) { say("Изменений нет"); return; }
+      const r = await api(`/api/admin/listings/${id}/full`, {method: "PUT", body: JSON.stringify(body)});
+      say("Сохранено: " + (r.changed.join(", ") || "без изменений")); openListingDrawer(id); return;
+    }
+    const fl = e.target.closest("[data-flagset]");
+    if (fl) {
+      const id = document.querySelector("#drawer [data-id]").dataset.id, why = ask("Причина (остаётся в журнале):"); if (!why) return;
+      await post(`/api/admin/listings/${id}/flags`, {[fl.dataset.flagset]: fl.dataset.on === "1", reason: why}); say("Готово"); openListingDrawer(id);
+    }
+  } catch (err) { say(err.message); }
+});
+
+// ---- знакомства: все анкеты с правкой ----
+let datFilter = {status: "", gender: "", flag: "", q: ""}, datLimit = 30;
+const D_FLAG = [["", "Любые"], ["selfie", "Ждут проверки селфи"], ["paused", "На паузе"], ["suspect", "Под сомнением"], ["vip", "С VIP"], ["invisible", "Невидимки"]];
+async function loadDatingAll() {
+  const f = datFilter;
+  $("#main").innerHTML = `<form id="datForm" class="filters"><select name="status"><option value="">Любой статус</option>${[["pending", "на проверке"], ["published", "опубликованы"], ["rejected", "отклонены"]].map(([k, v]) => `<option value="${k}" ${f.status === k ? "selected" : ""}>${v}</option>`).join("")}</select>
+    <select name="gender"><option value="">Любой пол</option><option value="f" ${f.gender === "f" ? "selected" : ""}>женщины</option><option value="m" ${f.gender === "m" ? "selected" : ""}>мужчины</option></select>
+    <select name="flag">${D_FLAG.map(([k, v]) => `<option value="${k}" ${f.flag === k ? "selected" : ""}>${v}</option>`).join("")}</select>
+    <input name="q" placeholder="Имя, город, слово, ID" value="${esc(f.q)}" style="width:200px"><button class="act" type="submit">Показать</button><span class="muted" id="datTotal"></span></form><div id="datList"></div>`;
+  const q = new URLSearchParams({limit: String(datLimit)});
+  Object.entries(f).forEach(([k, v]) => { if (v) q.set(k, v); });
+  const r = await api("/api/admin/dating-list?" + q);
+  $("#datTotal").textContent = "Найдено: " + r.total;
+  window.__datlist = Object.fromEntries(r.items.map((x) => [x.id, x]));
+  $("#datList").innerHTML = (r.items.length ? `<table><tr><th>№</th><th>Имя</th><th>Возраст</th><th>Город</th><th>Статус</th><th>Метки</th><th>Симпатии</th><th></th></tr>${r.items.map((p) => `<tr class="clickrow" data-drow="${p.id}">
+    <td>${p.id}</td><td><b>${esc(p.name || "без имени")}</b> ${p.gender === "f" ? "♀" : "♂"}</td><td>${p.age}</td><td>${esc(p.city)}</td>
+    <td><span class="badge ${ST_BADGE[p.status === "published" ? "approved" : p.status] || ""}">${esc({pending: "на проверке", published: "опубликована", rejected: "отклонена"}[p.status] || p.status)}</span></td>
+    <td>${p.selfie_status === "approved" ? "✔ " : p.selfie_status === "pending" ? "📷 " : ""}${p.paused ? "⏸ " : ""}${p.suspect ? "⚠ " : ""}${p.vip ? "👑 " : ""}${p.invisible ? "👻" : ""}</td><td>${p.likes_in}↓ ${p.likes_out}↑</td><td><button class="act gray">Открыть</button></td></tr>`).join("")}</table>`
+    : '<div class="card muted">Ничего не нашли.</div>') + (r.total > r.items.length ? '<button class="act gray" id="datMore">Показать ещё</button>' : "");
+}
+$("#main").addEventListener("submit", (e) => {
+  if (e.target.id !== "datForm") return;
+  e.preventDefault();
+  datFilter = Object.fromEntries(new FormData(e.target).entries()); datLimit = 30; reload();
+});
+async function openDatingDrawer(id) {
+  const p = (window.__datlist || {})[id] || (await api(`/api/admin/dating-list?q=${id}&limit=50`)).items.find((x) => String(x.id) === String(id));
+  if (!p) { say("Анкета не найдена"); return; }
+  const sel = (k, opts) => `<select data-df="${k}">${Object.entries(opts).map(([o, t]) => `<option value="${o}" ${(p[k] || "") === o ? "selected" : ""}>${t}</option>`).join("")}</select>`;
+  const d = openDrawer(`Анкета #${p.id} · ${esc(p.name || "без имени")}`, `<div class="row" data-did="${p.id}">
+    ${p.has_photo ? '<div><div class="muted">Главное фото</div><img data-dphoto alt="" style="max-width:240px;border-radius:12px"></div>' : '<span class="muted">Фото нет</span>'}
+    ${p.has_selfie ? '<div><div class="muted">Селфи для проверки (видят только модераторы)</div><img data-dselfie alt="" style="max-width:240px;border-radius:12px"></div>' : ""}</div>
+    <div class="row" data-did="${p.id}">${p.status !== "published" ? '<button class="act ok" data-ddec="approve">Опубликовать</button>' : ""}${p.status !== "rejected" ? '<button class="act no" data-ddec="reject">Отклонить…</button>' : ""}
+      ${p.selfie_status === "pending" ? '<button class="act ok" data-ddec="verify">✔ Тот же человек</button><button class="act warn" data-ddec="reject_selfie">Селфи не подходит</button>' : p.selfie_status === "approved" ? '<span class="badge ok">✔ подтверждена</span>' : ""}
+      ${p.has_photo ? '<button class="act gray" data-dphoto-del>Убрать фото</button>' : ""}</div>
+    <h4>Редактирование</h4><div class="gridform" data-did="${p.id}"><label>Имя<input data-df="first_name" value="${esc(p.name)}" maxlength="40"></label><label>Город<input data-df="city" value="${esc(p.city)}"></label>
+      <label>Рост<input data-df="height" type="number" value="${p.height ?? ""}"></label><label>Кого ищет${sel("seeking", {"": "—", f: "женщину", m: "мужчину", any: "не важно"})}</label>
+      <label>Цель${sel("goal", {"": "—", friendship: "дружба", relationship: "отношения", marriage: "брак", chat: "общение"})}</label><label>Виза<input data-df="visa" value="${esc(p.visa || "")}" maxlength="8"></label>
+      <label class="wide">О себе<textarea data-df="bio" rows="4" maxlength="500">${esc(p.bio)}</textarea></label>
+      <label class="chk"><input type="checkbox" data-df="paused" ${p.paused ? "checked" : ""}> На паузе</label><label class="chk"><input type="checkbox" data-df="suspect" ${p.suspect ? "checked" : ""}> Под сомнением (скрыта)</label></div>
+    <div class="row" data-did="${p.id}"><button class="act ok" data-dsave>💾 Сохранить</button><button class="act no" data-ddelete>🗑 Удалить анкету…</button></div>
+    <p class="muted">Автор: <a href="#" data-gu="${esc(p.owner)}">ID …${esc(p.owner.slice(-4))}</a> · симпатий получено ${p.likes_in}, отправлено ${p.likes_out}${p.note ? " · комментарий: " + esc(p.note) : ""}</p>`);
+  if (p.has_photo) adminImage(`/api/admin/dating/${p.id}/photo`).then((u) => { const i = d.querySelector("[data-dphoto]"); if (i) i.src = u; });
+  if (p.has_selfie) adminImage(`/api/admin/dating/${p.id}/selfie`).then((u) => { const i = d.querySelector("[data-dselfie]"); if (i) i.src = u; });
+}
+$("#main").addEventListener("click", async (e) => {
+  const row = e.target.closest("[data-drow]");
+  if (row) { openDatingDrawer(row.dataset.drow); return; }
+  if (e.target.id === "datMore") { datLimit += 30; reload(); return; }
+  const box = e.target.closest("[data-did]");
+  if (!box) return;
+  const id = box.dataset.did;
+  try {
+    const dec = e.target.closest("[data-ddec]");
+    if (dec) {
+      let q = "";
+      if (dec.dataset.ddec === "reject") { const why = ask("Причина отказа (автор анкеты её увидит)"); if (!why) return; q = "?reason=" + encodeURIComponent(why); }
+      await post(`/api/admin/dating/${id}/${dec.dataset.ddec}${q}`); say("Готово"); closeDrawer(); reload(); return;
+    }
+    if (e.target.closest("[data-dsave]")) {
+      const body = {};
+      document.querySelectorAll("#drawer [data-df]").forEach((el) => { const k = el.dataset.df; body[k] = el.type === "checkbox" ? el.checked : el.type === "number" ? (el.value === "" ? null : Number(el.value)) : el.value; });
+      Object.keys(body).forEach((k) => { if (body[k] === null) delete body[k]; });
+      body.reason = askOpt("Что поправили (автор увидит)") || "";
+      const r = await api(`/api/admin/dating/${id}/edit`, {method: "PUT", body: JSON.stringify(body)}); say("Сохранено: " + (r.changed.join(", ") || "без изменений")); closeDrawer(); reload();
+    }
+    if (e.target.closest("[data-dphoto-del]") && confirm("Убрать фото? Анкета вернётся на проверку.")) { await api(`/api/admin/dating/${id}/photo`, {method: "DELETE"}); say("Фото убрано"); closeDrawer(); reload(); }
+    if (e.target.closest("[data-ddelete]")) {
+      const why = ask("Причина удаления (автор её увидит):"); if (!why) return;
+      if (!confirm("Удалить анкету вместе с симпатиями и просмотрами? Это нельзя отменить.")) return;
+      await post(`/api/admin/dating/${id}/delete`, {reason: why}); say("Анкета удалена"); closeDrawer(); reload();
+    }
+  } catch (err) { say(err.message); }
+});
 const LOADERS = {dash: loadDash, listings: loadListings, jobs: loadSection, housing: loadSection, market: loadSection, dating: loadDating,
                  employers: loadEmployers, reports: loadReports, reviews: loadReviews, resumes: loadResumes, support: loadSupport, texts: loadTexts, users: loadUsers, community: loadCommunity, guide: loadGuide,
-                 marketing: loadMarketing, payments: loadPayments, pricing: loadPricing, rules: loadRules, duty: loadDuty, security: loadSecurity, batches: loadBatches, refunds: loadRefunds, companies: loadCompanies, reportsm: loadMoneyReports, stest: loadSearchTest, audit: loadAudit, errors: loadErrors, settings: loadSettings, admins: loadAdmins};
+                 marketing: loadMarketing, payments: loadPayments, pricing: loadPricing, rules: loadRules, alllist: loadAllListings, datingall: loadDatingAll, duty: loadDuty, security: loadSecurity, batches: loadBatches, refunds: loadRefunds, companies: loadCompanies, reportsm: loadMoneyReports, stest: loadSearchTest, audit: loadAudit, errors: loadErrors, settings: loadSettings, admins: loadAdmins};
 
 // Старт: есть сессия — открываем; открыто из Telegram — входим сами; иначе показываем кнопку
 if (session()) startApp();

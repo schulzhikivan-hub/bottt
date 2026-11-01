@@ -157,6 +157,20 @@ hr{border:0;border-top:1px solid var(--line);margin:14px 0}
 @keyframes sk{to{background-position:-200% 0}}
 
 
+/* ---------- боковая панель правки и менеджеры ---------- */
+.drawer{position:fixed;top:0;right:0;bottom:0;width:min(620px,100%);background:var(--surface);border-left:1px solid var(--line);box-shadow:-24px 0 60px -24px rgba(0,0,0,.35);z-index:40;display:flex;flex-direction:column;animation:dr .18s ease}
+@keyframes dr{from{transform:translateX(40px);opacity:0}to{transform:none;opacity:1}}
+.drawer .dhd{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line);background:var(--surface2)}
+.drawer .dhd b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.drawer .dbody{padding:14px 16px 40px;overflow-y:auto;flex:1}
+.drawer h4{margin:18px 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:1px;color:var(--muted)}
+.drawer .card{box-shadow:none}
+.drawer .gridform .wide,.gridform .wide{grid-column:1/-1}
+.chk{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text)}
+.clickrow{cursor:pointer}.clickrow:hover td{background:color-mix(in srgb,var(--brand) 8%,transparent)}
+.badge.ok{background:var(--okbg);color:var(--ok)}.badge.warn{background:var(--warnbg);color:#a86d00}.badge.bad{background:var(--badbg);color:var(--bad)}
+@media(max-width:860px){.drawer{width:100%}}
+
 /* ---------- новая главная ---------- */
 .dhead{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap;margin-bottom:12px}
 .dhead h2{margin:0;font-size:24px;letter-spacing:-.5px}.dhead p{margin:2px 0 0}
