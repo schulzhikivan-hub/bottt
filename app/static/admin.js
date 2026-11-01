@@ -91,6 +91,7 @@ const TABS = [
   {key: "housing", label: "🏠 Жильё", roles: MOD, title: "Жильё", cat: "housing"},
   {key: "market", label: "🛍 Барахолка", roles: MOD, title: "Барахолка, авто, услуги", cat: "marketplace"},
   {key: "dating", label: "💗 Знакомства", roles: MOD, title: "Анкеты знакомств"},
+  {key: "companies", label: "🏬 Компании", roles: MOD, title: "Компании: проверка, приостановка, баланс"},
   {key: "employers", label: "🏢 Работодатели", roles: MOD, title: "Заявки работодателей"},
   {key: "support", label: "💬 Поддержка", roles: SUPPORT, title: "Обращения пользователей"},
   {key: "resumes", label: "🧑‍💼 Резюме", roles: MOD, title: "Резюме соискателей"},
@@ -1139,9 +1140,43 @@ async function loadSearchTest() {
   $("#stGo").onclick = () => go().catch((e) => say(e.message));
   $("#stQ").addEventListener("keydown", (e) => { if (e.key === "Enter") $("#stGo").click(); });
 }
+
+// ---- компании ----
+let coFilter = "pending";
+async function loadCompanies() {
+  const rows = await api(`/api/admin/companies?status=${coFilter}`);
+  const ST = {pending: "на проверке", verified: "проверена", rejected: "отклонена", suspended: "приостановлена"};
+  $("#main").innerHTML = `<div class="card"><div class="row">${[["pending", "На проверке"], ["verified", "Проверенные"], ["suspended", "Приостановленные"], ["rejected", "Отклонённые"], ["all", "Все"]]
+    .map(([k, n]) => `<button class="act ${k === coFilter ? "" : "gray"}" data-cof="${k}">${n}</button>`).join("")}</div>
+    <table><tr><th>№</th><th>Компания</th><th>Рег. номер</th><th>Владелец</th><th>Объявл.</th><th>Команда</th><th>Баланс</th><th>Статус</th><th></th></tr>${rows.map((c) => `<tr data-coid="${c.id}"><td>${c.id}</td><td>${esc(c.name)}</td><td>${esc(c.reg_no)}</td>
+      <td>${esc(c.owner_name || c.owner)}</td><td>${c.listings}</td><td>${c.members}</td><td>${c.balance} ⭐</td><td>${esc(ST[c.status] || c.status)}${c.note ? `<br><small>${esc(c.note)}</small>` : ""}</td>
+      <td>${["pending", "suspended", "rejected"].includes(c.status) ? '<button class="act ok" data-codec="approve">Подтвердить</button>' : ""}
+      ${["pending"].includes(c.status) ? '<button class="act no" data-codec="reject">Отказать</button>' : ""}${c.status === "verified" ? '<button class="act no" data-codec="suspend">Приостановить</button>' : ""}
+      <button class="act gray" data-cocredit>+ баланс</button></td></tr>`).join("") || '<tr><td colspan="9" class="muted">Пусто</td></tr>'}</table></div>`;
+}
+$("#main").addEventListener("click", async (e) => {
+  const f = e.target.closest("[data-cof]");
+  if (f) { coFilter = f.dataset.cof; reload(); return; }
+  const row = e.target.closest("[data-coid]");
+  if (!row) return;
+  try {
+    const id = row.dataset.coid, d = e.target.closest("[data-codec]");
+    if (d) {
+      let reason = "";
+      if (["reject", "suspend"].includes(d.dataset.codec)) { reason = prompt("Причина (её увидит владелец)"); if (!reason) return; }
+      await post(`/api/admin/companies/${id}/${d.dataset.codec}`, {reason}); say("Готово"); reload();
+    }
+    if (e.target.closest("[data-cocredit]")) {
+      const n = Number(prompt("Сколько ⭐ зачислить на баланс компании?"));
+      if (!n) return;
+      const note = prompt("Комментарий (необязательно)") || "";
+      await post(`/api/admin/companies/${id}/credit`, {stars: n, note}); say("Зачислено"); reload();
+    }
+  } catch (err) { say(err.message); }
+});
 const LOADERS = {dash: loadDash, listings: loadListings, jobs: loadSection, housing: loadSection, market: loadSection, dating: loadDating,
                  employers: loadEmployers, reports: loadReports, reviews: loadReviews, resumes: loadResumes, support: loadSupport, texts: loadTexts, users: loadUsers, community: loadCommunity, guide: loadGuide,
-                 marketing: loadMarketing, payments: loadPayments, pricing: loadPricing, rules: loadRules, reportsm: loadMoneyReports, stest: loadSearchTest, audit: loadAudit, errors: loadErrors, settings: loadSettings, admins: loadAdmins};
+                 marketing: loadMarketing, payments: loadPayments, pricing: loadPricing, rules: loadRules, companies: loadCompanies, reportsm: loadMoneyReports, stest: loadSearchTest, audit: loadAudit, errors: loadErrors, settings: loadSettings, admins: loadAdmins};
 
 // Старт: есть сессия — открываем; открыто из Telegram — входим сами; иначе показываем кнопку
 if (session()) startApp();

@@ -156,7 +156,7 @@
   <h4 class="grp">Аккаунт</h4>
   <div class="menu-list">
     <button class="wide" data-menu="settings"><i>⚙️</i>Настройки</button>
-    <button class="wide" data-menu="employer"><i>🏢</i>Статус работодателя</button>
+    <button class="wide" data-menu="employer"><i>🏢</i>Компания</button>
     <button class="wide" data-menu="payments"><i>⭐</i>История платежей</button>
     <button class="wide" data-menu="blocks"><i>🚫</i>Заблокированные</button>
   </div>
@@ -279,6 +279,7 @@
 <label hidden>Раздел<select name="category" id="formCategory"><option value="job">Работа</option><option value="housing">Жильё</option><option value="marketplace">Барахолка</option></select></label>
 <div id="stepsBar" class="steps"></div>
 <div class="step" data-step="1">
+<label id="postAsBox" hidden>Опубликовать от<select name="company_id" id="postAs"><option value="">Меня лично</option></select></label>
 <label>Заголовок<input name="title" required minlength="3" maxlength="160" placeholder="Например: Работа на заводе"></label>
 <div class="geo" id="formGeo">
 <label>Регион<select name="region_code" required data-geo-region></select></label>

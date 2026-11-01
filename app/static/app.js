@@ -318,6 +318,7 @@ function listingCard(x) {
       <h3>${esc(x.title)}</h3>
       <div class="price">${esc(priceText(x))}</div>
       <div class="meta">📍 ${esc(x.city)} · ${esc(CAT[x.category] || x.category)}</div>
+      ${x.company_name ? `<div class="meta">🏢 ${esc(x.company_name)}${x.company_verified ? " ✔" : ""}</div>` : ""}
       <div class="pills">${pills(x)}</div>
     </div>
     <button class="fav ${fav ? "on" : ""}" data-act="fav" aria-label="В избранное">${fav ? "♥" : "♡"}</button>
@@ -1240,7 +1241,7 @@ async function showReceipt(id) {
     try { await navigator.clipboard.writeText(rows.map(([k, v]) => `${k}: ${v}`).join("\n")); toast("Квитанция скопирована"); } catch (e) { toast("Не удалось скопировать"); }
   };
 }
-const SUB_TITLES = {author: "Объявления автора", applications: "Мои отклики", searches: "Мои поиски", settings: "Настройки", employer: "Статус работодателя",
+const SUB_TITLES = {author: "Объявления автора", applications: "Мои отклики", searches: "Мои поиски", settings: "Настройки", employer: "Компания", company: "Компания",
                     recent: "Недавно смотрел", myreviews: "Мои отзывы", compare: "Сравнение", support: "Поддержка", faq: "Вопросы и ответы", ticket: "Обращение", invite: "Пригласить друзей", resume: "Моё резюме", cvsearch: "Поиск сотрудников", payments: "История платежей", blocks: "Заблокированные", help: "Помощь и правила"};
 let currentSubKey = "";
 const TICKET_STATUS = {open: "Ждёт ответа", answered: "Есть ответ", closed: "Закрыто"};
@@ -1464,7 +1465,8 @@ async function openMenu(key) {
       catch (err) { toast(err.message); }
     };
   }
-  if (key === "employer") {
+  if (key === "employer") return showCompany();
+  if (key === "employer-old") {
     const st = me?.employer_status;
     const text = {none: "Работодателям с подтверждённым статусом доверяют больше: у их вакансий появляется значок «Проверенный работодатель». Нужны название и номер регистрации компании.",
                   pending: "Заявка на проверке модератора. Мы сообщим в Telegram о решении.",
@@ -1654,6 +1656,21 @@ function resetPhotos(list) {
   formPhotos = list || []; formFiles = []; removedPhotos = [];
   renderPhotos();
 }
+// «Опубликовать от»: себя или проверенной компании, где у человека есть право публиковать
+let postAsDefault = null;
+async function fillPostAs(kind) {
+  const box = $("#postAsBox"), sel = $("#postAs");
+  sel.innerHTML = '<option value="">Меня лично</option>';
+  box.hidden = true;
+  let mine = [];
+  try { mine = (await api("/api/company/mine", {quiet: true})).filter((c) => c.verified && c.role !== "viewer"); } catch (e) { mine = []; }
+  if (!mine.length) { postAsDefault = null; return; }
+  sel.insertAdjacentHTML("beforeend", mine.map((c) => `<option value="${c.id}">🏢 ${esc(c.name)}</option>`).join(""));
+  box.hidden = false;
+  const want = postAsDefault ?? (kind === "job" && mine.length === 1 ? mine[0].id : "");
+  sel.value = want && mine.some((c) => c.id === want) ? String(want) : "";
+  postAsDefault = null;
+}
 async function openAdd(kind) {
   if (kind === "dating") return $("#myDatingBtn").onclick();
   if (me?.blocked) { toast("Аккаунт ограничен" + (me.block_reason ? ": " + me.block_reason : "")); return; }
@@ -1666,6 +1683,7 @@ async function openAdd(kind) {
   f.price_amount.disabled = false;
   await setGeo("#formGeo", me?.region_code || "", me?.district_id || "");
   $("#modalTitle").textContent = KIND_TITLE[kind];
+  await fillPostAs(kind);
   resetPhotos([]);
   updateFormBlocks();
   // Незаконченный черновик на этом устройстве
@@ -1744,6 +1762,7 @@ function listingPayload(f) {
           ? {model: v("d_model"), year: num("d_year"), mileage_km: num("d_mileage_km")} : {})};
   }
   data.details = Object.fromEntries(Object.entries(details).filter(([, x]) => x !== undefined && x !== ""));
+  if (!currentEditId && $("#postAs")?.value) data.company_id = Number($("#postAs").value);
   return Object.fromEntries(Object.entries(data).filter(([, x]) => x !== undefined));
 }
 async function saveListing(send) {
@@ -1874,7 +1893,8 @@ let promoPrices = {};      // service code -> цена со скидкой
 const SAMPLE = {bump: ["⬆ Поднято", ""], vip: ["VIP", ""], pin: ["📌 Закреплено", ""], highlight: ["★ Выделено", "hl"]};
 function renderServices(data) {
   $("#serviceFor").textContent = "Для объявления: " + data.title;
-  const gifts = (data.promos || []).map((x) => `<article class="listing hl"><h3>🎁 ${esc(x.title)}</h3><p>${esc(x.service)}, ${x.days} дн. бесплатно</p>
+  const balNote = data.balance ? `<p class="muted">Баланс ${data.balance_of === "company" ? "компании" : "личный"}: ${data.balance} ⭐</p>` : "";
+  const gifts = balNote + (data.promos || []).map((x) => `<article class="listing hl"><h3>🎁 ${esc(x.title)}</h3><p>${esc(x.service)}, ${x.days} дн. бесплатно</p>
     <div class="actions"><button data-lclaim="${x.id}">Получить бесплатно</button></div></article>`).join("");
   $("#serviceList").innerHTML = gifts + data.options.map((o) => {
     const price = promoPrices[o.code] != null && promoPrices[o.code] !== o.stars
@@ -1884,7 +1904,7 @@ function renderServices(data) {
     return `<article class="listing svc"><div class="svc-head"><h3>${esc(o.title)}</h3><span class="svc-price">${price}</span></div>
       <p>${esc(o.what)}${o.days > 1 ? " · " + o.days + " дн." : ""}</p>
       <div class="sample ${cls}"><span class="promo ${o.kind}" style="margin:0">${badge}</span> так выглядит в ленте</div>
-      ${o.available ? `<div class="actions"><button data-buy="${esc(o.code)}" data-listing="${servicesFor}">Оплатить ${promoPrices[o.code] ?? o.stars} ⭐</button></div>`
+      ${o.available ? `<div class="actions"><button data-buy="${esc(o.code)}" data-listing="${servicesFor}">Оплатить ${promoPrices[o.code] ?? o.stars} ⭐</button>${data.balance > 0 && data.can_pay !== false ? `<button class="secondary" data-buy="${esc(o.code)}" data-listing="${servicesFor}" data-bal="1">С баланса</button>` : ""}</div>`
         : `<p class="why">${esc(o.reason)}${until}</p>`}</article>`;
   }).join("") || '<div class="empty">Для этого раздела услуг пока нет</div>';
 }
@@ -1912,8 +1932,9 @@ $("#promoApply").onclick = async () => {
   $("#promoNote").textContent = applied ? `✔ Промокод ${applied} применён: цены ниже уже со скидкой` : "";
   renderServices(servicesData);
 };
-async function buy(listingId, code) {
-  const r = await api("/api/payments/invoice", {method: "POST", body: JSON.stringify({listing_id: Number(listingId), service_code: code, promo_code: promoCode})});
+async function buy(listingId, code, useBalance = false) {
+  const r = await api("/api/payments/invoice", {method: "POST", body: JSON.stringify({listing_id: Number(listingId), service_code: code, promo_code: promoCode, use_balance: useBalance})});
+  if (r.paid) { toast("Готово: услуга включена"); $("#services").classList.add("hidden"); loadProfile(); return; }
   if (!tg?.openInvoice) { toast("Оплата открывается только внутри Telegram"); return; }
   tg.openInvoice(r.invoice_url, (status) => {
     $("#services").classList.add("hidden");
@@ -2285,13 +2306,190 @@ document.addEventListener("click", async (e) => {
 });
 $("#datingServices").onclick = showDatingCabinet;
 
+// ---------- кабинет компании ----------
+const CO_STATUS = {pending: ["⏳", "На проверке", "warn"], verified: ["✔", "Проверена", "ok"], rejected: ["❌", "Отклонена", "bad"], suspended: ["⏸", "Приостановлена", "bad"]};
+const CO_APP = {new: "Новый", viewed: "Просмотрен", invited: "Приглашён", rejected: "Отказ"};
+const coState = {id: null, tab: "overview"};
+function coInitial(name) { return esc((name || "?").trim().slice(0, 1).toUpperCase()); }
+async function showCompany(id) {
+  openSub("company");
+  const body = $("#subBody");
+  body.innerHTML = '<div class="skeleton"></div>';
+  let mine;
+  try { mine = await api("/api/company/mine"); } catch (e) { body.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
+  if (!mine.length) return renderCompanyIntro(body);
+  coState.id = id || (mine.some((c) => c.id === coState.id) ? coState.id : mine[0].id);
+  const cur = mine.find((c) => c.id === coState.id);
+  let ov;
+  try { ov = await api(`/api/company/${coState.id}`); } catch (e) { body.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
+  const [icon, stTitle, cls] = CO_STATUS[ov.status] || ["", ov.status, ""];
+  const alert = ov.status === "pending" ? '<div class="dalert"><b>Компания на проверке</b><span>Пока её проверяют, вы можете заполнить профиль и приготовить вакансии. Публиковать от имени компании можно после проверки; от себя — уже сейчас.</span></div>'
+    : ov.status === "rejected" ? `<div class="dalert bad"><b>Компанию не подтвердили</b><span>${esc(ov.note || "Проверьте данные во вкладке «Профиль» и сохраните: заявка уйдёт на проверку снова.")}</span></div>`
+    : ov.status === "suspended" ? `<div class="dalert bad"><b>Компания приостановлена</b><span>${esc(ov.note || "Объявления скрыты.")} Напишите в поддержку.</span></div>` : "";
+  const tabs = [["overview", "Обзор"], ["listings", "Объявления"], ["apps", `Отклики${ov.applications.new ? " (" + ov.applications.new + ")" : ""}`], ["team", "Команда"], ["profile", "Профиль"]];
+  if (ov.balance !== undefined) tabs.push(["money", "Баланс"]);
+  body.innerHTML = `<div class="dcab">
+    ${mine.length > 1 ? `<div class="chips">${mine.map((c) => `<button class="chip ${c.id === coState.id ? "active" : ""}" data-cosw="${c.id}">${esc(c.name)}</button>`).join("")}</div>` : ""}
+    <article class="dcard2 co-head"><div class="co-ava">${coInitial(ov.name)}</div>
+      <div style="flex:1;min-width:0"><h3 style="margin:0">${esc(ov.name)}</h3><p class="muted">${esc(ov.city || "")} · ваша роль: ${esc(ov.role_title)}</p>
+      <span class="dpill ${cls}">${icon} ${stTitle}</span></div></article>
+    ${alert}
+    <div class="dcab-tiles"><div class="dcab-tile"><b>${ov.listings.active}</b><span>активных</span></div>
+      <div class="dcab-tile"><b>${ov.applications.new}</b><span>новых откликов</span></div>
+      <div class="dcab-tile"><b>${ov.views}</b><span>просмотров</span></div>
+      <div class="dcab-tile"><b>${ov.members}</b><span>в команде</span></div></div>
+    <div class="dcab-tabs">${tabs.map(([k, n]) => `<button class="${coState.tab === k ? "active" : ""}" data-cotab="${k}">${n}</button>`).join("")}</div>
+    <div id="coPane"></div></div>`;
+  body.querySelectorAll("[data-cosw]").forEach((b) => { b.onclick = () => { coState.tab = "overview"; showCompany(Number(b.dataset.cosw)); }; });
+  body.querySelectorAll("[data-cotab]").forEach((b) => { b.onclick = () => {
+    coState.tab = b.dataset.cotab;
+    body.querySelectorAll(".dcab-tabs button").forEach((x) => x.classList.toggle("active", x === b));
+    renderCoPane(ov);
+  }; });
+  renderCoPane(ov);
+}
+function renderCompanyIntro(body) {
+  body.innerHTML = `<div class="dcab"><article class="dcard2"><h3>🏢 Кабинет компании</h3>
+    <p>Публикуйте вакансии и объявления от имени компании, принимайте отклики всей командой и платите за продвижение с отдельного баланса компании.</p>
+    <p class="muted">Личный аккаунт остаётся отдельным: можно публиковать и от компании, и от себя.</p>
+    <div class="actions"><button id="coNew">Создать компанию</button></div></article>
+    <article class="dcard2"><h3>Есть приглашение?</h3><div class="actions"><input id="coCode" placeholder="Код приглашения" style="flex:1"><button class="secondary" id="coJoin">Войти в команду</button></div></article></div>`;
+  $("#coNew").onclick = () => renderCompanyForm(body, null);
+  $("#coJoin").onclick = () => joinCompany($("#coCode").value.trim());
+}
+async function joinCompany(code) {
+  if (!code) { toast("Введите код"); return; }
+  try { const c = await api("/api/company/join", {method: "POST", body: JSON.stringify({code})}); toast("Вы в команде: " + c.name); coState.id = c.id; coState.tab = "overview"; showCompany(); }
+  catch (err) { toast(err.message); }
+}
+function renderCompanyForm(body, ov) {
+  body.innerHTML = `<div class="dcab"><form id="coForm" class="dform"><fieldset class="fsec"><legend>🏢 ${ov ? "Профиль компании" : "Новая компания"}</legend>
+    <label>Название<input name="name" required minlength="2" maxlength="120" value="${esc(ov?.name || "")}"></label>
+    <label>Регистрационный номер (사업자등록번호)<small class="muted"> видят только модераторы и админы компании</small><input name="reg_no" required minlength="3" maxlength="80" value="${esc(ov?.reg_no || "")}"></label>
+    <label>Город<input name="city" maxlength="100" value="${esc(ov?.city || "")}"></label>
+    <label>Сайт<input name="website" maxlength="200" placeholder="https://" value="${esc(ov?.website || "")}"></label>
+    <label>О компании<textarea name="description" rows="4" maxlength="1500">${esc(ov?.description || "")}</textarea></label></fieldset>
+    <p class="muted">${ov ? "Если изменить регистрационный номер у проверенной компании, она вернётся на проверку." : "После создания компанию проверит модератор. Пока идёт проверка, публиковать можно от себя."}</p>
+    <div class="actions"><button class="submit" type="submit">Сохранить</button><button class="secondary" type="button" id="coCancel">Отмена</button></div></form></div>`;
+  $("#coCancel").onclick = () => showCompany();
+  $("#coForm").onsubmit = async (e) => {
+    e.preventDefault();
+    const data = Object.fromEntries(new FormData(e.target));
+    try {
+      if (ov) await api(`/api/company/${ov.id}`, {method: "PUT", body: JSON.stringify(data)});
+      else { const c = await api("/api/company", {method: "POST", body: JSON.stringify(data)}); coState.id = c.id; coState.tab = "overview"; }
+      toast(ov ? "Сохранено" : "Компания создана и отправлена на проверку"); showCompany();
+    } catch (err) { toast(err.message); }
+  };
+}
+async function renderCoPane(ov) {
+  const pane = $("#coPane");
+  const canWrite = ov.role !== "viewer", team = ov.role === "owner" || ov.role === "admin";
+  pane.innerHTML = '<div class="skeleton"></div>';
+  try {
+    if (coState.tab === "overview") {
+      pane.innerHTML = `<article class="dcard2"><h3>Что дальше</h3>
+        ${ov.status === "verified" && canWrite ? '<div class="actions"><button id="coPost">➕ Опубликовать вакансию от компании</button></div>' : '<p class="muted">Публикация от компании откроется после проверки.</p>'}
+        ${ov.status === "verified" ? '<div class="actions"><button class="secondary" id="coPublic">Публичная страница компании</button></div>' : ""}</article>
+        <article class="dcard2"><h3>Объявления</h3><p>Активных: <b>${ov.listings.active}</b> · на проверке: <b>${ov.listings.pending}</b> · остальные: <b>${ov.listings.other}</b></p>
+        <p class="muted">Откликов всего: ${ov.applications.total}. В команде ${ov.members} из ${ov.limits.members}.</p>
+        <div class="actions"><button class="secondary" data-cotab-go="listings">Все объявления</button><button class="secondary" data-cotab-go="apps">Отклики</button></div></article>`;
+      if ($("#coPost")) $("#coPost").onclick = async () => { postAsDefault = ov.id; $("#addSheet").classList.add("hidden"); await openAdd("job"); };
+      if ($("#coPublic")) $("#coPublic").onclick = () => showPublicCompany(ov.id);
+    }
+    if (coState.tab === "listings") {
+      const rows = await api(`/api/company/${ov.id}/listings`);
+      const ST = {approved: "опубликовано", pending: "на проверке", draft: "черновик", rejected: "отклонено", needs_fix: "на доработке", hidden: "скрыто", expired: "срок вышел", closed: "закрыто", sold: "закрыто"};
+      pane.innerHTML = rows.length ? rows.map((x) => `<article class="dcard2"><div class="dcard2-head"><h3 style="margin:0">${esc(x.title)}</h3><span class="muted">${esc(ST[x.status] || x.status)}</span></div>
+        <p class="muted">📍 ${esc(x.city)} · 👁 ${x.views || 0}${x.applications ? ` · ✉ ${x.applications.total}${x.applications.new ? " (новых " + x.applications.new + ")" : ""}` : ""} · ${esc(x.posted_by)}</p>
+        <div class="actions"><button class="secondary" data-open="${x.id}">Открыть</button>${x.category === "job" ? `<button class="secondary" data-coapps="${x.id}" data-title="${esc(x.title)}">Отклики</button>` : ""}
+        ${canWrite && x.status === "approved" && ov.role !== "recruiter" ? `<button data-coboost="${x.id}">Продвинуть</button>` : ""}
+        ${canWrite && ["approved", "expired"].includes(x.status) ? `<button class="secondary" data-corenew="${x.id}">Продлить</button>` : ""}</div></article>`).join("")
+        : '<div class="empty">Объявлений от компании пока нет.</div>';
+    }
+    if (coState.tab === "apps") {
+      const rows = await api(`/api/company/${ov.id}/applications`);
+      pane.innerHTML = rows.length ? rows.map((a) => `<article class="dcard2" data-coapp="${a.id}"><div class="dcard2-head"><h3 style="margin:0">${esc(a.name || "Соискатель")}</h3><span class="muted">${esc(CO_APP[a.status] || a.status)}</span></div>
+        <p class="muted">на «${esc(a.listing_title)}» · ${esc(fmtDate(a.created_at))}</p><p><b>${esc(a.contact)}</b>${a.visa ? " · виза " + esc(a.visa) : ""}${a.city ? " · " + esc(a.city) : ""}</p>
+        ${a.message ? `<p>${esc(a.message)}</p>` : ""}${a.reply ? `<p class="muted">Ответ: ${esc(a.reply)}</p>` : ""}
+        ${a.can_answer ? `<div class="actions"><button data-costatus="invited" data-id="${a.id}">Пригласить</button><button class="secondary" data-costatus="rejected" data-id="${a.id}">Отказать</button></div>` : ""}</article>`).join("")
+        : '<div class="empty">Откликов пока нет.</div>';
+    }
+    if (coState.tab === "team") {
+      const t = await api(`/api/company/${ov.id}/team`);
+      pane.innerHTML = `<article class="dcard2"><h3>Команда</h3>${t.members.map((m) => `<div class="drun"><span>${esc(m.name)}${m.me ? " (вы)" : ""} · <b>${esc(m.role_title)}</b></span>
+        <span>${t.can_edit && m.role !== "owner" ? `<select data-corole="${esc(m.tg_id)}">${t.roles.map((r) => `<option value="${r.key}" ${r.key === m.role ? "selected" : ""}>${esc(r.title)}</option>`).join("")}</select>
+          <button class="link" data-coremove="${esc(m.tg_id)}">убрать</button>` : m.me && m.role !== "owner" ? `<button class="link" data-coremove="${esc(m.tg_id)}">выйти</button>` : ""}</span></div>`).join("")}</article>
+        ${t.can_edit ? `<article class="dcard2"><h3>Пригласить</h3><p class="muted">Ссылка действует 7 дней и подходит одному человеку.</p>
+          <div class="actions"><select id="coInvRole">${t.roles.map((r) => `<option value="${r.key}" ${r.key === "recruiter" ? "selected" : ""}>${esc(r.title)}</option>`).join("")}</select><button id="coInv">Создать приглашение</button></div><div id="coInvOut"></div></article>` : ""}
+        <article class="dcard2"><h3>Роли</h3><p class="muted"><b>Владелец</b> — всё. <b>Админ</b> — команда, профиль, деньги. <b>Рекрутёр</b> — объявления и отклики. <b>Наблюдатель</b> — только смотрит.</p></article>`;
+      if ($("#coInv")) $("#coInv").onclick = async () => {
+        try {
+          const r = await api(`/api/company/${ov.id}/invite`, {method: "POST", body: JSON.stringify({role: $("#coInvRole").value})});
+          $("#coInvOut").innerHTML = `<p>Код: <b>${esc(r.code)}</b></p><p class="muted">${esc(r.link)}</p><div class="actions"><button class="secondary" id="coCopy">Скопировать ссылку</button></div>`;
+          $("#coCopy").onclick = async () => { try { await navigator.clipboard.writeText(r.link); toast("Скопировано"); } catch (e) { toast(r.link); } };
+        } catch (err) { toast(err.message); }
+      };
+    }
+    if (coState.tab === "profile") {
+      if (!team) { pane.innerHTML = `<article class="dcard2"><h3>${esc(ov.name)}</h3><p>${esc(ov.description || "Описания нет")}</p><p class="muted">${esc(ov.city || "")} ${esc(ov.website || "")}</p><p class="muted">Менять профиль могут владелец и админы.</p></article>`; return; }
+      renderCompanyForm($("#coPane"), ov);
+    }
+    if (coState.tab === "money") {
+      const b = await api(`/api/company/${ov.id}/balance`);
+      pane.innerHTML = `<article class="dcard2"><div class="dcard2-head"><h3>Баланс компании</h3><b>${b.balance} ⭐</b></div><p class="muted">${esc(b.note)}</p>
+        <p class="muted">Платить с баланса за продвижение объявлений компании могут владелец и админы. Личные балансы сотрудников сюда не попадают.</p></article>
+        <article class="dcard2"><h3>Движение</h3>${b.history.length ? b.history.map((h) => `<div class="drun"><span>${esc(h.service)} · ${esc(fmtDate(h.at).slice(0, 10))}</span><span>${h.stars ? h.stars + " ⭐" : ""}${h.from_balance ? " + " + h.from_balance + " с баланса" : ""} · ${esc(h.status)}</span></div>`).join("") : '<p class="muted">Платежей пока нет.</p>'}</article>`;
+    }
+  } catch (err) { pane.innerHTML = `<div class="empty">${esc(err.message)}</div>`; }
+}
+async function showPublicCompany(id) {
+  SUB_TITLES.copublic = "Компания";
+  openSub("copublic");
+  const body = $("#subBody");
+  body.innerHTML = '<div class="skeleton"></div>';
+  try {
+    const c = await api(`/api/companies/${id}`, {quiet: true});
+    body.innerHTML = `<div class="dcab"><article class="dcard2 co-head"><div class="co-ava">${coInitial(c.name)}</div><div style="flex:1"><h3 style="margin:0">${esc(c.name)} <span class="dpill ok">✔ Проверена</span></h3>
+      <p class="muted">${esc(c.city || "")} · на сайте с ${esc(c.since)}</p></div></article>
+      ${c.description ? `<article class="dcard2"><p>${esc(c.description)}</p>${c.website ? `<p><a href="${esc(c.website)}" target="_blank" rel="noopener">${esc(c.website)}</a></p>` : ""}</article>` : ""}
+      <h3 class="muted" style="margin:6px 4px">Объявления компании (${c.listings.length})</h3><div class="listings">${c.listings.map(listingCard).join("") || '<div class="empty">Сейчас открытых вакансий нет</div>'}</div></div>`;
+  } catch (err) { body.innerHTML = `<div class="empty">${esc(err.message)}</div>`; }
+}
+document.addEventListener("click", async (e) => {
+  const go = e.target.closest("[data-cotab-go]"), apps = e.target.closest("[data-coapps]"), boost = e.target.closest("[data-coboost]"),
+    renew = e.target.closest("[data-corenew]"), st = e.target.closest("[data-costatus]"), rm = e.target.closest("[data-coremove]"), pub = e.target.closest("[data-copage]");
+  try {
+    if (go) { coState.tab = go.dataset.cotabGo; showCompany(coState.id); }
+    if (apps) { ownItems[apps.dataset.coapps] = ownItems[apps.dataset.coapps] || {title: apps.dataset.title}; showApplicants(apps.dataset.coapps); }
+    if (boost) openServices(boost.dataset.coboost);
+    if (renew) { await api(`/api/listings/${renew.dataset.corenew}/renew`, {method: "POST"}); toast("Продлено"); renderCoPane(await api(`/api/company/${coState.id}`)); }
+    if (st) {
+      const reply = st.dataset.costatus === "rejected" ? "" : "";
+      await api(`/api/applications/${st.dataset.id}`, {method: "PUT", body: JSON.stringify({status: st.dataset.costatus, reply})});
+      toast(st.dataset.costatus === "invited" ? "Соискатель приглашён" : "Отказ отправлен"); renderCoPane(await api(`/api/company/${coState.id}`));
+    }
+    if (rm) {
+      if (!confirm("Убрать участника из команды? Его доступ закроется сразу.")) return;
+      await api(`/api/company/${coState.id}/team/${rm.dataset.coremove}`, {method: "DELETE"});
+      toast("Готово"); showCompany(coState.id);
+    }
+  } catch (err) { toast(err.message); }
+});
+document.addEventListener("change", async (e) => {
+  const r = e.target.closest("[data-corole]");
+  if (!r) return;
+  try { await api(`/api/company/${coState.id}/team/${r.dataset.corole}`, {method: "PUT", body: JSON.stringify({role: r.value})}); toast("Роль изменена"); }
+  catch (err) { toast(err.message); showCompany(coState.id); }
+});
+
 // ---------- общий обработчик нажатий ----------
 document.addEventListener("click", async (e) => {
   const tgLink = e.target.closest("[data-tglink]");
   if (tgLink && tg?.openTelegramLink) { e.preventDefault(); tg.openTelegramLink(tgLink.href); return; }
 
   const buyBtn = e.target.closest("[data-buy]");
-  if (buyBtn) { try { await buy(buyBtn.dataset.listing, buyBtn.dataset.buy); } catch (err) { toast(err.message); } return; }
+  if (buyBtn) { try { await buy(buyBtn.dataset.listing, buyBtn.dataset.buy, Boolean(buyBtn.dataset.bal)); } catch (err) { toast(err.message); } return; }
 
   const btn = e.target.closest("[data-act]");
   if (btn) {
@@ -2593,6 +2791,8 @@ function openFromLink() {
   if (["job", "housing", "marketplace"].includes(section)) { filters.category = section; return false; }
   if (section === "cabinet") { setTimeout(() => $("#myDatingBtn").onclick(), 700); return true; }      // кабинет знакомств из бота
   if (["dating", "community", "guide"].includes(section)) { showView(section); return true; }
+  const joinCode = params.get("join");
+  if (joinCode) { setTimeout(async () => { if (await requireConsent()) { openSub("company"); joinCompany(joinCode); } }, 900); return true; }
   const listing = params.get("listing");
   if (listing && /^\d+$/.test(listing)) { openDetail(listing, false); return true; }
   return false;
