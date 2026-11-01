@@ -1939,7 +1939,8 @@ async function loadExchange() {
     <div class="row"><button class="act ok" id="exSave">💾 Сохранить курс</button></div></div>
     <div class="card"><h3>Что увидят люди</h3><table><tr><th>KH</th><th>Заплатят звёздами</th></tr>${[10, 50, 100, 500, 1000, 10000].map((n) => `<tr><td>${n} KH</td><td>${Math.max(1, Math.ceil(n / x.kh_per_star - 1e-9))} ⭐</td></tr>`).join("")}</table></div>
     <div class="card"><h3>В обращении</h3><p>У людей: <b>${fmtN(x.in_circulation.people)} KH</b> · у компаний: <b>${fmtN(x.in_circulation.companies)} KH</b> · всего <b>${fmtN(x.in_circulation.total)} KH</b></p>
-      <p class="muted">В этом месяце: пополнений ${x.month.topups}, получено ${fmtN(x.month.stars)} ⭐, выдано ${fmtN(x.month.kh)} KH.</p></div>`;
+      <p class="muted">В этом месяце: пополнений ${x.month.topups}, получено ${fmtN(x.month.stars)} ⭐, выдано ${fmtN(x.month.kh)} KH.</p></div>
+    <div class="card"><h3>Потрачено KH в этом месяце: ${fmtN(x.spent_month.kh)}</h3>${x.spent_month.by_service.length ? `<table><tr><th>Услуга</th><th>Покупок</th><th>KH</th></tr>${x.spent_month.by_service.map((r) => `<tr><td>${esc(r.code)}</td><td>${r.n}</td><td>${fmtN(r.kh)}</td></tr>`).join("")}</table>` : '<p class="muted">Пока нет покупок за KH с баланса.</p>'}</div>`;
 }
 $("#main").addEventListener("click", async (e) => {
   if (e.target.id !== "exSave") return;

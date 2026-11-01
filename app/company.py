@@ -221,7 +221,8 @@ def company_overview(company_id: int, user_id: str = Depends(writer), db: Sessio
             "listings": {"total": len(ids), "active": by_status.get("approved", 0), "pending": by_status.get("pending", 0),
                          "other": len(ids) - by_status.get("approved", 0) - by_status.get("pending", 0)},
             "applications": {"new": new_apps, "total": all_apps}, "views": int(views), "members": members,
-            "limits": {"members": rules.val("company.max_members")}}
+            "limits": {"members": rules.val("company.max_members") + __import__("app.companypro", fromlist=["x"]).extra_members(db, c.id)},
+            "pro": __import__("app.companypro", fromlist=["x"]).info(db, c.id)}
 
 
 @router.put("/api/company/{company_id}")
@@ -292,9 +293,11 @@ def invite(company_id: int, payload: InviteIn, user_id: str = Depends(writer), d
     c, role = _company(db, company_id, user_id, TEAM)
     if payload.role == "admin" and role != "owner":
         raise HTTPException(403, "Назначить админа может только владелец")
+    from app import companypro
     count = db.scalar(select(func.count()).select_from(CompanyMember).where(CompanyMember.company_id == c.id)) or 0
-    if count >= rules.val("company.max_members"):
-        raise HTTPException(409, f"В команде не больше {rules.val('company.max_members')} человек")
+    cap = rules.val("company.max_members") + companypro.extra_members(db, c.id)
+    if count >= cap:
+        raise HTTPException(409, f"В команде не больше {cap} человек")
     code = secrets.token_urlsafe(10)
     db.add(CompanyInvite(code=code, company_id=c.id, role=payload.role, expires_at=now() + dt.timedelta(days=7)))
     log_action(db, user_id, "company.invite", "company", c.id, f"роль {payload.role}")
@@ -318,7 +321,8 @@ def join(payload: JoinIn, user_id: str = Depends(writer), db: Session = Depends(
     if role_of(db, c.id, user_id):
         raise HTTPException(409, "Вы уже в этой компании")
     count = db.scalar(select(func.count()).select_from(CompanyMember).where(CompanyMember.company_id == c.id)) or 0
-    if count >= rules.val("company.max_members"):
+    from app import companypro
+    if count >= rules.val("company.max_members") + companypro.extra_members(db, c.id):
         raise HTTPException(409, "В команде нет мест")
     db.add(CompanyMember(company_id=c.id, tg_id=user_id, role=inv.role))
     inv.used_by = user_id
@@ -481,6 +485,7 @@ def company_balance(company_id: int, user_id: str = Depends(writer), db: Session
     rows = db.scalars(select(Payment).where(Payment.company_id == c.id).order_by(Payment.id.desc()).limit(50)).all()
     titles = {x.code: x.title for x in db.scalars(select(Pricing)).all()}
     titles["topup"] = "Пополнение баланса"
+    titles["company_pro"] = "Подписка «Про»"
     listings = {x.id: x.title for x in db.scalars(select(Listing).where(Listing.id.in_([p.listing_id for p in rows if p.listing_id] or [0]))).all()}
     out = []
     for p in rows:
@@ -504,7 +509,7 @@ def public_company(company_id: int, db: Session = Depends(get_db)):
     rows = db.scalars(select(Listing).where(Listing.company_id == c.id, Listing.status == "approved").order_by(Listing.id.desc()).limit(50)).all()
     live = [x for x in rows if x.expires_at is None or aware(x.expires_at) > now()]
     return {"id": c.id, "name": c.name, "logo": photos.url(c.logo_key) if c.logo_key else None, "description": c.description, "website": c.website, "city": c.city, "verified": True,
-            "since": c.created_at.date().isoformat(), "listings": [o.model_dump(mode="json") for o in catalog.with_promo(db, live)],
+            "pro": __import__("app.companypro", fromlist=["x"]).is_pro(db, c.id), "since": c.created_at.date().isoformat(), "listings": [o.model_dump(mode="json") for o in catalog.with_promo(db, live)],
             **__import__("app.companypage", fromlist=["public_extra"]).public_extra(db, c.id)}
 
 

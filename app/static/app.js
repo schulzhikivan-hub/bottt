@@ -2646,6 +2646,18 @@ async function renderCoPane(ov) {
         <article class="dcard2"><h3>Объявления</h3><p>Активных: <b>${ov.listings.active}</b> · на проверке: <b>${ov.listings.pending}</b> · остальные: <b>${ov.listings.other}</b></p>
         <p class="muted">Откликов всего: ${ov.applications.total}. В команде ${ov.members} из ${ov.limits.members}.</p>
         <div class="actions"><button class="secondary" data-cotab-go="listings">Все объявления</button><button class="secondary" data-cotab-go="apps">Отклики</button></div></article>`;
+      if (ov.pro && ov.balance !== undefined) {
+        pane.insertAdjacentHTML("beforeend", `<article class="dcard2"><div class="dcard2-head"><h3>Подписка «Про»</h3><b>${ov.pro.active ? "до " + esc(fmtDate(ov.pro.until).split(",")[0]) : "не подключена"}</b></div>
+          <ul class="perks">${ov.pro.perks.map((t) => `<li>${esc(t)}</li>`).join("")}</ul>
+          <div class="actions"><button id="coPro">${ov.pro.active ? "Продлить" : "Подключить"} на ${ov.pro.days} дн. · ${ov.pro.price} KH</button></div>
+          <p class="muted">Оплата с баланса компании (${ov.balance} KH). Пополнить: вкладка «Баланс».</p></article>`);
+        $("#coPro").onclick = async () => {
+          try {
+            if (!(await confirmDialog(`Списать ${ov.pro.price} KH с баланса компании за ${ov.pro.days} дней «Про»?`))) return;
+            await api(`/api/company/${ov.id}/pro`, {method: "POST"}); toast("Подписка «Про» подключена"); showCompany(ov.id);
+          } catch (err) { toast(err.message); }
+        };
+      }
       if ($("#coPost")) $("#coPost").onclick = async () => { postAsCompany = {id: ov.id, name: ov.name}; $("#addSheet").classList.remove("hidden"); loadTemplates(); };
       if ($("#coPublic")) $("#coPublic").onclick = () => showPublicCompany(ov.id);
     }
@@ -2742,7 +2754,7 @@ async function showPublicCompany(id) {
       pg.kakao ? `KakaoTalk: ${esc(pg.kakao)}` : "", c.website ? `<a href="${esc(c.website)}" target="_blank" rel="noopener">Сайт</a>` : ""].filter(Boolean);
     let state = {can: false};
     try { state = await api(`/api/companies/${id}/review-state`, {quiet: true}); } catch (e) { /* гость: отзыв не оставить */ }
-    body.innerHTML = `<div class="dcab"><article class="dcard2 co-head">${coAvatar(c)}<div style="flex:1"><h3 style="margin:0">${esc(c.name)} <span class="dpill ok">✔ Проверена</span></h3>
+    body.innerHTML = `<div class="dcab"><article class="dcard2 co-head">${coAvatar(c)}<div style="flex:1"><h3 style="margin:0">${esc(c.name)} <span class="dpill ok">✔ Проверена</span>${c.pro ? ' <span class="dpill pro">PRO</span>' : ""}</h3>
       ${pg.tagline ? `<p>${esc(pg.tagline)}</p>` : ""}<p class="muted">${esc(c.city || "")} · на сайте с ${esc(c.since)}${c.reviews?.count ? ` · ★ ${c.reviews.rating} (${c.reviews.count})` : ""}</p></div></article>
       ${pg.benefits?.length ? `<div class="chips">${pg.benefits.map((k) => `<span class="chip">✔ ${esc(c.benefits_titles[k] || k)}</span>`).join("")}</div>` : ""}
       ${c.description || links.length || pg.address || pg.hours ? `<article class="dcard2">${c.description ? `<p>${esc(c.description)}</p>` : ""}${pg.address ? `<p>📍 ${esc(pg.address)}</p>` : ""}${pg.hours ? `<p>🕘 ${esc(pg.hours)}</p>` : ""}${links.length ? `<p>${links.join(" · ")}</p>` : ""}</article>` : ""}

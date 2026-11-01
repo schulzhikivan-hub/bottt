@@ -32,7 +32,7 @@ from app.guard import rate_limit, check_text, duplicate_note, notify_user
 from app import admin_ops as ops
 from app import catalog
 from app import photos, applications, searches, inbox, promos, adminx, observe, site
-from app import geo, reviews, resumes, referrals, support, extras, adminplus, adminview, datingsvc, ads, rules, adminreports, account, refunds, blocks, reportsflow, batches, security, duty, searchdict, searchlog, views, adminsys, adminmanage, adminedit, listingtools, exchange, pipeline, listingtemplates, chatextras, companypage
+from app import geo, reviews, resumes, referrals, support, extras, adminplus, adminview, datingsvc, ads, rules, adminreports, account, refunds, blocks, reportsflow, batches, security, duty, searchdict, searchlog, views, adminsys, adminmanage, adminedit, listingtools, exchange, pipeline, listingtemplates, chatextras, companypage, companypro
 from app import fields as listing_fields
 from app.users import get_or_create_user, writer, is_blocked_pair
 from app.models import Admin, AuditLog, ConvHide, DatingProfile, TypingMark
@@ -97,6 +97,7 @@ app.include_router(pipeline.router)
 app.include_router(listingtemplates.router)
 app.include_router(chatextras.router)
 app.include_router(companypage.router)
+app.include_router(companypro.router)
 app.include_router(listing_fields.router)
 STATIC = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
@@ -391,7 +392,8 @@ def create_listing(payload: ListingCreate, user_id: str = Depends(writer), db: S
             raise HTTPException(409, "Компания ещё не проверена: пока публикуйте от себя")
         active = db.scalar(select(func.count()).select_from(Listing).where(
             Listing.company_id == co.id, Listing.category == payload.category, Listing.status.in_(["draft", "pending", "approved"])))
-        limit = EMPLOYER_ACTIVE_JOBS if payload.category == "job" else 3 * MAX_ACTIVE_PER_CATEGORY
+        from app import companypro
+        limit = (EMPLOYER_ACTIVE_JOBS if payload.category == "job" else 3 * MAX_ACTIVE_PER_CATEGORY) * companypro.factor(db, co.id)
     else:
         active = db.scalar(
             select(func.count()).select_from(Listing).where(
@@ -826,7 +828,7 @@ def payment_receipt(payment_id: int, user_id: str = Depends(current_user_id), db
 def my_payments(user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
     rows = db.scalars(select(Payment).where(Payment.user_tg_id == user_id)
                       .order_by(desc(Payment.id)).limit(100)).all()
-    titles = {p.code: p.title for p in db.scalars(select(Pricing)).all()} | {payments.TOPUP_CODE: "Пополнение баланса"}
+    titles = {p.code: p.title for p in db.scalars(select(Pricing)).all()} | {payments.TOPUP_CODE: "Пополнение баланса", "company_pro": "Подписка «Про»"}
     return [{"id": p.id, "service": titles.get(p.service_code, p.service_code), "stars": p.stars,
              "status": p.status, "listing_id": p.listing_id, "charge_id": p.telegram_payment_charge_id,
              "promo": p.promo_code, "number": f"KH-{p.id:06d}", "note": p.note, "gift": p.status == "granted",

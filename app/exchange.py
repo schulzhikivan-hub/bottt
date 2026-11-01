@@ -33,7 +33,11 @@ def admin_exchange(actor: str = Depends(staff(*FIN)), db: Session = Depends(get_
     since = now().replace(hour=0, minute=0, second=0, microsecond=0)
     rows = db.scalars(select(Payment).where(Payment.service_code == payments.TOPUP_CODE, Payment.status == "paid",
                                             Payment.paid_at >= since.replace(day=1))).all()
-    return {**public_view(), "per_100_stars": rules.val("kh.per_100_stars"), "in_circulation": {"people": int(people), "companies": int(companies),
+    spent_rows = db.execute(select(Payment.service_code, func.coalesce(func.sum(Payment.balance_used), 0), func.count()).where(
+        Payment.status == "paid", Payment.service_code != payments.TOPUP_CODE, Payment.paid_at >= since.replace(day=1), Payment.balance_used > 0)
+        .group_by(Payment.service_code).order_by(func.sum(Payment.balance_used).desc())).all()
+    spent = {"kh": int(sum(r[1] for r in spent_rows)), "by_service": [{"code": r[0], "kh": int(r[1]), "n": r[2]} for r in spent_rows[:8]]}
+    return {**public_view(), "spent_month": spent, "per_100_stars": rules.val("kh.per_100_stars"), "in_circulation": {"people": int(people), "companies": int(companies),
             "total": int(people + companies)},
             "month": {"topups": len(rows), "stars": sum(p.stars for p in rows), "kh": sum(p.list_stars or p.stars for p in rows)}}
 

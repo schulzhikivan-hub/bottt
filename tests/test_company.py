@@ -322,3 +322,21 @@ def test_public_page_extras_and_company_reviews(client):
     assert client.post(f"/api/company/{cid}/reviews/{rid}/reply", json={"text": "Спасибо!"}, headers=as_user(1)).status_code == 200
     assert client.post(f"/api/admin/company-reviews/{rid}/hide", headers=ADMIN).status_code == 200
     assert client.get(f"/api/companies/{cid}").json()["reviews"]["count"] == 0
+
+
+def test_company_pro_is_paid_from_the_company_balance_and_lifts_limits(client):
+    cid = verified_company(client)
+    team_member(client, cid, 2, "recruiter")
+    assert client.post(f"/api/company/{cid}/pro", headers=as_user(2)).status_code == 403                  # money: owner and admins
+    r = client.post(f"/api/company/{cid}/pro", headers=as_user(1))
+    assert r.status_code == 400 and "Недостаточно KH" in r.json()["detail"]
+    assert client.get(f"/api/company/{cid}/pro", headers=as_user(1)).json()["active"] is False
+    client.post(f"/api/admin/companies/{cid}/credit", json={"stars": 1200}, headers=ADMIN)
+    assert client.post(f"/api/company/{cid}/pro", headers=as_user(1)).json()["active"] is True
+    assert client.post(f"/api/company/{cid}/pro", headers=as_user(1)).json()["active"] is True              # extended
+    with SessionLocal() as db:
+        assert db.get(co.Company, cid).balance_stars == 200                                                  # 1200 - 2 × 500
+    ov = client.get(f"/api/company/{cid}", headers=as_user(1)).json()
+    assert ov["pro"]["active"] and ov["limits"]["members"] == 5 + 10
+    assert client.get(f"/api/companies/{cid}").json()["pro"] is True
+    assert any(x["service"] == "Подписка «Про»" for x in client.get(f"/api/company/{cid}/balance", headers=as_user(1)).json()["history"])

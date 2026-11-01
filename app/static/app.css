@@ -780,3 +780,6 @@ img.co-ava{object-fit:cover}
 /* кабинет знакомств: регион и город по одному в строке: подписи не обрезаются */
 #datingGeo{grid-template-columns:1fr !important}
 .fsec select{text-overflow:ellipsis}
+
+.dpill.pro{background:linear-gradient(120deg,#e8910c,#f2b705);color:#1b2540}
+.perks{margin:6px 0;padding-left:18px;color:var(--hint);font-size:13.5px}
