@@ -55,3 +55,43 @@ def set_exchange(p: ExchangeIn, actor: str = Depends(staff(*ADM)), db: Session =
     rules.set_value(db, "kh.balance_only", p.balance_only, actor)
     rules.reset_cache()
     return admin_exchange(actor, db)
+
+
+def _series(db: Session, days: int) -> list[dict]:
+    import datetime as dt
+    start = (now() - dt.timedelta(days=days - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    rows = db.scalars(select(Payment).where(Payment.status == "paid", Payment.paid_at >= start)).all()
+    out = {(start + dt.timedelta(days=i)).date().isoformat(): {"day": (start + dt.timedelta(days=i)).date().isoformat(), "stars_in": 0, "kh_bought": 0,
+                                                              "kh_spent": 0, "purchases": 0} for i in range(days)}
+    for p in rows:
+        d = out.get(p.paid_at.date().isoformat())
+        if d is None:
+            continue
+        if p.service_code == payments.TOPUP_CODE:
+            d["stars_in"] += p.stars or 0
+            d["kh_bought"] += p.list_stars or p.stars or 0
+        elif (p.balance_used or 0) > 0:
+            d["kh_spent"] += p.balance_used
+            d["purchases"] += 1
+    return list(out.values())
+
+
+@router.get("/api/admin/exchange/report")
+def report(days: int = 30, actor: str = Depends(staff(*FIN)), db: Session = Depends(get_db)):
+    """Day by day: Stars received, KH bought, KH spent on services (a picture of the KH economy)."""
+    days = max(7, min(days, 180))
+    rows = _series(db, days)
+    return {"days": rows, "total": {k: sum(r[k] for r in rows) for k in ("stars_in", "kh_bought", "kh_spent", "purchases")}}
+
+
+@router.get("/api/admin/exchange/report.csv")
+def report_csv(days: int = 90, actor: str = Depends(staff(*FIN)), db: Session = Depends(get_db)):
+    import csv
+    import io
+    from fastapi.responses import Response
+    buf = io.StringIO()
+    w = csv.writer(buf, delimiter=";")
+    w.writerow(["День", "Получено звёзд", "Куплено KH", "Потрачено KH", "Покупок услуг"])
+    for r in _series(db, max(7, min(days, 365))):
+        w.writerow([r["day"], r["stars_in"], r["kh_bought"], r["kh_spent"], r["purchases"]])
+    return Response("﻿" + buf.getvalue(), media_type="text/csv; charset=utf-8", headers={"Content-Disposition": 'attachment; filename="kh-report.csv"'})

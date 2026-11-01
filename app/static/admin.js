@@ -1930,6 +1930,7 @@ else if (tgApp?.initData) autoLogin();
 // ---- обменник: звёзды Telegram → KH (валюта сайта) ----
 async function loadExchange() {
   const x = await api("/api/admin/exchange");
+  const rep = await api("/api/admin/exchange/report?days=30").catch(() => null);
   const rate = x.per_100_stars / 100;
   $("#main").innerHTML = `<div class="card"><h3>Обменник KH</h3>
     <p class="muted">KH — валюта сайта: баланс людей и компаний и цены услуг считаются в KH. Звёзды Telegram — способ купить KH.</p>
@@ -1940,9 +1941,16 @@ async function loadExchange() {
     <div class="card"><h3>Что увидят люди</h3><table><tr><th>KH</th><th>Заплатят звёздами</th></tr>${[10, 50, 100, 500, 1000, 10000].map((n) => `<tr><td>${n} KH</td><td>${Math.max(1, Math.ceil(n / x.kh_per_star - 1e-9))} ⭐</td></tr>`).join("")}</table></div>
     <div class="card"><h3>В обращении</h3><p>У людей: <b>${fmtN(x.in_circulation.people)} KH</b> · у компаний: <b>${fmtN(x.in_circulation.companies)} KH</b> · всего <b>${fmtN(x.in_circulation.total)} KH</b></p>
       <p class="muted">В этом месяце: пополнений ${x.month.topups}, получено ${fmtN(x.month.stars)} ⭐, выдано ${fmtN(x.month.kh)} KH.</p></div>
+    ${rep ? `<div class="card"><h3>Оборот KH за 30 дней</h3><p class="muted">Куплено ${fmtN(rep.total.kh_bought)} KH за ${fmtN(rep.total.stars_in)} ⭐ · потрачено ${fmtN(rep.total.kh_spent)} KH на ${rep.total.purchases} покупок</p>
+      <div class="kchart">${(() => { const peak = Math.max(1, ...rep.days.map((d) => Math.max(d.kh_bought, d.kh_spent))); return rep.days.map((d) => `<div class="kcol" title="${esc(d.day)}: куплено ${d.kh_bought}, потрачено ${d.kh_spent}"><i class="in" style="height:${Math.round(100 * d.kh_bought / peak)}%"></i><i class="out" style="height:${Math.round(100 * d.kh_spent / peak)}%"></i></div>`).join(""); })()}</div>
+      <p class="muted"><span class="dot in"></span> куплено KH · <span class="dot out"></span> потрачено KH</p><div class="row"><button class="act gray" id="exCsv">⬇ Выгрузка CSV за 90 дней</button></div></div>` : ""}
     <div class="card"><h3>Потрачено KH в этом месяце: ${fmtN(x.spent_month.kh)}</h3>${x.spent_month.by_service.length ? `<table><tr><th>Услуга</th><th>Покупок</th><th>KH</th></tr>${x.spent_month.by_service.map((r) => `<tr><td>${esc(r.code)}</td><td>${r.n}</td><td>${fmtN(r.kh)}</td></tr>`).join("")}</table>` : '<p class="muted">Пока нет покупок за KH с баланса.</p>'}</div>`;
 }
 $("#main").addEventListener("click", async (e) => {
+  if (e.target.id === "exCsv") {
+    const r = await fetch("/api/admin/exchange/report.csv?days=90", {headers: {"X-Admin-Session": session()}});
+    const a = document.createElement("a"); a.href = URL.createObjectURL(await r.blob()); a.download = "kh-report.csv"; a.click(); return;
+  }
   if (e.target.id !== "exSave") return;
   try {
     const per = Math.round(Number($("#exRate").value) * 100);

@@ -46,3 +46,11 @@ def test_own_quick_replies(client):
     assert client.get("/api/me/quick-replies", headers=as_user(2)).json() == []
     assert client.delete(f"/api/me/quick-replies/{r.json()['id']}", headers=as_user(2)).status_code == 404
     assert client.delete(f"/api/me/quick-replies/{r.json()['id']}", headers=as_user(1)).status_code == 200
+
+
+def test_chat_info_tells_the_company_and_a_listing_link_message_is_plain_text(client):
+    cid = chat(client, "Велосипед")
+    info = client.get(f"/api/conversations/{cid}/info", headers=as_user(1)).json()
+    assert info["company_id"] is None
+    r = client.post(f"/api/conversations/{cid}/messages", json={"text": "🔗 Объявление #1: Велосипед"}, headers=as_user(1))
+    assert r.status_code in (200, 201)

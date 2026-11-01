@@ -1022,6 +1022,7 @@ async function fillChatHeader(id) {
     if (currentChat !== id) return;
     $("#chatTitle").textContent = c.other_name;
     $("#chatAvatar").textContent = c.other_initial;
+    chatCompanyId = c.role === "seller" ? c.company_id : null;
     lastQuickArgs = [c.kind, c.role]; drawQuickReplies(c.kind, c.role);
     chatPinned = Boolean(c.pinned); $("#chatPin").textContent = chatPinned ? "📌 Открепить" : "📌 Закрепить";
     if (c.kind === "listing" && c.listing_id) {
@@ -1059,12 +1060,14 @@ $("#chatInput").addEventListener("input", syncSendButtons);
 const QUICK_BUYER = ["Здравствуйте! Ещё актуально?", "Когда можно посмотреть?", "Можно ли снизить цену?", "Спасибо, я подумаю", "Где вы находитесь?"];
 const QUICK_SELLER = ["Да, актуально", "Здравствуйте! Чем помочь?", "Приезжайте, адрес пришлю", "Цена окончательная", "Уже продано, извините"];
 let quickSet = QUICK_BUYER;
-let ownReplies = [];
+let ownReplies = [], chatCompanyId = null;
 async function drawQuickReplies(kind = "listing", role = "buyer") {
   quickSet = kind === "mutual" ? [] : role === "seller" ? QUICK_SELLER : QUICK_BUYER;
   if (kind !== "mutual") { try { ownReplies = await api("/api/me/quick-replies", {quiet: true}); } catch (e) { ownReplies = []; } }
+  let teamReplies = [];
+  if (chatCompanyId) { try { teamReplies = (await api(`/api/company/${chatCompanyId}/reply-templates`, {quiet: true})).filter((r) => r.kind === "chat").map((r) => ({id: 0, text: r.text})); } catch (e) { teamReplies = []; } }
   $("#quickReplies").hidden = kind === "mutual";
-  $("#quickReplies").innerHTML = ownReplies.map((r) => `<span class="qown"><button type="button" data-quick="${esc(r.text)}">${esc(r.text)}</button><button type="button" class="qdel" data-qdel="${r.id}" aria-label="Удалить">×</button></span>`).join("")
+  $("#quickReplies").innerHTML = teamReplies.map((r) => `<button type="button" data-quick="${esc(r.text)}">🏢 ${esc(r.text)}</button>`).join("") + ownReplies.map((r) => `<span class="qown"><button type="button" data-quick="${esc(r.text)}">${esc(r.text)}</button><button type="button" class="qdel" data-qdel="${r.id}" aria-label="Удалить">×</button></span>`).join("")
     + quickSet.map((t) => `<button type="button" data-quick="${esc(t)}">${esc(t)}</button>`).join("") + '<button type="button" class="qadd" data-qadd>＋ свой ответ</button>';
 }
 $("#quickReplies").addEventListener("click", async (e) => {
@@ -1142,7 +1145,10 @@ const fileHtml = (m) => !m.file ? "" : m.file.kind === "audio"
   ? `<button type="button" class="chatfile" data-playvoice="${esc(m.file.url)}">▶ ${esc(m.file.name)}</button>`
   : `<button type="button" class="chatfile" data-getfile="${esc(m.file.url)}" data-fname="${esc(m.file.name)}">📄 ${esc(m.file.name)}</button>`;
 const msgHtml = (m) => `
-      <div class="bubble ${m.mine ? "mine" : ""}">${fileHtml(m)}${m.photo ? `<a href="${esc(m.photo)}" target="_blank" rel="noopener"><img class="chatpic" src="${esc(m.photo)}" alt="" loading="lazy"></a>` : ""}${esc(m.text)}<small>${new Date(m.created_at).toLocaleTimeString("ru-RU", {hour: "2-digit", minute: "2-digit"})}${m.mine ? `<span class="ticks ${m.read ? "read" : ""}">${m.read ? "✓✓" : "✓"}</span>` : ""}</small></div>`;
+      <div class="bubble ${m.mine ? "mine" : ""}">${fileHtml(m)}${m.photo ? `<a href="${esc(m.photo)}" target="_blank" rel="noopener"><img class="chatpic" src="${esc(m.photo)}" alt="" loading="lazy"></a>` : ""}${linkMsg(m.text)}<small>${new Date(m.created_at).toLocaleTimeString("ru-RU", {hour: "2-digit", minute: "2-digit"})}${m.mine ? `<span class="ticks ${m.read ? "read" : ""}">${m.read ? "✓✓" : "✓"}</span>` : ""}</small></div>`;
+function linkMsg(text) {          // «🔗 Объявление #12: Название» открывается по нажатию
+  return esc(text).replace(/🔗 Объявление #(\d+)([^\n]*)/g, (m, id, rest) => `<a href="#" class="msglink" data-open="${id}">🔗 Объявление #${id}${rest}</a>`);
+}
 function renderMessages(items, stick) {
   const all = [...olderMessages, ...items];
   const box = $("#messages");
@@ -2688,7 +2694,7 @@ async function renderCoPane(ov) {
         ${a.can_answer ? `<label class="muted">Этап<select data-costage="${a.id}">${Object.entries(ST).map(([k, t]) => `<option value="${k}" ${k === a.stage ? "selected" : ""}>${t}</option>`).join("")}</select></label>
           <textarea data-conote="${a.id}" rows="2" maxlength="1000" placeholder="Заметка (её видит только команда)">${esc(a.note)}</textarea>
           <div class="actions"><button class="secondary" data-conote-save="${a.id}">💾 Заметка</button><button data-costatus="invited" data-id="${a.id}">Пригласить</button><button class="secondary" data-costatus="rejected" data-id="${a.id}">Отказать</button></div>` : ""}</article>`).join("")
-        : '<div class="empty">В этом этапе пока никого.</div>');
+        : '<div class="empty">В этом этапе пока никого.</div>') + (ov.role !== "viewer" ? await coReplyTemplatesHtml() : "");
     }
     if (coState.tab === "team") {
       const t = await api(`/api/company/${ov.id}/team`);
@@ -2754,7 +2760,7 @@ async function showPublicCompany(id) {
       pg.kakao ? `KakaoTalk: ${esc(pg.kakao)}` : "", c.website ? `<a href="${esc(c.website)}" target="_blank" rel="noopener">Сайт</a>` : ""].filter(Boolean);
     let state = {can: false};
     try { state = await api(`/api/companies/${id}/review-state`, {quiet: true}); } catch (e) { /* гость: отзыв не оставить */ }
-    body.innerHTML = `<div class="dcab"><article class="dcard2 co-head">${coAvatar(c)}<div style="flex:1"><h3 style="margin:0">${esc(c.name)} <span class="dpill ok">✔ Проверена</span>${c.pro ? ' <span class="dpill pro">PRO</span>' : ""}</h3>
+    body.innerHTML = `<div class="dcab">${pg.cover ? `<img class="cocover" src="${esc(pg.cover)}" alt="">` : ""}<article class="dcard2 co-head">${coAvatar(c)}<div style="flex:1"><h3 style="margin:0">${esc(c.name)} <span class="dpill ok">✔ Проверена</span>${c.pro ? ' <span class="dpill pro">PRO</span>' : ""}</h3>
       ${pg.tagline ? `<p>${esc(pg.tagline)}</p>` : ""}<p class="muted">${esc(c.city || "")} · на сайте с ${esc(c.since)}${c.reviews?.count ? ` · ★ ${c.reviews.rating} (${c.reviews.count})` : ""}</p></div></article>
       ${pg.benefits?.length ? `<div class="chips">${pg.benefits.map((k) => `<span class="chip">✔ ${esc(c.benefits_titles[k] || k)}</span>`).join("")}</div>` : ""}
       ${c.description || links.length || pg.address || pg.hours ? `<article class="dcard2">${c.description ? `<p>${esc(c.description)}</p>` : ""}${pg.address ? `<p>📍 ${esc(pg.address)}</p>` : ""}${pg.hours ? `<p>🕘 ${esc(pg.hours)}</p>` : ""}${links.length ? `<p>${links.join(" · ")}</p>` : ""}</article>` : ""}
@@ -2772,7 +2778,8 @@ document.addEventListener("click", async (e) => {
     if (boost) openServices(boost.dataset.coboost);
     if (renew) { await api(`/api/listings/${renew.dataset.corenew}/renew`, {method: "POST"}); toast("Продлено"); renderCoPane(await api(`/api/company/${coState.id}`)); }
     if (st) {
-      const reply = (await askText(st.dataset.costatus === "invited" ? "Сообщение соискателю (когда и куда прийти)" : "Причина отказа (необязательно, человек её увидит)", "Можно оставить пустым")) ?? "";
+      const reply = await pickReply(st.dataset.costatus === "invited" ? "invite" : "reject");
+      if (reply === null) return;
       await api(`/api/applications/${st.dataset.id}`, {method: "PUT", body: JSON.stringify({status: st.dataset.costatus, reply})});
       toast(st.dataset.costatus === "invited" ? "Соискатель приглашён" : "Отказ отправлен"); renderCoPane(await api(`/api/company/${coState.id}`));
     }
@@ -3481,6 +3488,7 @@ document.addEventListener("click", async (e) => {
 async function coPageFormHtml(ov) {
   const p = await api(`/api/company/${ov.id}/page`);
   return `<article class="dcard2" id="coPageBox"><h3>Публичная страница</h3><p class="muted">Так компанию увидят соискатели: коротко о вас, контакты и что вы предлагаете.</p>
+    ${p.cover ? `<img class="cocover" src="${esc(p.cover)}" alt="">` : ""}<div class="actions"><label class="btn secondary dfile">${p.cover ? "Заменить обложку" : "Загрузить обложку"}<input type="file" id="coCover" accept="image/jpeg,image/png,image/webp" hidden></label>${p.cover ? '<button class="secondary" id="coCoverDel">Убрать</button>' : ""}</div>
     <div class="gridform"><label class="wide">Одной строкой о компании<input data-pg="tagline" maxlength="120" value="${esc(p.tagline)}" placeholder="Корейская кухня в Сеуле, берём без опыта"></label>
     <label>Telegram<input data-pg="telegram" maxlength="80" value="${esc(p.telegram)}" placeholder="username без @"></label><label>Instagram<input data-pg="instagram" maxlength="80" value="${esc(p.instagram)}"></label>
     <label>KakaoTalk<input data-pg="kakao" maxlength="80" value="${esc(p.kakao)}"></label><label>Часы работы<input data-pg="hours" maxlength="80" value="${esc(p.hours)}" placeholder="Пн–Сб 9:00–18:00"></label>
@@ -3495,5 +3503,66 @@ document.addEventListener("click", async (e) => {
     document.querySelectorAll("#coPageBox [data-pg]").forEach((i) => { body[i.dataset.pg] = i.value; });
     await api(`/api/company/${coState.id}/page`, {method: "PUT", body: JSON.stringify(body)});
     toast("Страница сохранена");
+  } catch (err) { toast(err.message); }
+});
+
+document.addEventListener("change", async (e) => {
+  if (e.target.id !== "coCover" || !e.target.files[0]) return;
+  const data = new FormData(); data.append("file", e.target.files[0]);
+  const headers = inTelegram ? {"X-Telegram-Init-Data": tg.initData} : {"X-Web-Session": localStorage.getItem("webSession") || ""};
+  const r = await fetch(`/api/company/${coState.id}/cover`, {method: "POST", body: data, headers});
+  if (!r.ok) toast((await r.json()).detail || "Не удалось загрузить"); else { toast("Обложка обновлена"); showCompany(coState.id); }
+});
+document.addEventListener("click", async (e) => {
+  if (e.target.id !== "coCoverDel") return;
+  try { await api(`/api/company/${coState.id}/cover`, {method: "DELETE"}); showCompany(coState.id); } catch (err) { toast(err.message); }
+});
+// ---------- шаблоны ответов компании: приглашение, отказ, чат ----------
+const DEFAULT_REPLIES = {invite: ["Приглашаем на собеседование. Адрес и время пришлём в чате: напишите, когда вам удобно", "Здравствуйте! Вы нам подходите. Когда сможете подойти в офис?"],
+                         reject: ["Спасибо за отклик! Сейчас мы нашли другого кандидата, но сохраним ваш контакт", "К сожалению, по условиям вакансии вы не подходите (виза или опыт). Спасибо за интерес"]};
+async function pickReply(kind) {
+  let own = [];
+  try { own = (await api(`/api/company/${coState.id}/reply-templates`, {quiet: true})).filter((r) => r.kind === kind); } catch (e) { own = []; }
+  const options = [...own.map((r) => ({key: "own:" + r.id, label: r.text})), ...(DEFAULT_REPLIES[kind] || []).map((t, i) => ({key: "def:" + i, label: t})),
+                   {key: "write", label: "✍ Написать своё"}, {key: "none", label: "Без сообщения"}];
+  const k = await chooseDialog(kind === "invite" ? "Сообщение соискателю" : "Причина отказа", options);
+  if (!k) return null;
+  if (k === "none") return "";
+  if (k === "write") return (await askText("Сообщение соискателю", "Можно оставить пустым")) ?? "";
+  return options.find((o) => o.key === k).label;
+}
+async function coReplyTemplatesHtml() {
+  const rows = await api(`/api/company/${coState.id}/reply-templates`);
+  const K = {invite: "Приглашение", reject: "Отказ", chat: "Для чата"};
+  return `<article class="dcard2"><h3>Шаблоны ответов</h3><p class="muted">Быстрые ответы для приглашений, отказов и чата с кандидатами. Их видит вся команда.</p>
+    ${rows.map((r) => `<div class="drun"><span><b>${esc(K[r.kind] || r.kind)}</b> · ${esc(r.text)}</span><button class="link" data-corpl-del="${r.id}">убрать</button></div>`).join("") || '<p class="muted">Своих шаблонов пока нет, но предложим готовые.</p>'}
+    <div class="actions"><button class="secondary" data-corpl-add>＋ Добавить шаблон</button></div></article>`;
+}
+document.addEventListener("click", async (e) => {
+  const add = e.target.closest("[data-corpl-add]"), del = e.target.closest("[data-corpl-del]");
+  try {
+    if (add) {
+      const kind = await chooseDialog("Для чего шаблон?", [{key: "invite", label: "Приглашение на собеседование"}, {key: "reject", label: "Отказ"}, {key: "chat", label: "Быстрый ответ в чате"}]);
+      if (!kind) return;
+      const text = await askText("Текст шаблона", "Например: Адрес: Каннам, 123. Приходите к 10:00");
+      if (!text) return;
+      await api(`/api/company/${coState.id}/reply-templates`, {method: "POST", body: JSON.stringify({kind, text})});
+      toast("Шаблон сохранён"); renderCoPane(await api(`/api/company/${coState.id}`));
+    }
+    if (del) { await api(`/api/company/${coState.id}/reply-templates/${del.dataset.corplDel}`, {method: "DELETE"}); renderCoPane(await api(`/api/company/${coState.id}`)); }
+  } catch (err) { toast(err.message); }
+});
+// ---------- чат: прислать объявление ----------
+document.addEventListener("click", async (e) => {
+  if (e.target.id !== "chatSendListing") return;
+  $("#chatMenu").hidden = true;
+  try {
+    const mine = (await api("/api/me/listings")).filter((x) => x.status === "approved");
+    if (!mine.length) { toast("Опубликованных объявлений пока нет"); return; }
+    const k = await chooseDialog("Какое объявление прислать?", mine.slice(0, 20).map((x) => ({key: x.id, label: `${x.title} · ${priceText(x)}`})));
+    if (!k) return;
+    const item = mine.find((x) => String(x.id) === k);
+    await api(`/api/conversations/${currentChat}/messages`, {method: "POST", body: JSON.stringify({text: `🔗 Объявление #${item.id}: ${item.title}`})});
+    loadMessages();
   } catch (err) { toast(err.message); }
 });

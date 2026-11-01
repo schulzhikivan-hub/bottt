@@ -428,7 +428,7 @@ def close_company(company_id: int, user_id: str = Depends(writer), db: Session =
     (money is not made to disappear): ask support to pay it out or spend it."""
     c, role = _company(db, company_id, user_id, {"owner"})
     if (c.balance_stars or 0) > 0:
-        raise HTTPException(409, f"На балансе компании {c.balance_stars} ⭐. Потратьте их или попросите поддержку вернуть, потом закрывайте")
+        raise HTTPException(409, f"На балансе компании {c.balance_stars} KH. Потратьте их или попросите поддержку вернуть, потом закрывайте")
     for item in db.scalars(select(Listing).where(Listing.company_id == c.id, Listing.status.in_(["approved", "pending", "draft", "needs_fix"]))).all():
         item.status = "closed"
     for m in db.scalars(select(CompanyMember).where(CompanyMember.company_id == c.id)).all():
@@ -542,7 +542,7 @@ def admin_company_credit(company_id: int, payload: CreditIn, actor: str = Depend
     c.balance_stars = (c.balance_stars or 0) + payload.stars
     log_action(db, actor, "company.credit", "company", c.id, f"+{payload.stars} {payload.note}".strip())
     db.commit()
-    guard.notify_user(db, c.owner_tg_id, f"На баланс компании «{c.name}» зачислено {payload.stars} ⭐." + (f" {payload.note}" if payload.note else ""), "payments")
+    guard.notify_user(db, c.owner_tg_id, f"На баланс компании «{c.name}» зачислено {payload.stars} KH." + (f" {payload.note}" if payload.note else ""), "payments")
     return {"balance": c.balance_stars}
 
 

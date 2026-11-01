@@ -159,7 +159,7 @@ def approve(refund_id: int, payload: ApproveIn, actor: str = Depends(staff(*FIN)
     r.answer, r.decided_by, r.decided_at, r.note = payload.comment.strip(), actor, now(), NOTE
     log_action(db, actor, "refund.approve", "refund", r.id, f"{payload.mode} {amount}/{full_amount}")
     db.commit()
-    guard.notify_user(db, r.user_tg_id, (f"Возврат одобрен: {amount} ⭐ " + ("вернулись на ваш баланс." if payload.mode == "balance" else "возвращены в Telegram.")
+    guard.notify_user(db, r.user_tg_id, (f"Возврат одобрен: {amount} {'KH' if payload.mode == 'balance' else '⭐'} " + ("вернулись на ваш баланс." if payload.mode == "balance" else "возвращены в Telegram.")
                                          + (f" {r.answer}" if r.answer else "")), "payments")
     return view(r, p)
 

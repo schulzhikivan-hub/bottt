@@ -548,7 +548,7 @@ def conversation_card(db: Session, conv: Conversation, user_id: str, last: Messa
         kind="mutual" if conv.match_key else "listing", role="buyer" if conv.buyer_tg_id == user_id else "seller",
         other_name=name, other_initial=(name[:1] or "?").upper(), listing_cover=cover, listing_price=price,
         listing_category=listing.category if listing else "", listing_status=listing.status if listing else "",
-        last_mine=bool(last and last.sender_tg_id == user_id))
+        last_mine=bool(last and last.sender_tg_id == user_id), company_id=listing.company_id if listing else None)
 
 
 @app.get("/api/conversations", response_model=list[ConversationOut])
@@ -1011,7 +1011,7 @@ def admin_refund(payment_id: int, reason: str = Query(default="", max_length=300
     db.add(refunds.Refund(payment_id=p.id, user_tg_id=p.user_tg_id, status="approved" if credit is None else "partially_refunded", mode=mode, amount=p.refunded_amount or 0,
                           reason=reason or "возврат из админки", decided_by=actor, decided_at=now(), note=refunds.NOTE))
     db.commit()
-    text = ("Платёж возвращён." if credit is None else f"Неиспользованная часть услуги вернулась на ваш баланс: {credit} ⭐.") + (f" Причина: {reason}" if reason else "")
+    text = ("Платёж возвращён." if credit is None else f"Неиспользованная часть услуги вернулась на ваш баланс: {credit} KH.") + (f" Причина: {reason}" if reason else "")
     notify_user(db, p.user_tg_id, text, "payments")
     return {"id": p.id, "status": p.status, "credited": credit}
 

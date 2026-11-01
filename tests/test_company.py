@@ -340,3 +340,31 @@ def test_company_pro_is_paid_from_the_company_balance_and_lifts_limits(client):
     assert ov["pro"]["active"] and ov["limits"]["members"] == 5 + 10
     assert client.get(f"/api/companies/{cid}").json()["pro"] is True
     assert any(x["service"] == "Подписка «Про»" for x in client.get(f"/api/company/{cid}/balance", headers=as_user(1)).json()["history"])
+
+
+def _jpeg():
+    import io
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.new("RGB", (800, 400), (30, 90, 160)).save(buf, "JPEG")
+    return buf.getvalue()
+
+
+def test_company_cover_and_reply_templates(client, tmp_path):
+    from app.config import settings
+    settings.upload_dir = str(tmp_path)
+    cid = verified_company(client)
+    team_member(client, cid, 2, "recruiter")
+    assert client.post(f"/api/company/{cid}/cover", files={"file": ("c.jpg", _jpeg(), "image/jpeg")}, headers=as_user(2)).status_code == 403   # the face: owner and admins
+    r = client.post(f"/api/company/{cid}/cover", files={"file": ("c.jpg", _jpeg(), "image/jpeg")}, headers=as_user(1))
+    assert r.status_code == 201 and r.json()["cover"]
+    assert client.get(f"/api/companies/{cid}").json()["page"]["cover"] == r.json()["cover"]
+    assert client.delete(f"/api/company/{cid}/cover", headers=as_user(1)).json()["cover"] is None
+    assert client.get(f"/api/companies/{cid}").json()["page"]["cover"] is None
+    # the team's ready-made replies
+    t = client.post(f"/api/company/{cid}/reply-templates", json={"kind": "invite", "text": "Приходите в офис к 10:00"}, headers=as_user(2))
+    assert t.status_code == 201
+    assert client.post(f"/api/company/{cid}/reply-templates", json={"kind": "spam", "text": "Приходите в офис"}, headers=as_user(1)).status_code == 400
+    assert [x["text"] for x in client.get(f"/api/company/{cid}/reply-templates", headers=as_user(1)).json()] == ["Приходите в офис к 10:00"]
+    assert client.get(f"/api/company/{cid}/reply-templates", headers=as_user(3)).status_code == 404                # outsiders see nothing
+    assert client.delete(f"/api/company/{cid}/reply-templates/{t.json()['id']}", headers=as_user(1)).status_code == 200

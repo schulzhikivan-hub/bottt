@@ -291,7 +291,7 @@ def promos_view(db: Session, header: str = "") -> Reply:
     rows = db.scalars(select(PromoCode).order_by(PromoCode.id.desc()).limit(10)).all()
     lines = []
     for p in rows:
-        off = f"−{p.percent}%" if p.percent else f"−{p.fixed_stars} ⭐"
+        off = f"−{p.percent}%" if p.percent else f"−{p.fixed_stars} KH"
         lines.append(f"{'🟢' if p.is_active else '⚪️'} {p.code}: {off} · использовано {p.used_count}"
                      + (f"/{p.max_uses}" if p.max_uses else "") + (f" · до {p.valid_until:%d.%m.%Y}" if p.valid_until else ""))
     buttons = [[(("⏸ " if p.is_active else "▶️ ") + p.code, f"a:K:t:{p.id}")] for p in rows]
@@ -352,7 +352,7 @@ def content_view(db: Session, header: str = "") -> Reply:
 def prices_view(db: Session) -> Reply:
     payments.ensure_pricing(db)
     rows = db.scalars(select(Pricing).order_by(Pricing.code)).all()
-    lines = [f"{'🟢' if p.is_active else '⚪️'} {p.code}: {p.stars} ⭐ ({p.title})" for p in rows]
+    lines = [f"{'🟢' if p.is_active else '⚪️'} {p.code}: {p.stars} KH ({p.title})" for p in rows]
     buttons = [[(f"✏️ {p.code}", f"a:C:p:{p.code}"),
                 ("⏸ Выключить" if p.is_active else "▶️ Включить", f"a:C:t:{p.code}")] for p in rows]
     return Reply("💰 Цены услуг\n" + "\n".join(lines), buttons + [BACK])
@@ -494,7 +494,7 @@ def _handle(db: Session, admin_id: int, role: str, parts: list[str]) -> Reply:
         if section == "K":
             if action == "new":
                 return Reply("Напишите промокод одной строкой:\nКОД 20% [лимит] [дней]  — скидка в процентах\n"
-                             "КОД 30⭐ [лимит] [дней]  — скидка в звёздах\nНапример: SPRING 20% 50 30\nИли /cancel:",
+                             "КОД 30KH [лимит] [дней]  — скидка в KH\nНапример: SPRING 20% 50 30\nИли /cancel:",
                              state={"kind": "promo_new"})
             if action == "t":
                 promo = db.get(PromoCode, int(arg))
@@ -609,7 +609,7 @@ def _handle_text(db: Session, admin_id: int, role: str, text: str) -> Reply | No
         if kind == "promo_new":
             from app import promos
             from fastapi import HTTPException
-            parts = text.replace("⭐", "").split()
+            parts = text.replace("⭐", "").replace("KH", "").replace("kh", "").split()
             try:
                 if len(parts) < 2:
                     raise ValueError
@@ -623,7 +623,7 @@ def _handle_text(db: Session, admin_id: int, role: str, text: str) -> Reply | No
             except HTTPException as e:
                 return Reply(f"{e.detail}. Исправьте и отправьте ещё раз или /cancel.", state=state)
             except ValueError:
-                return Reply("Не разобрал. Формат: КОД 20% [лимит] [дней] или КОД 30⭐ [лимит] [дней]. Ещё раз или /cancel.", state=state)
+                return Reply("Не разобрал. Формат: КОД 20% [лимит] [дней] или КОД 30KH [лимит] [дней]. Ещё раз или /cancel.", state=state)
             PENDING_INPUT.pop(admin_id, None)
             return promos_view(db, f"✅ Создан промокод {promo.code}\n\n")
         if kind == "bc_text":

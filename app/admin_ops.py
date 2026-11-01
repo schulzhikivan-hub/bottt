@@ -180,7 +180,7 @@ def block_user(db: Session, actor: str, tg_id: str, reason: str, cascade: dict |
             for item in db.scalars(select(Listing).where(Listing.company_id == c.id, Listing.status == "approved")).all():
                 item.status, item.note = "hidden", "company suspended"
             suspended += 1
-    log_action(db, actor, "user.block", "user", tg_id, f"{reason}; скрыто объявлений: {len(hidden)}; возврат на баланс: {credited} ⭐; компаний приостановлено: {suspended}")
+    log_action(db, actor, "user.block", "user", tg_id, f"{reason}; скрыто объявлений: {len(hidden)}; возврат на баланс: {credited} KH; компаний приостановлено: {suspended}")
     db.commit()
     for item in hidden:
         applications.notify_ended(db, item, "скрыта модератором")

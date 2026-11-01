@@ -2,12 +2,12 @@
 (they applied to a vacancy or wrote to the company)."""
 import datetime as dt
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import DateTime, Integer, String, UniqueConstraint, func, select
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
-from app import company
+from app import company, photos
 from app.admin_auth import MOD, staff
 from app.audit import log_action
 from app.database import Base, get_db
@@ -31,6 +31,7 @@ class CompanyPage(Base):
     address: Mapped[str] = mapped_column(String(160), default="")
     hours: Mapped[str] = mapped_column(String(80), default="")
     benefits: Mapped[str] = mapped_column(String(200), default="")      # keys of BENEFITS, comma separated
+    cover_key: Mapped[str | None] = mapped_column(String(40), nullable=True)
 
 
 class CompanyReview(Base):
@@ -48,7 +49,7 @@ class CompanyReview(Base):
 
 def _page_out(p: CompanyPage | None) -> dict:
     p = p or CompanyPage(company_id=0)
-    return {"tagline": p.tagline or "", "telegram": p.telegram or "", "instagram": p.instagram or "", "kakao": p.kakao or "",
+    return {"cover": photos.url(p.cover_key) if p.cover_key else None, "tagline": p.tagline or "", "telegram": p.telegram or "", "instagram": p.instagram or "", "kakao": p.kakao or "",
             "address": p.address or "", "hours": p.hours or "", "benefits": [b for b in (p.benefits or "").split(",") if b in BENEFITS]}
 
 
@@ -159,3 +160,90 @@ def admin_decide(review_id: int, decision: str, db: Session = Depends(get_db), a
     log_action(db, actor, f"company_review.{decision}", "company", r.company_id, f"отзыв #{review_id}")
     db.commit()
     return {"status": r.status}
+
+
+@router.post("/api/company/{company_id}/cover", status_code=201)
+async def set_cover(company_id: int, file: UploadFile = File(...), user_id: str = Depends(writer), db: Session = Depends(get_db)):
+    """A wide picture at the top of the public page (cropped to 1200×500)."""
+    import io
+    import uuid
+    from PIL import Image, ImageOps
+    c, role = company._company(db, company_id, user_id, company.TEAM)
+    data = await file.read(photos.MAX_UPLOAD_BYTES + 1)
+    if len(data) > photos.MAX_UPLOAD_BYTES:
+        raise HTTPException(413, "Фото больше 8 МБ")
+    full, _thumb = photos.process_image(data)
+    img = ImageOps.fit(Image.open(io.BytesIO(full)).convert("RGB"), (1200, 500))
+    out = io.BytesIO()
+    img.save(out, "JPEG", quality=82, optimize=True)
+    key = uuid.uuid4().hex
+    (photos.photo_root() / f"{key}.jpg").write_bytes(out.getvalue())
+    row = db.get(CompanyPage, c.id) or CompanyPage(company_id=c.id)
+    if row.cover_key:
+        photos.delete_files(row.cover_key)
+    row.cover_key = key
+    db.add(row)
+    log_action(db, user_id, "company.edit", "company", c.id, "обложка")
+    db.commit()
+    return {"cover": photos.url(key)}
+
+
+@router.delete("/api/company/{company_id}/cover")
+def remove_cover(company_id: int, user_id: str = Depends(writer), db: Session = Depends(get_db)):
+    c, role = company._company(db, company_id, user_id, company.TEAM)
+    row = db.get(CompanyPage, c.id)
+    if row is not None and row.cover_key:
+        photos.delete_files(row.cover_key)
+        row.cover_key = None
+        db.commit()
+    return {"cover": None}
+
+
+# ---------- ready-made replies of the company (for applicants and for chats) ----------
+KINDS = {"invite": "Приглашение", "reject": "Отказ", "chat": "Для чата"}
+MAX_REPLY_TEMPLATES = 20
+
+
+class CompanyReply(Base):
+    __tablename__ = "company_replies"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    company_id: Mapped[int] = mapped_column(Integer, index=True)
+    kind: Mapped[str] = mapped_column(String(10), default="chat")
+    text: Mapped[str] = mapped_column(String(500))
+
+
+class CompanyReplyIn(BaseModel):
+    kind: str = Field(default="chat", max_length=10)
+    text: str = Field(min_length=3, max_length=500)
+
+
+@router.get("/api/company/{company_id}/reply-templates")
+def list_reply_templates(company_id: int, user_id: str = Depends(writer), db: Session = Depends(get_db)):
+    c, role = company._company(db, company_id, user_id, company.WRITE)
+    return [{"id": r.id, "kind": r.kind, "text": r.text} for r in db.scalars(select(CompanyReply).where(CompanyReply.company_id == c.id).order_by(CompanyReply.id)).all()]
+
+
+@router.post("/api/company/{company_id}/reply-templates", status_code=201)
+def add_reply_template(company_id: int, p: CompanyReplyIn, user_id: str = Depends(writer), db: Session = Depends(get_db)):
+    c, role = company._company(db, company_id, user_id, company.WRITE)
+    if p.kind not in KINDS:
+        raise HTTPException(400, "Вид шаблона: invite, reject или chat")
+    check_text(p.text, "")
+    count = db.scalar(select(func.count()).select_from(CompanyReply).where(CompanyReply.company_id == c.id)) or 0
+    if count >= MAX_REPLY_TEMPLATES:
+        raise HTTPException(409, f"Шаблонов уже {MAX_REPLY_TEMPLATES}: удалите ненужные")
+    r = CompanyReply(company_id=c.id, kind=p.kind, text=p.text.strip())
+    db.add(r)
+    db.commit()
+    return {"id": r.id, "kind": r.kind, "text": r.text}
+
+
+@router.delete("/api/company/{company_id}/reply-templates/{reply_id}")
+def delete_reply_template(company_id: int, reply_id: int, user_id: str = Depends(writer), db: Session = Depends(get_db)):
+    c, role = company._company(db, company_id, user_id, company.WRITE)
+    r = db.get(CompanyReply, reply_id)
+    if r is None or r.company_id != c.id:
+        raise HTTPException(404, "Шаблон не найден")
+    db.delete(r)
+    db.commit()
+    return {"ok": True}

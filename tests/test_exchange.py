@@ -72,3 +72,14 @@ def test_admin_sees_the_exchange_and_circulation(client):
         db.commit()
     x = client.get("/api/admin/exchange", headers=ADMIN).json()
     assert x["in_circulation"]["people"] == 40 and x["per_100_stars"] == 100
+
+
+def test_kh_report_by_day_and_csv(client):
+    client.post("/api/me/balance/topup", json={"kh": 100}, headers=as_user(1))
+    with SessionLocal() as db:
+        pay = db.query(Payment).one()
+        payments.process_successful_payment(db, "1", pay.payload, "c-rep", "XTR", 100)
+    rep = client.get("/api/admin/exchange/report?days=14", headers=ADMIN).json()
+    assert len(rep["days"]) == 14 and rep["total"]["stars_in"] == 100 and rep["total"]["kh_bought"] == 100 and rep["total"]["kh_spent"] == 0
+    csv = client.get("/api/admin/exchange/report.csv", headers=ADMIN)
+    assert csv.status_code == 200 and "Куплено KH" in csv.text and csv.headers["content-type"].startswith("text/csv")

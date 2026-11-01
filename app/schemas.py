@@ -134,3 +134,4 @@ class ConversationOut(BaseModel):
     listing_status: str = ""
     last_mine: bool = False
     pinned: bool = False
+    company_id: int | None = None

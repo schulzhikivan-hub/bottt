@@ -310,7 +310,7 @@ def register(dp: Dispatcher, bot: Bot) -> None:
                 topup = getattr(placement, "kind", "") == "topup"
                 ends = payments.aware(placement.ends_at).strftime("%d.%m.%Y %H:%M")
             if topup:
-                await message.answer(f"Баланс{' компании' if placement.company_id else ''} пополнен на {placement.credited} ⭐.")
+                await message.answer(f"Баланс{' компании' if placement.company_id else ''} пополнен на {placement.credited} KH.")
             else:
                 await message.answer(f"Оплата получена. Услуга активна до {ends} UTC.")
         except payments.PaymentError as exc:

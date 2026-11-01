@@ -783,3 +783,6 @@ img.co-ava{object-fit:cover}
 
 .dpill.pro{background:linear-gradient(120deg,#e8910c,#f2b705);color:#1b2540}
 .perks{margin:6px 0;padding-left:18px;color:var(--hint);font-size:13.5px}
+
+.cocover{width:100%;height:auto;max-height:180px;object-fit:cover;border-radius:14px;margin-bottom:8px;display:block}
+.msglink{color:var(--accent);font-weight:600;text-decoration:underline}

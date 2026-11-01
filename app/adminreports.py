@@ -125,7 +125,7 @@ def give_stars(tg_id: str, payload: StarsIn, actor: str = Depends(staff(*ADM)), 
     A gift is written into the person's payment history with the mark «🎁», every change into the journal. A daily cap per
     employee protects against a slip of the finger; the super administrator has no cap."""
     if payload.stars == 0 or abs(payload.stars) > 100000:
-        raise HTTPException(400, "Сумма: от 1 до 100 000 ⭐, минус — списать")
+        raise HTTPException(400, "Сумма: от 1 до 100 000 KH, минус — списать")
     user = db.get(User, tg_id)
     if user is None:
         raise HTTPException(404, "Пользователь не найден")
@@ -139,10 +139,10 @@ def give_stars(tg_id: str, payload: StarsIn, actor: str = Depends(staff(*ADM)), 
             except (ValueError, IndexError):
                 continue
         if given + payload.stars > rules.val("credit.day_stars"):
-            raise HTTPException(429, f"Дневной лимит выдачи {rules.val('credit.day_stars')} ⭐ исчерпан (выдано {given}). Дальше выдаёт суперадмин")
+            raise HTTPException(429, f"Дневной лимит выдачи {rules.val('credit.day_stars')} KH исчерпан (выдано {given}). Дальше выдаёт суперадмин")
     have = user.balance_stars or 0
     if have + payload.stars < 0:
-        raise HTTPException(409, f"На балансе только {have} ⭐: списать больше нельзя")
+        raise HTTPException(409, f"На балансе только {have} KH: списать больше нельзя")
     user.balance_stars = have + payload.stars
     if payload.stars > 0:
         db.add(Payment(user_tg_id=tg_id, listing_id=None, service_code="topup", stars=payload.stars, list_stars=payload.stars,
@@ -150,6 +150,6 @@ def give_stars(tg_id: str, payload: StarsIn, actor: str = Depends(staff(*ADM)), 
                        note=f"🎁 Начисление от поддержки: {payload.reason.strip()}"))
     log_action(db, actor, "user.stars", "user", tg_id, f"{payload.stars} {payload.reason.strip()}")
     db.commit()
-    guard.notify_user(db, tg_id, (f"🎁 Вам начислено {payload.stars} ⭐ на баланс." if payload.stars > 0 else f"С вашего баланса списано {-payload.stars} ⭐.")
+    guard.notify_user(db, tg_id, (f"🎁 Вам начислено {payload.stars} KH на баланс." if payload.stars > 0 else f"С вашего баланса списано {-payload.stars} KH.")
                       + f" Причина: {payload.reason.strip()}", "payments")
     return {"balance": user.balance_stars}

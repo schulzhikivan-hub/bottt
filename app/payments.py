@@ -547,7 +547,7 @@ def refund_to_balance(db: Session, payment_id: int, reason: str = "") -> tuple[P
         user.balance_stars = (user.balance_stars or 0) + credit
     payment.status = "refunded"
     payment.refunded_amount = credit
-    payment.note = (payment.note + f" возврат на баланс {credit} ⭐ ({int(fraction * 100)}% остатка) {reason}").strip()
+    payment.note = (payment.note + f" возврат на баланс {credit} KH ({int(fraction * 100)}% остатка) {reason}").strip()
     for placement in db.scalars(select(Placement).where(Placement.payment_id == payment.id)).all():
         placement.status = "refunded"
     if payment.profile_id:
@@ -584,7 +584,7 @@ def set_price(db: Session, code: str, stars: int | None, is_active: bool | None)
         raise PaymentError("Услуга не найдена")
     if stars is not None:
         if stars < 1 or stars > 10000:
-            raise PaymentError("Цена должна быть от 1 до 10000 ⭐")
+            raise PaymentError("Цена должна быть от 1 до 10000 KH")
         pricing.stars = stars
     if is_active is not None:
         pricing.is_active = is_active
