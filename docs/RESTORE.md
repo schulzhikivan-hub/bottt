@@ -7,6 +7,14 @@
 
 Папка копий: `/opt/korea-hub/backups` (доступна только root). **Копии лежат на том же сервере.** Если диск сервера погибнет, погибнут и они: раз в неделю скачивайте свежую копию на свой компьютер или в облако (`scp root@СЕРВЕР:/opt/korea-hub/backups/koreahub-full-ПОСЛЕДНЯЯ.tar.gz .`).
 
+## Копия вне сервера (рекомендуется)
+Ночная копия сама уходит на другой сервер, если настроено:
+1. На сервере для копий создайте пользователя и папку, например `backup@host:/srv/koreahub`. Этому пользователю нужен только доступ на запись в папку.
+2. Создайте ключ без пароля: `sudo mkdir -p /etc/korea-hub && sudo ssh-keygen -t ed25519 -N "" -f /etc/korea-hub/offsite_key`. Публичную часть (`/etc/korea-hub/offsite_key.pub`) добавьте в `~/.ssh/authorized_keys` пользователя `backup`.
+3. В один файл запишите адрес: `echo 'backup@host:/srv/koreahub' | sudo tee /etc/korea-hub/offsite`.
+4. Проверка: `sudo bash /opt/korea-hub/install.sh offsite`. Дальше каждая ночная копия отправляется автоматически.
+Копии содержат персональные данные: храните их на сервере, к которому имеете доступ только вы.
+
 ## Как восстановить
 1. Посмотрите список: `ls -lh /opt/korea-hub/backups`.
 2. Выполните: `sudo bash /opt/korea-hub/install.sh restore /opt/korea-hub/backups/koreahub-full-ДАТА.tar.gz`.

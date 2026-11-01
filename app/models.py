@@ -30,6 +30,7 @@ class User(Base):
     avatar_key: Mapped[str | None] = mapped_column(String(40), nullable=True)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     consent_version: Mapped[str] = mapped_column(String(40), default="")
+    ref_code: Mapped[str | None] = mapped_column(String(12), unique=True, nullable=True)   # for the invitation link
     trusted: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())   # «Проверенный автор»: a moderator checked this person
     visa: Mapped[str] = mapped_column(String(8), default="")  # private; used for job filters and applications
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
@@ -491,3 +492,21 @@ class Resume(Base):
     note: Mapped[str] = mapped_column(String(300), default="")
     search_text: Mapped[str] = mapped_column(String(1200), default="")   # lower-cased in Python: SQL lower() skips Cyrillic on SQLite
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class BannedPhoto(Base):
+    """Fingerprint (difference hash) of a picture a moderator banned. Near-identical uploads are refused."""
+    __tablename__ = "banned_photos"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    dhash: Mapped[str] = mapped_column(String(16), index=True)
+    note: Mapped[str] = mapped_column(String(200), default="")
+    created_by: Mapped[str] = mapped_column(String(40), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class Referral(Base):
+    """Who invited whom. Only a person who was not on the service yet can be counted, once."""
+    __tablename__ = "referrals"
+    invited_tg_id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    inviter_tg_id: Mapped[str] = mapped_column(String(40), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

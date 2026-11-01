@@ -20,7 +20,9 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import get_db
-from app.models import Listing, ListingPhoto
+from app.admin_auth import MOD, staff
+from app.audit import log_action
+from app.models import BannedPhoto, Listing, ListingPhoto
 from app.users import writer
 
 router = APIRouter()
@@ -74,6 +76,25 @@ def check_shape(full_jpeg: bytes) -> None:
         raise HTTPException(400, f"Фото слишком маленькое: меньшая сторона не меньше {MIN_SIDE} пикселей")
     if long / short > MAX_ASPECT:
         raise HTTPException(400, "Странные пропорции фото: загрузите обычный снимок, не узкую полосу")
+
+
+def dhash(jpeg: bytes) -> str:
+    """64-bit difference hash: survives re-compression and resizing, so a banned picture is recognised again."""
+    img = Image.open(io.BytesIO(jpeg)).convert("L").resize((9, 8), Image.LANCZOS)
+    px = list(img.getdata())
+    bits = 0
+    for row in range(8):
+        for col in range(8):
+            bits = (bits << 1) | (1 if px[row * 9 + col] > px[row * 9 + col + 1] else 0)
+    return f"{bits:016x}"
+
+
+def is_banned(db: Session, jpeg: bytes, max_distance: int = 5) -> bool:
+    h = int(dhash(jpeg), 16)
+    for (other,) in db.execute(select(BannedPhoto.dhash)).all():
+        if bin(h ^ int(other, 16)).count("1") <= max_distance:
+            return True
+    return False
 
 
 def url(key: str, thumb: bool = False) -> str:
@@ -133,6 +154,8 @@ async def add_photo(listing_id: int, file: UploadFile = File(...), user_id: str 
         raise HTTPException(413, "Фото больше 8 МБ")
     full, thumb = process_image(data)
     check_shape(full)
+    if is_banned(db, full):
+        raise HTTPException(400, "Это изображение запрещено правилами сервиса. Выберите другое фото")
     sha = hashlib.sha256(full).hexdigest()
     key = uuid.uuid4().hex
     (photo_root() / f"{key}.jpg").write_bytes(full)
@@ -195,3 +218,23 @@ def get_photo(name: str):
     if not path.exists():
         raise HTTPException(404, "Фото не найдено")
     return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=31536000, immutable"})
+
+
+@router.post("/api/admin/listings/{listing_id}/ban-photos")
+def ban_listing_photos(listing_id: int, actor: str = Depends(staff(*MOD)), db: Session = Depends(get_db)):
+    """The pictures of this listing are banned: they are deleted and the same picture cannot be uploaded again."""
+    item = db.get(Listing, listing_id)
+    if item is None:
+        raise HTTPException(404, "Объявление не найдено")
+    rows = db.scalars(select(ListingPhoto).where(ListingPhoto.listing_id == listing_id)).all()
+    banned = 0
+    for row in rows:
+        path = photo_root() / f"{row.key}.jpg"
+        if path.exists():
+            db.add(BannedPhoto(dhash=dhash(path.read_bytes()), note=f"объявление #{listing_id}", created_by=actor))
+            banned += 1
+        delete_files(row.key)
+        db.delete(row)
+    log_action(db, actor, "photo.ban", "listing", listing_id, f"запрещено фото: {banned}")
+    db.commit()
+    return {"banned": banned}

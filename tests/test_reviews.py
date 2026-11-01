@@ -88,3 +88,38 @@ def test_config_has_rates_only_when_set(monkeypatch):
     assert c.get("/api/config").json()["rates"] == {}
     monkeypatch.setattr(settings, "krw_rub", 0.065)
     assert c.get("/api/config").json()["rates"] == {"rub": 0.065}
+
+
+def test_banned_picture_cannot_be_uploaded_again():
+    import io
+    from PIL import Image, ImageDraw
+    c, lid = setup_chat()
+    img = Image.new("RGB", (400, 300), "white")
+    d = ImageDraw.Draw(img)
+    for i in range(0, 300, 30):
+        d.rectangle([i, i // 2, i + 90, i // 2 + 60], fill=(i % 255, 90, 160))
+    buf = io.BytesIO(); img.save(buf, "JPEG")
+    up = c.post(f"/api/listings/{lid}/photos", files={"file": ("a.jpg", buf.getvalue(), "image/jpeg")}, headers=as_user(1))
+    assert up.status_code == 201
+    assert c.post(f"/api/admin/listings/{lid}/ban-photos", headers=ADMIN).json() == {"banned": 1}
+    again = c.post(f"/api/listings/{lid}/photos", files={"file": ("b.jpg", buf.getvalue(), "image/jpeg")}, headers=as_user(1))
+    assert again.status_code == 400 and "запрещено" in again.json()["detail"]
+    # a different picture still passes
+    other = Image.new("RGB", (400, 300), "black")
+    d2 = ImageDraw.Draw(other); d2.ellipse([50, 20, 350, 280], fill="white")
+    b2 = io.BytesIO(); other.save(b2, "JPEG")
+    assert c.post(f"/api/listings/{lid}/photos", files={"file": ("c.jpg", b2.getvalue(), "image/jpeg")}, headers=as_user(1)).status_code == 201
+
+
+def test_referral_counts_only_new_people_once():
+    from app import referrals
+    c, lid = setup_chat()
+    code = c.get("/api/me/referral", headers=as_user(1)).json()["code"]
+    assert len(code) == 8
+    with SessionLocal() as db:
+        assert referrals.register(db, "1", code) is False        # not yourself
+        assert referrals.register(db, "2", code) is False        # already has an account
+        assert referrals.register(db, "500", "nope") is False    # unknown code
+        assert referrals.register(db, "500", code) is True
+        assert referrals.register(db, "500", code) is False      # only once
+    assert c.get("/api/me/referral", headers=as_user(1)).json() == {"code": code, "invited": 1}

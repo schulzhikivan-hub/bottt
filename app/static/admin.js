@@ -230,6 +230,7 @@ function listingCardHtml(x, opts = {}) {
     ${(x.flags || []).length ? `<div style="color:#b45309;font-weight:600">⚠ ${(x.flags || []).map(esc).join(" · ")}</div>` : ""}
     ${edit ? `<div><b>Что меняется:</b><ul>${diff || "<li>только фото</li>"}</ul></div>` : `<p>${esc(x.description || "")}</p>`}
     <div class="thumbs">${photos || '<span class="muted">Фото нет</span>'}${waiting ? ` <span class="muted">(ждут решения: ${waiting})</span>` : ""}</div>
+    ${photos ? '<button class="act gray" data-banphotos>🚫 Запретить эти фото</button>' : ""}
     <p class="muted">Контакт: ${esc(x.contact || "—")} · Автор: ${esc(x.author_id || "—")} · просмотров: ${x.views || 0}${x.note ? " · комментарий: " + esc(x.note) : ""}</p>
     ${buttons}</div>`;
 }
@@ -238,6 +239,13 @@ function reasonFrom(card, act) {
   if (key) return TEMPLATES.find((t) => t.key === key)?.text || "";
   return ask(act === "reject" ? "Причина отказа (автор её увидит):" : act === "hide" ? "Причина, почему скрыть (автор её увидит):" : "Что исправить (автор её увидит):");
 }
+$("#main").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-banphotos]");
+  if (!b) return;
+  const card = b.closest("[data-id]");
+  if (!(await Promise.resolve(confirm("Фото будут удалены, и такие же загрузить больше нельзя. Продолжить?")))) return;
+  try { const r = await post(`/api/admin/listings/${card.dataset.id}/ban-photos`); say(`Запрещено фото: ${r.banned}`); reload(); } catch (err) { say(err.message); }
+});
 async function listingAction(e) {
   const btn = e.target.closest("[data-act]");
   if (!btn || !btn.closest("[data-id]")) return;

@@ -299,9 +299,45 @@ cmd_cron() {
   setup_cron
 }
 
+# Копия вне сервера. Включается файлом /etc/korea-hub/offsite с одной строкой user@host:/папка
+# и ключом /etc/korea-hub/offsite_key (без пароля, только на запись в эту папку). Нет файла: ничего не делаем.
+OFFSITE_CONF="/etc/korea-hub/offsite"
+OFFSITE_KEY="/etc/korea-hub/offsite_key"
+offsite_push() {
+  local file="$1" target
+  [ -f "$OFFSITE_CONF" ] || return 0
+  [ -f "$file" ] || return 0
+  [ -f "$OFFSITE_KEY" ] || { warn "Копия вне сервера включена, но нет ключа $OFFSITE_KEY."; return 0; }
+  target="$(head -n1 "$OFFSITE_CONF" | tr -d '[:space:]')"
+  case "$target" in
+    *@*:*) ;;
+    *) warn "В $OFFSITE_CONF должна быть строка вида user@host:/папка"; return 0 ;;
+  esac
+  if scp -q -i "$OFFSITE_KEY" -o BatchMode=yes -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new "$file" "$target/"; then
+    log "Копия отправлена вне сервера: $target"
+  else
+    warn "Не удалось отправить копию вне сервера ($target). Проверьте ключ и доступ."
+    return 1
+  fi
+}
+
+cmd_offsite() {
+  require_root offsite
+  [ -f "$OFFSITE_CONF" ] || die "Не настроено. Создайте $OFFSITE_CONF (одна строка user@host:/папка) и ключ $OFFSITE_KEY. См. docs/RESTORE.md."
+  local latest="" f
+  for f in "$BACKUP_DIR"/koreahub-full-*.tar.gz; do   # имена с датой: последний в алфавитном порядке самый свежий
+    [ -f "$f" ] && latest="$f"
+  done
+  [ -n "$latest" ] || die "Копий пока нет. Сначала: sudo bash $APP_DIR/install.sh backup"
+  offsite_push "$latest" || die "Отправка не удалась."
+}
+
 cmd_backup_only() {
   [ -d "$APP_DIR/.git" ] || die "$APP_DIR не найден."
-  backup_full
+  local out
+  out="$(backup_full)"
+  echo "$out"
+  offsite_push "$out" || true
 }
 
 # Восстановление из копии. Перед заменой текущее состояние сохраняется отдельной копией.
@@ -409,7 +445,7 @@ cmd_set_token() {
 
 usage() {
   cat <<EOF
-Использование: sudo bash install.sh {install|update|backup|restore|set-token|monitor|cron|status}
+Использование: sudo bash install.sh {install|update|backup|restore|set-token|monitor|cron|offsite|status}
   install     первая установка
   update      обновить код и перезапустить сервисы (с полной копией перед этим)
   backup      полная копия: база и фото в одном файле (хранится 14 дней)
@@ -417,6 +453,7 @@ usage() {
   set-token   заменить токен бота (ввод скрыт)
   monitor     проверить здоровье, при сбое написать администраторам
   cron        включить ежедневную копию (04:00) и проверку каждые 5 минут
+  offsite     отправить последнюю копию вне сервера (настройка в docs/RESTORE.md)
   status      состояние сервисов
 EOF
 }
@@ -430,6 +467,7 @@ main() {
     set-token) cmd_set_token ;;
     monitor)   cmd_monitor ;;
     cron)      cmd_cron ;;
+    offsite)   cmd_offsite ;;
     status)    cmd_status ;;
     *)         usage; exit 1 ;;
   esac

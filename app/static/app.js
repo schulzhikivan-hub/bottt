@@ -904,7 +904,7 @@ async function showReceipt(id) {
   };
 }
 const SUB_TITLES = {author: "Объявления автора", applications: "Мои отклики", searches: "Мои поиски", settings: "Настройки", employer: "Статус работодателя",
-                    resume: "Моё резюме", cvsearch: "Поиск сотрудников", payments: "История платежей", blocks: "Заблокированные", help: "Помощь и правила"};
+                    invite: "Пригласить друзей", resume: "Моё резюме", cvsearch: "Поиск сотрудников", payments: "История платежей", blocks: "Заблокированные", help: "Помощь и правила"};
 let currentSubKey = "";
 const CV_STATUS = {pending: "На проверке у модератора", approved: "Опубликовано: работодатели могут найти", rejected: "Отклонено", hidden: "Скрыто"};
 // ---------- «Ищу работу»: своё резюме ----------
@@ -1083,6 +1083,19 @@ async function openMenu(key) {
                   rejected: "Заявка отклонена. Можно подать снова с верными данными."}[st] || "";
     body.innerHTML = `<article class="listing"><p>${esc(text)}</p>
       ${(st === "none" || st === "rejected") ? '<div class="actions"><button data-own="employer-apply">Подать заявку</button></div>' : ""}</article>`;
+  }
+  if (key === "invite") {
+    await ensureConfig();
+    const r = await api("/api/me/referral");
+    const link = botName ? `https://t.me/${botName}?start=ref_${r.code}` : "";
+    body.innerHTML = `<article class="listing"><p>Отправьте ссылку друзьям: когда они зайдут в KOREA HUB, мы сообщим вам.</p>
+      <p><b>Приглашено: ${r.invited}</b></p>
+      ${link ? `<p class="muted" style="word-break:break-all">${esc(link)}</p><div class="actions"><button id="inviteShare">Поделиться ссылкой</button></div>` : '<p class="muted">Ссылка появится, когда бот будет доступен.</p>'}</article>`;
+    if (link) $("#inviteShare").onclick = () => {
+      if (tg?.openTelegramLink) tg.openTelegramLink("https://t.me/share/url?url=" + encodeURIComponent(link) + "&text=" + encodeURIComponent("KOREA HUB: работа, жильё и объявления в Корее"));
+      else if (navigator.share) navigator.share({url: link}).catch(() => {});
+      else navigator.clipboard?.writeText(link).then(() => toast("Ссылка скопирована"));
+    };
   }
   if (key === "resume") await renderMyResume(body);
   if (key === "cvsearch") await renderCvSearch(body);

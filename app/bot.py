@@ -124,6 +124,10 @@ def register(dp: Dispatcher, bot: Bot) -> None:
             return
         if arg.startswith("src_"):
             _remember_source(str(message.from_user.id), arg[4:])
+        if arg.startswith("ref_"):
+            with SessionLocal() as db:
+                from app import referrals
+                referrals.register(db, str(message.from_user.id), arg[4:])
         if not arg.startswith("login_"):
             await message.answer(WELCOME + "\nВыберите нужный раздел:",
                                  reply_markup=menu_markup(is_staff(message.from_user.id)))
