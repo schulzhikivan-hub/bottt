@@ -96,6 +96,7 @@
 
 <section id="view-chats" class="view" hidden>
   <div class="section-head"><div><span class="eyebrow">ПЕРЕПИСКА</span><h2>Сообщения</h2></div></div>
+  <input id="chatSearch" type="search" class="chatsearch" placeholder="Поиск по перепискам: имя, объявление, текст" autocomplete="off">
   <div class="chips" id="chatTabs">
     <button class="chip active" data-ctab="all">Все</button><button class="chip" data-ctab="seller">Мне написали</button>
     <button class="chip" data-ctab="buyer">Я написал(а)</button><button class="chip" data-ctab="mutual">Знакомства</button><button class="chip" data-ctab="unread">Непрочитанные</button>
@@ -110,7 +111,7 @@
     <b class="chat-name"><span id="chatTitle">Чат</span><span class="chat-sub" id="chatSub"></span></b>
     <button class="link" id="chatMenuBtn" aria-label="Действия" aria-haspopup="true">⋯</button>
     <div class="chat-menu" id="chatMenu" hidden>
-      <button id="chatHide">🗂 Скрыть чат</button><button id="chatBlock">🚫 Заблокировать</button><button id="chatReport">⚑ Пожаловаться</button>
+      <button id="chatPin">📌 Закрепить</button><button id="chatHide">🗂 Скрыть чат</button><button id="chatBlock">🚫 Заблокировать</button><button id="chatReport">⚑ Пожаловаться</button>
     </div>
   </div>
   <a class="chat-ad" id="chatAd" href="#" hidden>

@@ -768,3 +768,8 @@ img.co-ava{object-fit:cover}
 #setName,#meTopupN,#coTopupN,#coCode{font:inherit;color:var(--text);background:var(--card);border:1px solid var(--border);border-radius:12px;padding:12px 14px;box-sizing:border-box;max-width:100%}
 #subBody > form input:not([class]),#subBody > div > form input:not([class]){width:100%;margin-bottom:8px}
 #subBody button[type=submit]:not([class]){font:inherit;font-weight:700;border:0;border-radius:12px;background:var(--accent);color:#fff;padding:12px 18px;margin-top:4px}
+
+.chatsearch{width:100%;box-sizing:border-box;font:inherit;border:1px solid var(--border);background:var(--card);border-radius:12px;padding:10px 14px;margin:6px 0 8px}
+.qown{display:inline-flex;align-items:center}
+.qdel{border:0;background:none;color:var(--hint);font-size:16px;padding:0 6px}
+.qadd{border-style:dashed !important;color:var(--accent)}

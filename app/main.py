@@ -32,7 +32,7 @@ from app.guard import rate_limit, check_text, duplicate_note, notify_user
 from app import admin_ops as ops
 from app import catalog
 from app import photos, applications, searches, inbox, promos, adminx, observe, site
-from app import geo, reviews, resumes, referrals, support, extras, adminplus, adminview, datingsvc, ads, rules, adminreports, account, refunds, blocks, reportsflow, batches, security, duty, searchdict, searchlog, views, adminsys, adminmanage, adminedit, listingtools, exchange, pipeline, listingtemplates
+from app import geo, reviews, resumes, referrals, support, extras, adminplus, adminview, datingsvc, ads, rules, adminreports, account, refunds, blocks, reportsflow, batches, security, duty, searchdict, searchlog, views, adminsys, adminmanage, adminedit, listingtools, exchange, pipeline, listingtemplates, chatextras
 from app import fields as listing_fields
 from app.users import get_or_create_user, writer, is_blocked_pair
 from app.models import Admin, AuditLog, ConvHide, DatingProfile, TypingMark
@@ -95,6 +95,7 @@ app.include_router(listingtools.router)
 app.include_router(exchange.router)
 app.include_router(pipeline.router)
 app.include_router(listingtemplates.router)
+app.include_router(chatextras.router)
 app.include_router(listing_fields.router)
 STATIC = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
@@ -564,7 +565,10 @@ def my_conversations(user_id: str = Depends(current_user_id), db: Session = Depe
             Message.conversation_id == conv.id, Message.sender_tg_id != user_id, Message.read_at.is_(None))) or 0
         out.append(conversation_card(db, conv, user_id, last, unread))
     epoch = datetime.min.replace(tzinfo=timezone.utc)
-    out.sort(key=lambda c: aware(c.last_at) if c.last_at else epoch, reverse=True)
+    pins = chatextras.pinned_ids(db, user_id)
+    for c in out:
+        c.pinned = c.id in pins
+    out.sort(key=lambda c: (c.pinned, aware(c.last_at) if c.last_at else epoch), reverse=True)      # pinned first, then the newest
     return out
 
 
@@ -572,7 +576,9 @@ def my_conversations(user_id: str = Depends(current_user_id), db: Session = Depe
 def conversation_info(conv_id: int, user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
     """The header of a chat: who it is, which listing, its photo and price."""
     conv = _get_conversation_for(db, conv_id, user_id)
-    return conversation_card(db, conv, user_id)
+    card = conversation_card(db, conv, user_id)
+    card.pinned = conv_id in chatextras.pinned_ids(db, user_id)
+    return card
 
 
 @app.post("/api/conversations/{conv_id}/hide")

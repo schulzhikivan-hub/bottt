@@ -975,12 +975,14 @@ function relTime(iso) {
 let convTab = "all", convItems = [];
 function drawConversations() {
   const box = $("#conversations");
-  const rows = convItems.filter((c) => convTab === "all" ? true : convTab === "unread" ? c.unread > 0 : convTab === "match" ? c.kind === "mutual" : c.kind === "listing" && c.role === convTab);
+  const q = ($("#chatSearch")?.value || "").trim().toLowerCase();
+  const rows = convItems.filter((c) => !q || [c.other_name, c.listing_title, c.last_text].some((t) => (t || "").toLowerCase().includes(q)))
+    .filter((c) => convTab === "all" ? true : convTab === "unread" ? c.unread > 0 : convTab === "match" ? c.kind === "mutual" : c.kind === "listing" && c.role === convTab);
   document.querySelectorAll("#chatTabs [data-ctab]").forEach((b) => b.classList.toggle("active", b.dataset.ctab === convTab));
   box.innerHTML = rows.length ? rows.map((c) => `
     <article class="convrow ${c.unread ? "unread" : ""}" data-chat="${c.id}" data-title="${esc(c.other_name)}">
       <div class="thumb2 ${c.listing_status && c.listing_status !== "approved" ? "cdead" : ""}">${c.listing_cover ? `<img src="${esc(c.listing_cover)}" alt="" loading="lazy">` : c.kind === "mutual" ? "💗" : (CAT_ICON[c.listing_category] || "📄")}<span class="mini">${esc(c.other_initial)}</span></div>
-      <div class="cbody"><span class="cname">${esc(c.other_name)}</span>
+      <div class="cbody"><span class="cname">${c.pinned ? "📌 " : ""}${esc(c.other_name)}</span>
         <span class="cad">${c.kind === "mutual" ? "Знакомство" : esc(c.listing_title)}${c.listing_price ? ` <span class="cprice">· ${esc(c.listing_price)}</span>` : ""}${c.listing_status && c.listing_status !== "approved" && c.kind === "listing" ? ' <span class="cprice">· снято</span>' : ""}</span>
         <span class="clast">${c.last_mine ? "Вы: " : ""}${esc(c.last_text || "Нет сообщений")}</span></div>
       <div class="cside"><span class="ctime">${esc(relTime(c.last_at))}</span>${c.unread ? `<span class="cbadge">${c.unread}</span>` : ""}</div>
@@ -988,6 +990,7 @@ function drawConversations() {
     : `<div class="empty">${convItems.length ? "В этой вкладке пока пусто." : "Переписок пока нет. Откройте объявление и нажмите «Написать»."}</div>`;
 }
 document.addEventListener("click", (e) => { const t = e.target.closest("#chatTabs [data-ctab]"); if (t) { convTab = t.dataset.ctab; drawConversations(); } });
+$("#chatSearch").addEventListener("input", drawConversations);
 async function loadConversations() {
   const box = $("#conversations");
   try {
@@ -1019,7 +1022,8 @@ async function fillChatHeader(id) {
     if (currentChat !== id) return;
     $("#chatTitle").textContent = c.other_name;
     $("#chatAvatar").textContent = c.other_initial;
-    drawQuickReplies(c.kind, c.role);
+    lastQuickArgs = [c.kind, c.role]; drawQuickReplies(c.kind, c.role);
+    chatPinned = Boolean(c.pinned); $("#chatPin").textContent = chatPinned ? "📌 Открепить" : "📌 Закрепить";
     if (c.kind === "listing" && c.listing_id) {
       const ad = $("#chatAd");
       ad.hidden = false; ad.dataset.open = c.listing_id;
@@ -1031,6 +1035,12 @@ async function fillChatHeader(id) {
   } catch (e) { /* шапка не критична */ }
 }
 $("#chatAd").addEventListener("click", (e) => { e.preventDefault(); const id = $("#chatAd").dataset.open; if (id) openDetail(+id); });
+let chatPinned = false;
+$("#chatPin").onclick = async () => {
+  $("#chatMenu").hidden = true;
+  try { await api(`/api/conversations/${currentChat}/pin`, {method: chatPinned ? "DELETE" : "POST"}); chatPinned = !chatPinned; toast(chatPinned ? "Диалог закреплён вверху списка" : "Диалог откреплён"); }
+  catch (err) { toast(err.message); }
+};
 $("#chatMenuBtn").onclick = (e) => { e.stopPropagation(); $("#chatMenu").hidden = !$("#chatMenu").hidden; };
 document.addEventListener("click", (e) => { if (!e.target.closest("#chatMenu, #chatMenuBtn")) $("#chatMenu").hidden = true; });
 $("#chatHide").onclick = async () => {
@@ -1049,12 +1059,28 @@ $("#chatInput").addEventListener("input", syncSendButtons);
 const QUICK_BUYER = ["Здравствуйте! Ещё актуально?", "Когда можно посмотреть?", "Можно ли снизить цену?", "Спасибо, я подумаю", "Где вы находитесь?"];
 const QUICK_SELLER = ["Да, актуально", "Здравствуйте! Чем помочь?", "Приезжайте, адрес пришлю", "Цена окончательная", "Уже продано, извините"];
 let quickSet = QUICK_BUYER;
-function drawQuickReplies(kind = "listing", role = "buyer") {
+let ownReplies = [];
+async function drawQuickReplies(kind = "listing", role = "buyer") {
   quickSet = kind === "mutual" ? [] : role === "seller" ? QUICK_SELLER : QUICK_BUYER;
-  $("#quickReplies").hidden = quickSet.length === 0;
-  $("#quickReplies").innerHTML = quickSet.map((t) => `<button type="button" data-quick="${esc(t)}">${esc(t)}</button>`).join("");
+  if (kind !== "mutual") { try { ownReplies = await api("/api/me/quick-replies", {quiet: true}); } catch (e) { ownReplies = []; } }
+  $("#quickReplies").hidden = kind === "mutual";
+  $("#quickReplies").innerHTML = ownReplies.map((r) => `<span class="qown"><button type="button" data-quick="${esc(r.text)}">${esc(r.text)}</button><button type="button" class="qdel" data-qdel="${r.id}" aria-label="Удалить">×</button></span>`).join("")
+    + quickSet.map((t) => `<button type="button" data-quick="${esc(t)}">${esc(t)}</button>`).join("") + '<button type="button" class="qadd" data-qadd>＋ свой ответ</button>';
 }
-$("#quickReplies").addEventListener("click", (e) => { const b = e.target.closest("[data-quick]"); if (b) { $("#chatInput").value = b.dataset.quick; $("#chatInput").focus(); } });
+$("#quickReplies").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-quick]"), del = e.target.closest("[data-qdel]"), add = e.target.closest("[data-qadd]");
+  if (b) { $("#chatInput").value = b.dataset.quick; $("#chatInput").focus(); syncSendButtons(); return; }
+  try {
+    if (del) { await api(`/api/me/quick-replies/${del.dataset.qdel}`, {method: "DELETE"}); drawQuickReplies(...lastQuickArgs); }
+    if (add) {
+      const text = $("#chatInput").value.trim() || (await askText("Свой быстрый ответ", "Например: Адрес и время работы пришлю в чате"));
+      if (!text) return;
+      await api("/api/me/quick-replies", {method: "POST", body: JSON.stringify({text})});
+      toast("Ответ сохранён: он будет здесь в любом чате"); drawQuickReplies(...lastQuickArgs);
+    }
+  } catch (err) { toast(err.message); }
+});
+let lastQuickArgs = ["listing", "buyer"];
 $("#chatInput").addEventListener("input", () => {
   const t = Date.now();
   if (!currentChat || t - lastTypingPing < 3000) return;

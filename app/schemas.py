@@ -133,3 +133,4 @@ class ConversationOut(BaseModel):
     listing_category: str = ""
     listing_status: str = ""
     last_mine: bool = False
+    pinned: bool = False
