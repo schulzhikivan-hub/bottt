@@ -115,6 +115,8 @@ def save_profile(payload: DatingIn, user_id: str = Depends(writer), db: Session 
     profile.status = "pending"  # every change goes back to moderation
     db.commit()
     db.refresh(profile)
+    from app import adminplus
+    adminplus.notify_staff(db, "Новая анкета знакомств ждёт проверки (админка → Знакомства).", "dating")
     return {**_public(profile), "status": profile.status}
 
 

@@ -8,7 +8,7 @@ from collections import defaultdict
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
-from sqlalchemy import select, func
+from sqlalchemy import select, func, or_
 from sqlalchemy.orm import Session
 
 from app import admin_ops as ops
@@ -273,28 +273,50 @@ def delete_banner(banner_id: int, actor: str = Depends(staff(*ADM)), db: Session
 BROADCAST_PER_TICK = 25   # Telegram allows about 30 messages a second to different people
 
 
+AUDIENCES = {"all": "Все", "employers": "Работодатели", "authors": "Те, кто публиковал объявления",
+             "active30": "Заходили за 30 дней", "inactive30": "Не заходили 30 дней"}
+
+
 class BroadcastIn(BaseModel):
     text: str = Field(min_length=3, max_length=500)
     region_code: str | None = Field(default=None, max_length=20)
+    audience: str = Field(default="all", max_length=12)
+    send_at: dt.datetime | None = None        # empty: stays a draft until an administrator sends it
 
 
 def broadcast_view(b: Broadcast) -> dict:
     return {"id": b.id, "text": b.text, "region_code": b.region_code, "status": b.status, "total": b.total,
-            "sent": b.sent, "failed": b.failed, "created_at": str(b.created_at)}
+            "sent": b.sent, "failed": b.failed, "created_at": str(b.created_at),
+            "audience": b.audience_kind, "send_at": b.send_at.isoformat() if b.send_at else None}
 
 
-def audience(db: Session, region_code: str | None) -> list[str]:
+def audience(db: Session, region_code: str | None, kind: str = "all") -> list[str]:
     """Who gets a broadcast: people who accepted the rules, are not blocked or deleted and did not switch Telegram notices off."""
     stmt = select(User).where(User.consent_at.is_not(None), User.blocked.is_(False), User.deleted_at.is_(None),
                               User.notify_messages.is_(True))
     if region_code:
         stmt = stmt.where(User.region_code == region_code)
+    month_ago = now() - dt.timedelta(days=30)
+    if kind == "employers":
+        stmt = stmt.where(User.employer_status == "approved")
+    elif kind == "authors":
+        stmt = stmt.where(User.tg_id.in_(select(Listing.author_telegram_id)))
+    elif kind == "active30":
+        stmt = stmt.where(User.last_seen_at >= month_ago)
+    elif kind == "inactive30":
+        stmt = stmt.where(or_(User.last_seen_at.is_(None), User.last_seen_at < month_ago))
     return [u.tg_id for u in db.scalars(stmt).all() if u.tg_id.isdigit()]
 
 
-def create_broadcast(db: Session, actor: str, text: str, region_code: str | None) -> Broadcast:
-    b = Broadcast(created_by=actor, text=text.strip(), region_code=region_code or None, status="draft",
-                  total=len(audience(db, region_code)))
+def create_broadcast(db: Session, actor: str, text: str, region_code: str | None, kind: str = "all",
+                     send_at: dt.datetime | None = None) -> Broadcast:
+    if kind not in AUDIENCES:
+        raise HTTPException(400, "Неизвестная группа получателей")
+    if send_at is not None and aware(send_at) <= now():
+        raise HTTPException(400, "Время отправки должно быть в будущем")
+    b = Broadcast(created_by=actor, text=text.strip(), region_code=region_code or None, audience_kind=kind,
+                  status="scheduled" if send_at else "draft", send_at=aware(send_at) if send_at else None,
+                  total=len(audience(db, region_code, kind)))
     db.add(b)
     log_action(db, actor, "broadcast.create", "broadcast", text[:40], f"region={region_code or 'all'} total={b.total}")
     db.commit()
@@ -305,9 +327,9 @@ def start_broadcast(db: Session, actor: str, broadcast_id: int) -> Broadcast:
     b = db.get(Broadcast, broadcast_id)
     if b is None:
         raise HTTPException(404, "Рассылка не найдена")
-    if b.status != "draft":
+    if b.status not in ("draft", "scheduled"):
         raise HTTPException(409, "Эта рассылка уже запущена или завершена")
-    ids = audience(db, b.region_code)
+    ids = audience(db, b.region_code, b.audience_kind)
     for tg in ids:
         db.add(BroadcastTarget(broadcast_id=b.id, tg_id=tg))
     b.total, b.status = len(ids), "sending" if ids else "done"
@@ -322,7 +344,7 @@ def cancel_broadcast(db: Session, actor: str, broadcast_id: int) -> Broadcast:
     b = db.get(Broadcast, broadcast_id)
     if b is None:
         raise HTTPException(404, "Рассылка не найдена")
-    if b.status not in ("draft", "sending"):
+    if b.status not in ("draft", "scheduled", "sending"):
         raise HTTPException(409, "Рассылку уже нельзя отменить")
     b.status, b.finished_at = "cancelled", now()
     log_action(db, actor, "broadcast.cancel", "broadcast", b.id, f"sent={b.sent}")
@@ -332,6 +354,8 @@ def cancel_broadcast(db: Session, actor: str, broadcast_id: int) -> Broadcast:
 
 def broadcast_tick(db: Session, send) -> int:
     """Send the next batch of the oldest running broadcast. `send(tg_id, text) -> bool`. Returns how many were tried."""
+    for due in db.scalars(select(Broadcast).where(Broadcast.status == "scheduled", Broadcast.send_at <= now())).all():
+        start_broadcast(db, due.created_by, due.id)       # the planned time has come
     b = db.scalar(select(Broadcast).where(Broadcast.status == "sending").order_by(Broadcast.id).limit(1))
     if b is None:
         return 0
@@ -362,7 +386,7 @@ def list_broadcasts(actor: str = Depends(staff(*ADM)), db: Session = Depends(get
 
 @router.post("/api/admin/broadcasts", status_code=201)
 def add_broadcast(payload: BroadcastIn, actor: str = Depends(staff(*ADM)), db: Session = Depends(get_db)):
-    return broadcast_view(create_broadcast(db, actor, payload.text, payload.region_code))
+    return broadcast_view(create_broadcast(db, actor, payload.text, payload.region_code, payload.audience, payload.send_at))
 
 
 @router.post("/api/admin/broadcasts/{broadcast_id}/send")

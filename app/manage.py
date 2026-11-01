@@ -236,6 +236,8 @@ def apply_employer(payload: EmployerIn, user_id: str = Depends(writer), db: Sess
     user.contact_person = payload.contact_person.strip()
     user.employer_status = "pending"
     db.commit()
+    from app import adminplus
+    adminplus.notify_staff(db, "Новая заявка работодателя ждёт проверки (админка → Работодатели).", "employer")
     return {"employer_status": user.employer_status}
 
 
@@ -298,9 +300,32 @@ def admin_employer_decision(tg_id: str, decision: str, actor: str = Depends(staf
 
 
 @router.get("/api/admin/audit")
-def admin_audit(limit: int = Query(default=100, ge=1, le=500), actor: str = Depends(staff(*ADM)),
-                db: Session = Depends(get_db)):
+def admin_audit(limit: int = Query(default=100, ge=1, le=500), who: str = Query(default="", max_length=40),
+                action: str = Query(default="", max_length=60), object_type: str = Query(default="", max_length=30),
+                object_id: str = Query(default="", max_length=40), q: str = Query(default="", max_length=60),
+                since: str = Query(default="", max_length=10), until: str = Query(default="", max_length=10),
+                actor: str = Depends(staff(*ADM)), db: Session = Depends(get_db)):
+    """The journal with filters: who, what, which object, free text in details, from–to date (YYYY-MM-DD)."""
+    import datetime as _dt
     from app.models import AuditLog
-    rows = db.scalars(select(AuditLog).order_by(AuditLog.id.desc()).limit(limit)).all()
+    stmt = select(AuditLog)
+    if who:
+        stmt = stmt.where(AuditLog.actor == who)
+    if action:
+        stmt = stmt.where(AuditLog.action.like(action.replace("%", "") + "%"))
+    if object_type:
+        stmt = stmt.where(AuditLog.object_type == object_type)
+    if object_id:
+        stmt = stmt.where(AuditLog.object_id == object_id)
+    if q:
+        stmt = stmt.where(AuditLog.details.ilike(f"%{q}%"))
+    try:
+        if since:
+            stmt = stmt.where(AuditLog.created_at >= _dt.datetime.fromisoformat(since).replace(tzinfo=_dt.timezone.utc))
+        if until:
+            stmt = stmt.where(AuditLog.created_at < _dt.datetime.fromisoformat(until).replace(tzinfo=_dt.timezone.utc) + _dt.timedelta(days=1))
+    except ValueError:
+        raise HTTPException(400, "Дата в формате ГГГГ-ММ-ДД")
+    rows = db.scalars(stmt.order_by(AuditLog.id.desc()).limit(limit)).all()
     return [{"id": r.id, "actor": r.actor, "action": r.action, "object_type": r.object_type,
              "object_id": r.object_id, "details": r.details, "created_at": str(r.created_at)} for r in rows]

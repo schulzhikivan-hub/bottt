@@ -57,6 +57,13 @@ th{background:#f6f8fc;color:var(--hint);font-weight:600}
   main{padding:14px}
   header.top{position:static}
 }
+.gsearch{display:flex;gap:6px;margin-left:auto;margin-right:12px}.gsearch input{min-width:200px}
+nav#tabs em[data-badge]{background:#d93025}nav#tabs em.warn{background:#b45309}
+.wait{font-size:12px;color:#6b7385}.wait.late{color:#d93025;font-weight:700}
+.kv{display:grid;grid-template-columns:150px 1fr;gap:4px 10px;font-size:14px}.kv b{color:#6b7385;font-weight:500}
+.good{color:#188038}.bad{color:#d93025}
+.editbox input,.editbox textarea{width:100%;margin:3px 0}
+.filters{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
 </style></head>
 <body>
 <div id="login" class="card">
@@ -75,7 +82,9 @@ th{background:#f6f8fc;color:var(--hint);font-weight:600}
     <div class="foot"><span id="who"></span><br><button class="act gray" id="logout" hidden>Выйти</button></div>
   </aside>
   <div class="content">
-    <header class="top"><h1 id="title">Главная</h1><span id="status"></span></header>
+    <header class="top"><h1 id="title">Главная</h1>
+      <form id="gSearch" class="gsearch" role="search"><input id="gQuery" placeholder="Найти: №объявления, ID, имя, слово" maxlength="60" aria-label="Поиск по всему"><button class="act" type="submit">Найти</button></form>
+      <span id="status"></span></header>
     <main id="main"></main>
   </div>
 </div>

@@ -337,6 +337,8 @@ def _heartbeat() -> None:
     with SessionLocal() as db:
         observe.beat(db, "bot")
         guard.purge_rate_hits(db)       # old rate-limit counters
+        from app import adminplus
+        adminplus.unblock_expired(db)   # temporary blocks that are over
 
 
 async def expiry_loop(bot: Bot) -> None:

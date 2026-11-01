@@ -104,6 +104,9 @@ def create_ticket(payload: TicketIn, user_id: str = Depends(writer), db: Session
     db.flush()
     db.add(TicketMessage(ticket_id=t.id, staff=False, author=user_id, text=payload.text.strip()))
     db.commit()
+    from app import adminplus
+    adminplus.notify_staff(db, ("Новое оспаривание решения" if t.kind == "appeal" else "Новое обращение в поддержку") + " (админка → Поддержка).",
+                           "ticket", ("support", "moderator", "admin", "super_admin"))
     return {"id": t.id}
 
 

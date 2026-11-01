@@ -32,7 +32,7 @@ from app.guard import rate_limit, check_text, duplicate_note, notify_user
 from app import admin_ops as ops
 from app import catalog
 from app import photos, applications, searches, inbox, promos, adminx, observe, site
-from app import geo, reviews, resumes, referrals, support, extras
+from app import geo, reviews, resumes, referrals, support, extras, adminplus
 from app import fields as listing_fields
 from app.users import get_or_create_user, writer, is_blocked_pair
 from app.models import DatingProfile, TypingMark
@@ -68,6 +68,7 @@ app.include_router(resumes.router)
 app.include_router(referrals.router)
 app.include_router(support.router)
 app.include_router(extras.router)
+app.include_router(adminplus.router)
 app.include_router(listing_fields.router)
 STATIC = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
@@ -286,6 +287,7 @@ def create_report(payload: ReportIn, user_id: str = Depends(writer), db: Session
         db.add(Report(reporter_tg_id=user_id, target_type=payload.target_type,
                       target_id=payload.target_id, reason=payload.reason, comment=payload.comment))
         db.commit()
+        adminplus.notify_staff(db, "Новая жалоба ждёт рассмотрения (админка → Жалобы).", "report", ("support", "moderator", "admin", "super_admin"))
     # Several different reporters hide a listing until a moderator decides
     if payload.target_type == "listing":
         count = db.scalar(select(func.count(func.distinct(Report.reporter_tg_id))).where(

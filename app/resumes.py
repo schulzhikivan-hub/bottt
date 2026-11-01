@@ -74,6 +74,8 @@ def save_resume(payload: ResumeIn, user_id: str = Depends(writer), db: Session =
     r.status, r.note, r.updated_at = "pending", "", now()    # every edit is checked again
     db.add(r)
     db.commit()
+    from app import adminplus
+    adminplus.notify_staff(db, "Новое резюме ждёт проверки (админка → Резюме).", "resume")
     return {"status": r.status}
 
 

@@ -131,14 +131,45 @@ async function logout() {
 }
 $("#logout").onclick = logout;
 
+const BADGE_KEYS = {listings: "listings", reports: "reports", support: "support", resumes: "resumes", employers: "employers", dating: "dating", errors: "errors"};
 async function refreshBadges() {
   try {
-    const q = MOD.includes(role()) ? (await api("/api/admin/listings")).length : 0;
-    const rp = (await api("/api/admin/reports?status=new")).length;
-    const set = (k, n) => { const el = document.querySelector(`[data-badge="${k}"]`); if (el) { el.textContent = n; el.hidden = !n; } };
-    set("listings", q); set("reports", rp);
+    const c = await api("/api/admin/counters");
+    const set = (k, n, late) => { const el = document.querySelector(`[data-badge="${k}"]`); if (el) { el.textContent = n; el.hidden = !n; el.classList.toggle("warn", !!late); } };
+    for (const [tab, key] of Object.entries(BADGE_KEYS)) set(tab, c[key] || 0, (key === "listings" && c.listings_wait_h >= 24) || (key === "support" && c.support_wait_h >= 24));
+    document.title = (c.listings + c.support + c.reports > 0 ? `(${c.listings + c.support + c.reports}) ` : "") + "KOREA HUB · админка";
   } catch (e) { /* счётчики не обязательны */ }
 }
+setInterval(() => { if (session()) refreshBadges(); }, 60000);
+
+// ---------- общий поиск ----------
+$("#gSearch").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const q = $("#gQuery").value.trim();
+  if (!q) return;
+  try {
+    const r = await api("/api/admin/search?q=" + encodeURIComponent(q));
+    current = "search";
+    document.querySelectorAll("#tabs button").forEach((b) => b.classList.remove("active"));
+    $("#title").textContent = "Результаты: " + q;
+    const L = r.listings.map((x) => `<div class="card"><b>#${x.id} ${esc(x.title)}</b> <span class="badge">${esc(STATUS_RU[x.status] || x.status)}</span> · ${esc(x.city)} · автор ${esc(x.author_id)}
+      <div><button class="act gray" data-gl="${x.id}">Открыть</button><button class="act gray" data-gu="${esc(x.author_id)}">Автор</button></div><div data-gbox></div></div>`).join("");
+    const U = r.users.map((u) => `<div class="card"><b>${esc(u.name || "без имени")}</b> · ID ${esc(u.tg_id)} · ${esc(u.city)}${u.blocked ? " · <span class='bad'>заблокирован</span>" : ""}
+      <div><button class="act gray" data-gu="${esc(u.tg_id)}">Карточка</button></div></div>`).join("");
+    const T = r.tickets.map((t) => `<div class="card">Обращение #${t.id} · ${esc(t.kind)} · ${esc(t.status)} · пользователь ${esc(t.user)}</div>`).join("");
+    const P = r.payments.map((t) => `<div class="card">Платёж #${t.id} · ${t.stars} ⭐ · ${esc(t.status)} · пользователь ${esc(t.user)}</div>`).join("");
+    $("#main").innerHTML = (L || U || T || P) ? (L ? "<h3>Объявления</h3>" + L : "") + (U ? "<h3>Люди</h3>" + U : "") + (T ? "<h3>Обращения</h3>" + T : "") + (P ? "<h3>Платежи</h3>" + P : "")
+      : '<div class="card muted">Ничего не найдено.</div>';
+  } catch (err) { say(err.message); }
+});
+$("#main").addEventListener("click", async (e) => {
+  const gl = e.target.closest("[data-gl]");
+  if (gl) {
+    try { const x = await api("/api/admin/listings/" + gl.dataset.gl); gl.closest(".card").querySelector("[data-gbox]").innerHTML = listingCardHtml(x); } catch (err) { say(err.message); }
+  }
+  const gu = e.target.closest("[data-gu]");
+  if (gu) openUserCard(gu.dataset.gu);
+});
 
 function show(tab) {
   const def = TABS.find((t) => t.key === tab);
@@ -149,12 +180,23 @@ function show(tab) {
   $("#main").innerHTML = "";
   LOADERS[tab](def).then(() => { say("Обновлено " + new Date().toLocaleTimeString("ru-RU")); refreshBadges(); }).catch((e) => say(e.message));
 }
-const reload = () => show(current);
+const reload = () => { if (LOADERS[current]) show(current); else if (current === "search") $("#gSearch").requestSubmit(); };
 
 // ---- главная: показатели, график, воронка ----
 function bars(days, key) {
   const max = Math.max(1, ...days.map((d) => d[key]));
   return `<div class="bars">${days.map((d) => `<i class="${d[key] ? "" : "zero"}" style="height:${Math.max(3, Math.round(d[key] / max * 100))}%" title="${esc(d.date)}: ${d[key]}"></i>`).join("")}</div>`;
+}
+async function fillSystem() {
+  try {
+    const x = await api("/api/admin/system");
+    const ok = (v, t) => `<span class="${v ? "good" : "bad"}">${v ? "✔" : "✖"} ${t}</span>`;
+    $("#sysCard").innerHTML = `<h3>Состояние системы</h3><div class="kv"><b>База данных</b><span>${ok(x.db, x.db ? "работает" : "недоступна")}</span>
+      <b>Бот</b><span>${ok(x.bot_ok, x.bot_age_s == null ? "нет сигнала" : "отзывается " + x.bot_age_s + " с назад")}</span>
+      <b>Свободно на диске</b><span>${x.disk_free_mb == null ? "—" : ok(x.disk_free_mb > 2000, Math.round(x.disk_free_mb / 1024) + " ГБ")}</span>
+      <b>Сертификат HTTPS</b><span>${x.cert_days == null ? "не проверяется" : ok(x.cert_days > 14, "ещё " + x.cert_days + " дн.")}</span>
+      <b>Ошибки у людей за сутки</b><span>${ok(x.client_errors_24h === 0, x.client_errors_24h)}</span><b>Пользователей</b><span>${x.users}</span></div>`;
+  } catch (err) { $("#sysCard").innerHTML = ""; }
 }
 async function loadDash() {
   const [s, a, queue] = await Promise.all([api("/api/admin/stats"), api("/api/admin/analytics?days=30"), api("/api/admin/listings")]);
@@ -170,6 +212,7 @@ async function loadDash() {
       <div><b>${s.week.stars} ⭐</b><small>за неделю (${s.week.sales} продаж)</small></div>
       <div><b>${s.payers}</b><small>платящих</small></div>
     </div>
+    <div class="card" id="sysCard"><h3>Состояние системы</h3><p class="muted">Загрузка…</p></div>
     <div class="card"><h3>Новые пользователи за 30 дней</h3>${bars(a.days, "users")}
       <h3 style="margin-top:12px">Новые объявления</h3>${bars(a.days, "listings")}
       <h3 style="margin-top:12px">Заработано звёзд по дням</h3>${bars(a.days, "stars")}<p class="muted">Итого за 30 дней: ${a.totals.stars} ⭐, откликов: ${a.totals.applications}</p></div>
@@ -180,6 +223,7 @@ async function loadDash() {
     <div class="card"><h3>Последние на проверке</h3>${queue.length ? `<table><tr><th>№</th><th>Раздел</th><th>Название</th><th>Город</th><th></th></tr>${queue.slice(0, 8).map((x) => `
       <tr data-id="${x.id}"><td>${x.id}</td><td>${esc(CAT[x.category] || x.category)}</td><td>${esc(x.title)}</td><td>${esc(x.city)}</td>
       <td><button class="act ok" data-quick="approve">Одобрить</button><button class="act no" data-quick="reject">Отклонить</button></td></tr>`).join("")}</table>` : '<p class="muted">Очередь пуста.</p>'}</div>`;
+  fillSystem();
 }
 document.addEventListener("click", async (e) => {
   const btn = e.target.closest("[data-quick]");
@@ -235,8 +279,40 @@ function listingCardHtml(x, opts = {}) {
     <div class="thumbs">${photos || '<span class="muted">Фото нет</span>'}${waiting ? ` <span class="muted">(ждут решения: ${waiting})</span>` : ""}</div>
     ${photos ? '<button class="act gray" data-banphotos>🚫 Запретить эти фото</button>' : ""}
     <p class="muted">Контакт: ${esc(x.contact || "—")} · Автор: ${esc(x.author_id || "—")} · просмотров: ${x.views || 0}${x.note ? " · комментарий: " + esc(x.note) : ""}</p>
-    ${buttons}</div>`;
+    ${buttons}${extraButtons(x)}<div data-editbox></div></div>`;
 }
+const hoursSince = (iso) => (iso ? Math.max(0, Math.floor((Date.now() - new Date(iso.endsWith("Z") || iso.includes("+") ? iso : iso + "Z").getTime()) / 3600000)) : 0);
+function extraButtons(x) {
+  const wait = x.status === "pending" || x.has_edit ? `<span class="wait ${hoursSince(x.created_at) >= 24 ? "late" : ""}">ждёт ${hoursSince(x.created_at)} ч</span> ` : "";
+  const undo = ["approved", "rejected", "needs_fix", "hidden"].includes(x.status) ? '<button class="act gray" data-undo>↶ Отменить решение</button>' : "";
+  const claimed = claimsMap[x.id] ? `<span class="wait late">🔒 в работе: ${esc(claimsMap[x.id])}</span> ` : '<button class="act gray" data-claim>🔒 Взять в работу</button>';
+  return `<div class="row" style="margin-top:6px">${wait}${claimed}<button class="act gray" data-edit>✏ Править</button>${undo}</div>`;
+}
+let claimsMap = {};
+async function loadClaims(kind) { try { claimsMap = await api("/api/admin/claims?kind=" + kind); } catch (e) { claimsMap = {}; } }
+$("#main").addEventListener("click", async (e) => {
+  const card = e.target.closest("[data-id]");
+  if (!card) return;
+  const id = card.dataset.id;
+  try {
+    if (e.target.closest("[data-claim]")) { await post("/api/admin/claim", {kind: "listing", id}); say("Вы взяли объявление в работу на 15 минут"); claimsMap[id] = "вы"; e.target.closest("[data-claim]").outerHTML = '<span class="wait late">🔒 в работе: вы</span>'; }
+    if (e.target.closest("[data-undo]")) { if (!confirm("Отменить последнее решение по этому объявлению?")) return; await post(`/api/admin/listings/${id}/undo`); say("Решение отменено"); reload(); }
+    if (e.target.closest("[data-edit]")) {
+      const box = card.querySelector("[data-editbox]");
+      if (box.innerHTML) { box.innerHTML = ""; return; }
+      const x = await api("/api/admin/listings/" + id);
+      box.innerHTML = `<div class="editbox"><input data-ef="title" value="${esc(x.title)}" maxlength="120"><textarea data-ef="description" rows="5" maxlength="3000">${esc(x.description || "")}</textarea>
+        <input data-ef="city" value="${esc(x.city)}" maxlength="100"><input data-ef="price" value="${esc(x.price || "")}" maxlength="80" placeholder="Цена (текст)"><input data-ef="contact" value="${esc(x.contact || "")}" maxlength="160">
+        <button class="act ok" data-esave>Сохранить правку</button> <span class="muted">Автор получит уведомление о правке</span></div>`;
+    }
+    if (e.target.closest("[data-esave]")) {
+      const body = {};
+      card.querySelectorAll("[data-ef]").forEach((el) => { body[el.dataset.ef] = el.value; });
+      const r = await api(`/api/admin/listings/${id}/edit`, {method: "PUT", body: JSON.stringify(body)});
+      say(r.changed.length ? "Сохранено: " + r.changed.join(", ") : "Изменений нет"); reload();
+    }
+  } catch (err) { say(err.message); }
+});
 function reasonFrom(card, act) {
   const key = card.querySelector("[data-template]")?.value;
   if (key) return TEMPLATES.find((t) => t.key === key)?.text || "";
@@ -265,6 +341,7 @@ async function listingAction(e) {
 
 // ---- модерация: очередь, поиск, массовые действия ----
 async function loadListings() {
+  await loadClaims("listing");
   TEMPLATES = await api("/api/admin/templates");
   const rows = await api("/api/admin/listings");
   $("#main").innerHTML = `
@@ -304,6 +381,7 @@ $("#main").addEventListener("click", listingAction);
 
 // ---- вакансии, жильё, барахолка ----
 async function loadSection(def) {
+  await loadClaims("listing");
   TEMPLATES = TEMPLATES.length ? TEMPLATES : await api("/api/admin/templates");
   $("#main").innerHTML = `<div class="toolbar"><select id="fStatus"><option value="">Любой статус</option>
     ${Object.entries(STATUS_RU).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join("")}</select>
@@ -368,12 +446,22 @@ $("#main").addEventListener("click", async (e) => {
 // ---- жалобы с контекстом ----
 async function loadReports() {
   const rows = await api("/api/admin/reports?status=new");
-  $("#main").innerHTML = rows.length ? rows.map((r) => `
+  let summary = "";
+  if (ADM.includes(role())) {
+    try {
+      const r = await api("/api/admin/reports-summary?days=30");
+      summary = `<div class="card"><h3>Жалобы за 30 дней</h3><div class="kv"><b>Признано обоснованными</b><span>${r.justified_pct == null ? "—" : r.justified_pct + "%"}</span>
+        <b>По причинам</b><span>${r.by_reason.map((x) => esc(x.reason) + ": " + x.n).join(" · ") || "—"}</span>
+        <b>По объектам</b><span>${r.by_type.map((x) => esc(x.type) + ": " + x.n).join(" · ") || "—"}</span>
+        <b>Чаще всего</b><span>${r.top.map((x) => esc(x.type) + " " + esc(x.id) + " (" + x.n + ")").join(" · ") || "—"}</span></div></div>`;
+    } catch (err) { /* сводка необязательна */ }
+  }
+  $("#main").innerHTML = summary + (rows.length ? rows.map((r) => `
     <div class="card" data-rid="${r.id}"><b>Жалоба #${r.id}</b> · ${esc(r.target_type)} ${esc(r.target_id)} · причина: ${esc(r.reason)}
       <div class="meta">${esc(r.created_at)}</div><p>${esc(r.comment || "")}</p><div data-ctx></div>
       <button class="act gray" data-rep="context">Показать контекст</button>
       <button class="act ok" data-rep="resolve">Принять (скрыть / заблокировать)</button>
-      <button class="act no" data-rep="reject">Отклонить жалобу</button></div>`).join("") : '<div class="card muted">Новых жалоб нет.</div>';
+      <button class="act no" data-rep="reject">Отклонить жалобу</button></div>`).join("") : '<div class="card muted">Новых жалоб нет.</div>');
 }
 $("#main").addEventListener("click", async (e) => {
   const btn = e.target.closest("[data-rep]");
@@ -393,11 +481,14 @@ $("#main").addEventListener("click", async (e) => {
 
 // ---- поддержка: обращения и оспаривания ----
 async function loadSupport() {
+  await loadClaims("ticket");
   const rows = await api("/api/admin/tickets?status=open");
   const answered = await api("/api/admin/tickets?status=answered");
-  const card = (t) => `<div class="card" data-tid="${t.id}"><b>${t.kind === "appeal" ? "Оспаривание" : "Обращение"} #${t.id}</b> · пользователь ${esc(t.user)} · ${esc(fmt(t.updated_at))}
+  const card = (t) => `<div class="card" data-tid="${t.id}"><label style="float:right"><input type="checkbox" data-tpick> выбрать</label><b>${t.kind === "appeal" ? "Оспаривание" : "Обращение"} #${t.id}</b> · пользователь ${esc(t.user)} · <button class="act gray" data-gu="${esc(t.user)}">карточка</button>
+    <span class="wait ${hoursSince(t.updated_at) >= 24 && t.status === "open" ? "late" : ""}">${t.status === "open" ? "ждёт " + hoursSince(t.updated_at) + " ч" : esc(fmt(t.updated_at))}</span>
+    ${claimsMap[t.id] ? `<span class="wait late">🔒 ${esc(claimsMap[t.id])}</span>` : ""}
     <p>${esc(t.preview)}</p><button class="act gray" data-tk="open">Открыть</button><div data-tbox></div></div>`;
-  $("#main").innerHTML = `<h3>Ждут ответа (${rows.length})</h3>` + (rows.length ? rows.map(card).join("") : '<div class="card muted">Нет.</div>') +
+  $("#main").innerHTML = `<div class="toolbar"><button class="act gray" id="tBulkClose">Закрыть выбранные</button></div><h3>Ждут ответа (${rows.length})</h3>` + (rows.length ? rows.map(card).join("") : '<div class="card muted">Нет.</div>') +
     `<h3>Отвечено (${answered.length})</h3>` + (answered.length ? answered.map(card).join("") : '<div class="card muted">Нет.</div>');
 }
 $("#main").addEventListener("click", async (e) => {
@@ -408,6 +499,7 @@ $("#main").addEventListener("click", async (e) => {
   const box = card.querySelector("[data-tbox]");
   try {
     if (b.dataset.tk === "open") {
+      try { await post("/api/admin/claim", {kind: "ticket", id}); } catch (err) { say(err.message); return; }   // два сотрудника не отвечают одному и тому же
       const t = await api(`/api/admin/tickets/${id}`);
       box.innerHTML = t.messages.map((m) => `<div class="meta"><b>${m.staff ? "Поддержка" : "Пользователь"}</b> ${esc(fmt(m.at))}</div><p style="white-space:pre-wrap">${esc(m.text)}</p>`).join("") +
         (t.listing ? `<div class="meta">Объявление #${t.listing.id} «${esc(t.listing.title)}» · статус: ${esc(STATUS_RU[t.listing.status] || t.listing.status)}${t.listing.note ? " · причина: " + esc(t.listing.note) : ""}</div>` : "") +
@@ -424,6 +516,19 @@ $("#main").addEventListener("click", async (e) => {
     if (b.dataset.tk === "close") await post(`/api/admin/tickets/${id}/close`);
     reload();
   } catch (err) { say(err.message); }
+});
+
+$("#main").addEventListener("click", async (e) => {
+  if (e.target.id === "tBulkClose") {
+    const ids = [...document.querySelectorAll("[data-tpick]:checked")].map((c) => c.closest("[data-tid]").dataset.tid);
+    if (!ids.length) { say("Отметьте обращения"); return; }
+    try { const r = await post("/api/admin/tickets-bulk-close", {ids}); say("Закрыто: " + r.done); reload(); } catch (err) { say(err.message); }
+  }
+  if (e.target.id === "rBulkOk") {
+    const ids = [...document.querySelectorAll("[data-rpick]:checked")].map((c) => c.closest("[data-owner]").dataset.owner);
+    if (!ids.length) { say("Отметьте резюме"); return; }
+    try { const r = await post("/api/admin/resumes-bulk/approve", {ids}); say("Опубликовано: " + r.done); reload(); } catch (err) { say(err.message); }
+  }
 });
 
 // ---- тексты, FAQ, курс, автомодерация ----
@@ -476,9 +581,9 @@ $("#main").addEventListener("click", async (e) => {
 // ---- резюме ----
 async function loadResumes() {
   const rows = await api("/api/admin/resumes?status=pending");
-  $("#main").innerHTML = rows.length ? rows.map((r) => `<div class="card" data-owner="${esc(r.owner)}"><b>${esc(r.position)}</b> · ${esc(r.city)} · виза ${esc(r.visa || "—")} · от ${r.salary_from ?? "—"} ₩
+  $("#main").innerHTML = (rows.length ? '<div class="toolbar"><button class="act ok" id="rBulkOk">Опубликовать выбранные</button></div>' : "") + (rows.length ? rows.map((r) => `<div class="card" data-owner="${esc(r.owner)}"><label style="float:right"><input type="checkbox" data-rpick> выбрать</label><b>${esc(r.position)}</b> · ${esc(r.city)} · виза ${esc(r.visa || "—")} · от ${r.salary_from ?? "—"} ₩
     <div class="meta">пользователь ${esc(r.owner)} · ${esc(r.updated || "")}</div><p>${esc(r.experience)}</p><p>${esc(r.about)}</p>
-    <button class="act ok" data-cv="approve">Опубликовать</button><button class="act no" data-cv="reject">Отклонить</button></div>`).join("") : '<div class="card muted">Новых резюме нет.</div>';
+    <button class="act ok" data-cv="approve">Опубликовать</button><button class="act no" data-cv="reject">Отклонить</button> <button class="act gray" data-gu="${esc(r.owner)}">Карточка</button></div>`).join("") : '<div class="card muted">Новых резюме нет.</div>');
 }
 $("#main").addEventListener("click", async (e) => {
   const b = e.target.closest("[data-cv]");
@@ -506,6 +611,39 @@ $("#main").addEventListener("click", async (e) => {
   try { await post(`/api/admin/reviews/${b.closest("[data-revid]").dataset.revid}/${b.dataset.rev}`); reload(); } catch (err) { say(err.message); }
 });
 
+// ---- карточка человека ----
+async function openUserCard(id) {
+  try {
+    const u = await api(`/api/admin/users/${encodeURIComponent(id)}/card`);
+    current = "usercard";
+    document.querySelectorAll("#tabs button").forEach((b) => b.classList.remove("active"));
+    $("#title").textContent = "Карточка " + (u.name || "ID " + u.tg_id);
+    const blocked = u.blocked ? `<span class="bad">заблокирован${u.blocked_until ? " до " + esc(fmt(u.blocked_until)) : " бессрочно"}</span>${u.block_reason ? " · " + esc(u.block_reason) : ""}` : '<span class="good">активен</span>';
+    $("#main").innerHTML = `<div class="card" data-uid="${esc(u.tg_id)}"><div class="kv">
+      <b>ID</b><span>${esc(u.tg_id)}</span><b>Имя</b><span>${esc(u.name || "—")}</span><b>Город</b><span>${esc(u.city)}</span><b>Виза</b><span>${esc(u.visa || "—")}</span>
+      <b>Статус</b><span>${blocked}${u.deleted ? " · аккаунт удалён" : ""}${u.trusted ? " · ✔ проверенный автор" : ""}${u.employer_status === "approved" ? " · работодатель " + esc(u.company) : ""}</span>
+      <b>Регистрация</b><span>${esc(fmt(u.created_at))}</span><b>Был в сети</b><span>${esc(fmt(u.last_seen_at) || "—")}</span><b>Согласие с правилами</b><span>${u.consent ? "да" : "нет"}</span>
+      <b>Объявлений</b><span>${u.listings.length}</span><b>Откликов</b><span>${u.applications}</span><b>Чатов</b><span>${u.chats}</span><b>В избранном</b><span>${u.favorites}</span>
+      <b>Жалоб на него / от него</b><span>${u.reports_against} / ${u.reports_made}</span><b>Отзывов получено / написано</b><span>${u.reviews_got} / ${u.reviews_written}</span>
+      <b>Заплатил</b><span>${u.stars_paid} ⭐</span><b>Резюме</b><span>${u.has_resume ? "есть" : "нет"}</span></div>
+      <div style="margin-top:10px">${u.blocked ? '<button class="act ok" data-ux="unblock">Разблокировать</button>' : '<button class="act no" data-ux="block">Заблокировать бессрочно</button><button class="act warn" data-ux="blockfor">Заблокировать на срок</button>'}
+        <button class="act gray" data-ux="${u.trusted ? "untrust" : "trust"}">${u.trusted ? "Снять «проверенный автор»" : "Отметить «проверенный автор»"}</button></div></div>
+      <div class="card"><h3>Заметки сотрудников</h3>${u.notes.map((n) => `<div class="meta"><b>${esc(n.author)}</b> ${esc(fmt(n.at))} <button class="act gray" data-delnote="${n.id}">убрать</button></div><p>${esc(n.text)}</p>`).join("") || '<p class="muted">Заметок нет.</p>'}
+        <textarea id="noteText" rows="2" maxlength="500" placeholder="Например: предупреждён о телефонах в описании"></textarea><button class="act ok" id="noteAdd">Добавить заметку</button></div>
+      <div class="card"><h3>Объявления</h3>${u.listings.map((x) => `<div>#${x.id} ${esc(x.title)} <span class="badge">${esc(STATUS_RU[x.status] || x.status)}</span> <button class="act gray" data-gl="${x.id}">Открыть</button><div data-gbox></div></div>`).join("") || '<p class="muted">Нет.</p>'}</div>
+      <div class="card"><h3>Обращения в поддержку</h3>${u.tickets.map((t) => `<div>#${t.id} · ${esc(t.kind)} · ${esc(t.status)}</div>`).join("") || '<p class="muted">Нет.</p>'}</div>`;
+    say("");
+  } catch (err) { say(err.message); }
+}
+$("#main").addEventListener("click", async (e) => {
+  const holder = document.querySelector('#main > .card[data-uid]');
+  if (e.target.id === "noteAdd" && holder) {
+    try { await post(`/api/admin/users/${holder.dataset.uid}/notes`, {text: $("#noteText").value.trim()}); openUserCard(holder.dataset.uid); } catch (err) { say(err.message); }
+  }
+  const dn = e.target.closest("[data-delnote]");
+  if (dn && holder) { try { await api(`/api/admin/notes/${dn.dataset.delnote}`, {method: "DELETE"}); openUserCard(holder.dataset.uid); } catch (err) { say(err.message); } }
+});
+
 // ---- пользователи ----
 async function loadUsers() {
   $("#main").innerHTML = `<div class="toolbar"><input id="userQuery" placeholder="ID пользователя"><button class="act" id="userSearch">Найти</button></div><div id="usersList"></div>`;
@@ -515,6 +653,7 @@ async function loadUsers() {
       <div class="card" data-uid="${esc(u.tg_id)}"><b>ID ${esc(u.tg_id)}</b> · ${esc(u.city)} · согласие: ${u.consent ? "да" : "нет"}${u.trusted ? " · ✔ проверенный автор" : ""}
         ${u.deleted ? " · аккаунт удалён" : ""}${u.blocked ? " · <b>заблокирован</b>" : ""}${u.block_reason ? `<div class="meta">Причина: ${esc(u.block_reason)}</div>` : ""}
         <div data-act-box></div>
+        <button class="act gray" data-ux="card">Карточка</button>
         <button class="act gray" data-ux="activity">Активность</button>
         <button class="act gray" data-ux="${u.trusted ? "untrust" : "trust"}">${u.trusted ? "Снять отметку «проверен»" : "Отметить «проверенный автор»"}</button>
         ${u.blocked ? '<button class="act ok" data-ux="unblock">Разблокировать</button>' : '<button class="act no" data-ux="block">Заблокировать</button>'}</div>`).join("")
@@ -529,6 +668,16 @@ $("#main").addEventListener("click", async (e) => {
   const card = btn.closest("[data-uid]");
   const id = card.dataset.uid;
   try {
+    if (btn.dataset.ux === "card") { openUserCard(id); return; }
+    if (btn.dataset.ux === "blockfor") {
+      const days = Number(prompt("На сколько дней заблокировать? (1–365)", "7"));
+      if (!days) return;
+      const why = ask("Причина блокировки (пользователь её не увидит):");
+      if (!why) return;
+      await post(`/api/admin/users/${id}/block-for`, {reason: why, days});
+      say(`Заблокирован на ${days} дн.`); if (current === "usercard") openUserCard(id); else reload();
+      return;
+    }
     if (btn.dataset.ux === "activity") {
       const a = await api(`/api/admin/users/${id}/activity`);
       const fmtObj = (o) => Object.entries(o).map(([k, v]) => `${esc(STATUS_RU[k] || k)}: ${v}`).join(", ") || "нет";
@@ -538,13 +687,13 @@ $("#main").addEventListener("click", async (e) => {
     }
     if (btn.dataset.ux === "trust" || btn.dataset.ux === "untrust") {
       await post(`/api/admin/users/${id}/trust/${btn.dataset.ux === "trust" ? "on" : "off"}`);
-      reload();
+      if (current === "usercard") openUserCard(id); else reload();
       return;
     }
     const reason = ask(btn.dataset.ux === "block" ? "Причина блокировки (пользователь её не увидит):" : "Причина разблокировки:");
     if (!reason) return;
     await post(`/api/admin/users/${id}/${btn.dataset.ux}`, {reason});
-    reload();
+    if (current === "usercard") openUserCard(id); else reload();
   } catch (err) { say(err.message); }
 });
 
@@ -619,16 +768,20 @@ async function loadMarketing() {
       Отправка идёт постепенно (около 25 сообщений за раз), её можно остановить.</p>
       <textarea id="cText" rows="3" maxlength="500" placeholder="Текст рассылки (до 500 символов)"></textarea>
       <div class="row"><select id="cRegion"><option value="">Вся Корея</option>${geo.map((r) => `<option value="${esc(r.code)}">${esc(r.name)}</option>`).join("")}</select>
-      <button class="act" id="cMake">Создать черновик</button></div>
-      <table><tr><th>№</th><th>Текст</th><th>Кому</th><th>Статус</th><th>Отправлено</th><th></th></tr>${casts.map((c) => `<tr data-cid="${c.id}"><td>${c.id}</td><td>${esc(c.text.slice(0, 70))}</td><td>${esc(c.region_code || "все")}</td>
-        <td>${esc(c.status)}</td><td>${c.sent}/${c.total}${c.failed ? ` (ошибок ${c.failed})` : ""}</td><td>
-        ${c.status === "draft" ? '<button class="act ok" data-csend>Отправить</button>' : ""}${["draft", "sending"].includes(c.status) ? '<button class="act no" data-ccancel>Остановить</button>' : ""}</td></tr>`).join("")}</table></div>`;
+      <select id="cAud"><option value="all">Все</option><option value="employers">Работодатели</option><option value="authors">Кто публиковал объявления</option><option value="active30">Заходили за 30 дней</option><option value="inactive30">Не заходили 30 дней</option></select>
+      <label>Отправить в <input id="cWhen" type="datetime-local"></label> <span class="muted">пусто — черновик, запустите вручную</span>
+      <button class="act" id="cMake">Создать</button></div>
+      <table><tr><th>№</th><th>Текст</th><th>Кому</th><th>Статус</th><th>Отправлено</th><th></th></tr>${casts.map((c) => `<tr data-cid="${c.id}"><td>${c.id}</td><td>${esc(c.text.slice(0, 70))}</td><td>${esc(c.region_code || "вся Корея")} · ${esc({all: "все", employers: "работодатели", authors: "авторы", active30: "активные", inactive30: "неактивные"}[c.audience] || c.audience)}</td>
+        <td>${esc(c.status === "scheduled" ? "запланирована на " + fmt(c.send_at) : c.status)}</td><td>${c.sent}/${c.total}${c.failed ? ` (ошибок ${c.failed})` : ""}</td><td>
+        ${["draft", "scheduled"].includes(c.status) ? '<button class="act ok" data-csend>Отправить сейчас</button>' : ""}${["draft", "scheduled", "sending"].includes(c.status) ? '<button class="act no" data-ccancel>Остановить</button>' : ""}</td></tr>`).join("")}</table></div>`;
   $("#bAdd").onclick = async () => {
     try { await post("/api/admin/banners", {text: $("#bText").value.trim(), link: $("#bLink").value.trim(), days: $("#bDays").value ? Number($("#bDays").value) : null}); reload(); }
     catch (err) { say(err.message); }
   };
   $("#cMake").onclick = async () => {
-    try { const c = await post("/api/admin/broadcasts", {text: $("#cText").value.trim(), region_code: $("#cRegion").value || null}); say(`Черновик создан: получателей ${c.total}`); reload(); }
+    try { const when = $("#cWhen").value ? new Date($("#cWhen").value).toISOString() : null;
+      const c = await post("/api/admin/broadcasts", {text: $("#cText").value.trim(), region_code: $("#cRegion").value || null, audience: $("#cAud").value, send_at: when});
+      say(c.status === "scheduled" ? `Запланировано: получателей ${c.total}` : `Черновик создан: получателей ${c.total}`); reload(); }
     catch (err) { say(err.message); }
   };
 }
@@ -708,16 +861,30 @@ async function loadErrors() {
     : '<div class="card muted">Ошибок пока нет.</div>';
 }
 async function loadAudit() {
-  const rows = await api("/api/admin/audit?limit=200");
-  $("#main").innerHTML = rows.length ? `<table><tr><th>Время</th><th>Кто</th><th>Действие</th><th>Объект</th><th>Детали</th></tr>
-    ${rows.map((r) => `<tr><td>${esc(fmt(r.created_at))}</td><td>${esc(r.actor)}</td><td>${esc(r.action)}</td><td>${esc(r.object_type)} ${esc(r.object_id)}</td><td>${esc(r.details)}</td></tr>`).join("")}</table>`
-    : '<div class="card muted">Журнал пуст.</div>';
+  $("#main").innerHTML = `<form id="auditForm" class="filters"><input name="who" placeholder="Кто (ID)" style="width:110px"><input name="action" placeholder="Действие, напр. listing.reject" style="width:200px">
+    <input name="object_type" placeholder="Объект, напр. listing" style="width:150px"><input name="object_id" placeholder="№ объекта" style="width:100px"><input name="q" placeholder="Слово в деталях" style="width:160px">
+    <input name="since" type="date"><input name="until" type="date"><button class="act" type="submit">Показать</button></form><div id="auditList"></div>`;
+  const go = async () => {
+    const q = new URLSearchParams({limit: "200"});
+    new FormData($("#auditForm")).forEach((v, k) => { if (String(v).trim()) q.set(k, String(v).trim()); });
+    const rows = await api("/api/admin/audit?" + q);
+    $("#auditList").innerHTML = rows.length ? `<table><tr><th>Время</th><th>Кто</th><th>Действие</th><th>Объект</th><th>Детали</th></tr>
+      ${rows.map((r) => `<tr><td>${esc(fmt(r.created_at))}</td><td>${esc(r.actor)}</td><td>${esc(r.action)}</td><td>${esc(r.object_type)} ${esc(r.object_id)}</td><td>${esc(r.details)}</td></tr>`).join("")}</table>`
+      : '<div class="card muted">Записей по этим условиям нет.</div>';
+  };
+  $("#auditForm").onsubmit = (e) => { e.preventDefault(); go().catch((err) => say(err.message)); };
+  await go();
 }
-
 // ---- выгрузки ----
 async function loadSettings() {
+  let mine = [];
+  try { mine = await api("/api/admin/my-sessions"); } catch (err) { mine = []; }
   $("#main").innerHTML = `<div class="card"><h3>Выгрузка в таблицу (CSV)</h3><p class="muted">Файлы открываются в Excel и Google Таблицах. В выгрузке пользователей нет имён и контактов. Каждая выгрузка записывается в журнал.</p>
-    ${["users:Пользователи", "payments:Платежи", "listings:Объявления"].map((x) => { const [k, v] = x.split(":"); return `<button class="act" data-export="${k}">⬇ ${v}</button>`; }).join("")}</div>`;
+    ${["users:Пользователи", "payments:Платежи", "listings:Объявления"].map((x) => { const [k, v] = x.split(":"); return `<button class="act" data-export="${k}">⬇ ${v}</button>`; }).join("")}</div>
+    <div class="card"><h3>Мои входы</h3><p class="muted">Активных входов: ${mine.length}. Если потеряли телефон или вошли на чужом устройстве, закройте все.</p>
+      <button class="act no" id="logoutAll">Выйти на всех устройствах</button></div>`;
+  const la = document.getElementById("logoutAll");
+  if (la) la.onclick = async () => { if (!confirm("Закрыть все ваши входы, включая этот?")) return; try { await post("/api/admin/logout-all"); logout(); } catch (err) { say(err.message); } };
 }
 $("#main").addEventListener("click", async (e) => {
   const btn = e.target.closest("[data-export]");
@@ -734,6 +901,22 @@ $("#main").addEventListener("click", async (e) => {
 });
 
 // ---- сотрудники (только суперадминистратор) ----
+async function fillStaffExtras() {
+  try {
+    const d = await api("/api/admin/staff-detail");
+    $("#staffDetail").innerHTML = d.length ? `<table><tr><th>Сотрудник</th><th>Одобрил</th><th>Отклонил</th><th>На доработку</th><th>Скрыл</th><th>Ответов</th><th>Жалоб</th><th>Доля отказов</th></tr>
+      ${d.map((x) => `<tr><td>${esc(x.actor)}</td><td>${x.approved}</td><td>${x.rejected}</td><td>${x.fixes}</td><td>${x.hidden}</td><td>${x.replies}</td><td>${x.reports}</td><td>${x.reject_pct == null ? "—" : x.reject_pct + "%"}</td></tr>`).join("")}</table>` : "Пока нет данных.";
+    const l = await api("/api/admin/staff-logins");
+    $("#staffLogins").innerHTML = l.length ? `<table><tr><th>Время</th><th>Кто</th><th>Действие</th><th>Детали</th></tr>${l.map((x) => `<tr><td>${esc(fmt(x.at))}</td><td>${esc(x.actor)}</td><td>${esc(x.action)}</td><td>${esc(x.details)}</td></tr>`).join("")}</table>` : "Записей нет.";
+  } catch (err) { /* необязательно */ }
+}
+$("#main").addEventListener("click", async (e) => {
+  const out = e.target.closest("[data-staff-out]");
+  if (!out) return;
+  const id = out.closest("[data-staff]").dataset.staff;
+  if (!confirm(`Закрыть все входы сотрудника ${id}? Ему придётся войти снова.`)) return;
+  try { const r = await post(`/api/admin/staff/${id}/force-logout`); say("Закрыто сессий: " + r.closed); } catch (err) { say(err.message); }
+});
 async function loadAdmins() {
   const rows = await api("/api/admin/admins");
   const ROLES = ["support", "moderator", "admin", "super_admin"];
@@ -741,9 +924,12 @@ async function loadAdmins() {
     admin — + цены, платежи, контент, рассылки, статистика, журнал; super_admin — + сотрудники.</p>
     <table><tr><th>Telegram ID</th><th>Роль</th><th>Доступ</th><th></th></tr>
     ${rows.map((a) => `<tr data-staff="${esc(a.tg_id)}"><td>${esc(a.tg_id)}</td><td><select data-role>${ROLES.map((r) => `<option value="${r}" ${r === a.role ? "selected" : ""}>${r}</option>`).join("")}</select></td>
-      <td><input type="checkbox" data-active ${a.active ? "checked" : ""}></td><td><button class="act" data-staff-save>Сохранить</button></td></tr>`).join("")}</table>
+      <td><input type="checkbox" data-active ${a.active ? "checked" : ""}></td><td><button class="act" data-staff-save>Сохранить</button> <button class="act gray" data-staff-out>Выйти со всех устройств</button></td></tr>`).join("")}</table>
+    <div class="card"><h3>Работа сотрудников за 30 дней</h3><div id="staffDetail" class="muted">Загрузка…</div></div>
+    <div class="card"><h3>Входы и действия с доступом</h3><div id="staffLogins" class="muted">Загрузка…</div></div>
     <p><input id="newStaffId" inputmode="numeric" placeholder="Telegram ID сотрудника"><select id="newStaffRole">${ROLES.map((r) => `<option>${r}</option>`).join("")}</select>
     <button class="act" id="addStaff">Добавить</button></p>`;
+  fillStaffExtras();
 }
 $("#main").addEventListener("click", async (e) => {
   const row = e.target.closest("[data-staff]");

@@ -31,6 +31,7 @@ class User(Base):
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     consent_version: Mapped[str] = mapped_column(String(40), default="")
     ref_code: Mapped[str | None] = mapped_column(String(12), unique=True, nullable=True)   # for the invitation link
+    blocked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)   # temporary block ends here
     trusted: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())   # «Проверенный автор»: a moderator checked this person
     visa: Mapped[str] = mapped_column(String(8), default="")  # private; used for job filters and applications
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
@@ -304,6 +305,7 @@ class AdminSession(Base):
     token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
     tg_id: Mapped[str] = mapped_column(String(40), index=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=_now, nullable=True)
 
 
 class LoginRequest(Base):
@@ -417,7 +419,9 @@ class Broadcast(Base):
     created_by: Mapped[str] = mapped_column(String(40))
     text: Mapped[str] = mapped_column(String(1000))
     region_code: Mapped[str | None] = mapped_column(String(20), nullable=True)  # only people from this region
-    status: Mapped[str] = mapped_column(String(12), default="draft", index=True)  # draft, sending, done, cancelled
+    status: Mapped[str] = mapped_column(String(12), default="draft", index=True)  # draft, scheduled, sending, done, cancelled
+    audience_kind: Mapped[str] = mapped_column(String(12), default="all", server_default="all")   # all, employers, authors, active30, inactive30
+    send_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     total: Mapped[int] = mapped_column(Integer, default=0)
     sent: Mapped[int] = mapped_column(Integer, default=0)
     failed: Mapped[int] = mapped_column(Integer, default=0)
@@ -586,3 +590,22 @@ class ClientError(Base):
     request_id: Mapped[str] = mapped_column(String(40), default="")
     agent: Mapped[str] = mapped_column(String(160), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, index=True)
+
+
+class UserNote(Base):
+    """A private note about a person, visible to staff only."""
+    __tablename__ = "user_notes"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_tg_id: Mapped[str] = mapped_column(String(40), index=True)
+    author: Mapped[str] = mapped_column(String(40))
+    text: Mapped[str] = mapped_column(String(500))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class Claim(Base):
+    """«Взято в работу»: a soft lock so two staff members do not handle the same item at once."""
+    __tablename__ = "claims"
+    kind: Mapped[str] = mapped_column(String(12), primary_key=True)
+    obj_id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    staff: Mapped[str] = mapped_column(String(40))
+    until: Mapped[datetime] = mapped_column(DateTime(timezone=True))
