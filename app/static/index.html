@@ -144,7 +144,9 @@
   </div>
   <h4 class="grp">Помощь и данные</h4>
   <div class="menu-list">
-    <button class="wide" data-menu="help"><i>❓</i>Помощь и правила</button>
+    <button class="wide" data-menu="support"><i>💬</i>Написать в поддержку</button>
+    <button class="wide" data-menu="faq"><i>❓</i>Вопросы и ответы</button>
+    <button class="wide" data-menu="help"><i>📖</i>Правила</button>
     <button class="wide" data-menu="export"><i>📄</i>Выгрузить мои данные</button>
     <button class="wide danger" data-menu="logout" id="logoutItem" hidden><i>⎋</i>Выйти</button>
     <button class="wide danger" data-menu="delete"><i>🗑</i>Удалить аккаунт</button>
@@ -404,6 +406,10 @@
 <div id="reviewStars" class="stars" role="radiogroup" aria-label="Оценка"></div>
 <textarea id="reviewText" rows="4" maxlength="500" placeholder="Что понравилось или не понравилось? Без телефонов и ссылок"></textarea>
 <button class="submit" id="reviewOk" type="button">Отправить отзыв</button></div></div>
+
+<div id="welcomeSheet" class="modal hidden"><div class="sheet"><div class="sheet-top"><b id="welcomeTitle">KOREA HUB</b><button id="closeWelcome" type="button">✕</button></div>
+<p id="welcomeText" style="white-space:pre-wrap"></p>
+<button class="submit" id="welcomeOk" type="button">Понятно</button></div></div>
 
 <div id="services" class="modal hidden"><div class="sheet"><div class="sheet-top"><b>Продвижение</b><button id="closeServices">✕</button></div>
 <p class="muted" id="serviceFor"></p>

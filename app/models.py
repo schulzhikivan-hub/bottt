@@ -472,6 +472,7 @@ class Review(Base):
     reviewer_tg_id: Mapped[str] = mapped_column(String(40), index=True)
     rating: Mapped[int] = mapped_column(Integer)
     text: Mapped[str] = mapped_column(String(500), default="")
+    reply: Mapped[str] = mapped_column(String(500), default="", server_default="")   # the author's answer, shown under the review
     status: Mapped[str] = mapped_column(String(12), default="published", index=True)  # published | hidden
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
@@ -509,4 +510,42 @@ class Referral(Base):
     __tablename__ = "referrals"
     invited_tg_id: Mapped[str] = mapped_column(String(40), primary_key=True)
     inviter_tg_id: Mapped[str] = mapped_column(String(40), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class Setting(Base):
+    """Texts and switches the owner edits in the admin panel (no server restart, no .env)."""
+    __tablename__ = "app_settings"
+    key: Mapped[str] = mapped_column(String(40), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, default="")
+
+
+class Faq(Base):
+    __tablename__ = "faq"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    question: Mapped[str] = mapped_column(String(200))
+    answer: Mapped[str] = mapped_column(Text)
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+
+class Ticket(Base):
+    """A request to support or an appeal against a moderator's decision. Answered inside the app, no nick needed."""
+    __tablename__ = "tickets"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_tg_id: Mapped[str] = mapped_column(String(40), index=True)
+    kind: Mapped[str] = mapped_column(String(10), default="support")      # support | appeal
+    listing_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    status: Mapped[str] = mapped_column(String(10), default="open", index=True)   # open | answered | closed
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, index=True)
+
+
+class TicketMessage(Base):
+    __tablename__ = "ticket_messages"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    ticket_id: Mapped[int] = mapped_column(ForeignKey("tickets.id", ondelete="CASCADE"), index=True)
+    staff: Mapped[bool] = mapped_column(Boolean, default=False)
+    author: Mapped[str] = mapped_column(String(40), default="")
+    text: Mapped[str] = mapped_column(String(1500))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

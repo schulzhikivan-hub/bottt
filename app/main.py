@@ -32,7 +32,7 @@ from app.guard import rate_limit, check_text, duplicate_note, notify_user
 from app import admin_ops as ops
 from app import catalog
 from app import photos, applications, searches, inbox, promos, adminx, observe, site
-from app import geo, reviews, resumes, referrals
+from app import geo, reviews, resumes, referrals, support
 from app import fields as listing_fields
 from app.users import get_or_create_user, writer, is_blocked_pair
 from app.models import DatingProfile
@@ -66,6 +66,7 @@ app.include_router(geo.router)
 app.include_router(reviews.router)
 app.include_router(resumes.router)
 app.include_router(referrals.router)
+app.include_router(support.router)
 app.include_router(listing_fields.router)
 STATIC = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
@@ -107,24 +108,19 @@ class ConsentIn(BaseModel):
 
 
 @app.get("/api/config")
-def public_config():
+def public_config(db: Session = Depends(get_db)):
     """What the page needs to build links: the bot's @username (empty if it cannot be found)."""
     from app import webauth
     import time
     cached = _config_cache.get("bot")
     if cached and (cached[0] or time.monotonic() - cached[1] < 300):  # a failed lookup is not repeated for 5 minutes
-        return {"bot": cached[0], "rates": _rates()}
+        return {"bot": cached[0], "rates": support.rates(db)}
     try:
         name = webauth.bot_username()
     except Exception:
         name = ""
     _config_cache["bot"] = (name, time.monotonic())
-    return {"bot": name, "rates": _rates()}
-
-
-def _rates() -> dict:
-    """Approximate conversion, set by the owner in .env (no outside service is called). Empty when not set."""
-    return {k: v for k, v in (("rub", settings.krw_rub), ("usd", settings.krw_usd)) if v and v > 0}
+    return {"bot": name, "rates": support.rates(db)}
 
 
 _config_cache: dict = {}
@@ -356,6 +352,8 @@ def create_listing(payload: ListingCreate, user_id: str = Depends(writer), db: S
         # Для модератора: виден в журнале, автор этого не видит
         log_action(db, "system", "listing.duplicate_suspected", "listing", item.id, dup)
         db.commit()
+    if item.status == "pending" and support.maybe_auto_approve(db, item):
+        db.refresh(item)
     return item
 
 

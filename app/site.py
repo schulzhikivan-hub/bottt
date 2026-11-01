@@ -203,6 +203,14 @@ def manifest():
     return Response(json.dumps(data, ensure_ascii=False), media_type="application/manifest+json")
 
 
+@router.get("/sw.js")
+def service_worker():
+    """Served from the root so that it may control the whole site; never cached by the browser itself."""
+    from pathlib import Path
+    body = (Path(__file__).parent / "static" / "sw.js").read_text(encoding="utf-8")
+    return Response(body, media_type="application/javascript", headers={"Cache-Control": "no-cache", "Service-Worker-Allowed": "/"})
+
+
 @router.get("/favicon.ico")
 def favicon():
     from fastapi.responses import FileResponse

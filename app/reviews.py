@@ -9,6 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app import guard
+from app.auth import optional_user_id
 from app.admin_auth import MOD, staff
 from app.audit import log_action
 from app.database import get_db
@@ -65,6 +66,26 @@ def create_review(payload: ReviewIn, user_id: str = Depends(writer), db: Session
     return {"id": review.id, **summary(db, listing.author_telegram_id)}
 
 
+class ReplyIn(BaseModel):
+    text: str = Field(min_length=2, max_length=500)
+
+
+@router.post("/api/reviews/{review_id}/reply")
+def reply_to_review(review_id: int, payload: ReplyIn, user_id: str = Depends(writer), db: Session = Depends(get_db)):
+    """The reviewed person answers once, in public. The reviewer is told."""
+    row = db.get(Review, review_id)
+    if row is None or row.target_tg_id != user_id or row.status != "published":
+        raise HTTPException(404, "Отзыв не найден")
+    if row.reply:
+        raise HTTPException(409, "Вы уже ответили на этот отзыв")
+    text = " ".join(payload.text.split())
+    guard.check_text("", text)
+    row.reply = text
+    db.commit()
+    guard.notify_user(db, row.reviewer_tg_id, "Автор ответил на ваш отзыв.", "messages")
+    return {"id": row.id, "reply": row.reply}
+
+
 @router.delete("/api/reviews/{review_id}")
 def delete_own_review(review_id: int, user_id: str = Depends(writer), db: Session = Depends(get_db)):
     row = db.get(Review, review_id)
@@ -76,7 +97,7 @@ def delete_own_review(review_id: int, user_id: str = Depends(writer), db: Sessio
 
 
 @router.get("/api/authors/{listing_id}/reviews")
-def author_reviews(listing_id: int, db: Session = Depends(get_db)):
+def author_reviews(listing_id: int, viewer: str | None = Depends(optional_user_id), db: Session = Depends(get_db)):
     """Public: rating and the latest texts. Names are display names only, no Telegram IDs."""
     listing = db.get(Listing, listing_id)
     if listing is None or listing.status != "approved":
@@ -86,7 +107,7 @@ def author_reviews(listing_id: int, db: Session = Depends(get_db)):
     out = []
     for r in rows:
         u = db.get(User, r.reviewer_tg_id)
-        out.append({"id": r.id, "rating": r.rating, "text": r.text, "name": (u.display_name if u and u.display_name else "Пользователь"),
+        out.append({"id": r.id, "rating": r.rating, "text": r.text, "reply": r.reply, "can_reply": bool(viewer and viewer == r.target_tg_id and not r.reply), "name": (u.display_name if u and u.display_name else "Пользователь"),
                     "at": r.created_at.date().isoformat()})
     return {**summary(db, listing.author_telegram_id), "items": out}
 

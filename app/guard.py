@@ -124,7 +124,7 @@ def send_telegram(tg_id: str, text: str) -> bool:
         return False
 
 
-NOTIFY_KINDS = {"messages": "Сообщения", "applications": "Отклики", "moderation": "Решения модератора",
+NOTIFY_KINDS = {"messages": "Сообщения", "applications": "Отклики", "moderation": "Решения модератора", "support": "Ответы поддержки",
                 "searches": "Новые по моим поискам", "expiry": "Срок объявлений", "payments": "Платежи и продвижение"}
 
 

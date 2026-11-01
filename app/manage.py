@@ -125,6 +125,8 @@ def submit_draft(listing_id: int, user_id: str = Depends(writer), db: Session = 
         raise HTTPException(400, "Добавьте хотя бы одно фото")
     item.status = "pending"
     db.commit()
+    from app import support
+    support.maybe_auto_approve(db, item)
     db.refresh(item)
     return catalog.with_promo(db, [item], owner=True)[0]
 

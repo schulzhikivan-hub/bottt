@@ -806,6 +806,7 @@ function ownCard(x) {
     acts.push('<button data-own="promo">🚀 Продвинуть</button>');
   }
   if (["closed", "sold"].includes(x.status)) acts.push('<button data-own="reopen">Вернуть</button>');
+  if (["rejected", "needs_fix", "hidden"].includes(x.status)) acts.push('<button data-own="appeal" class="secondary">Оспорить решение</button>');
   if (x.status !== "archived") acts.push('<button data-own="archive" class="secondary">Удалить</button>');
   const note = x.note ? `<p class="note">Комментарий модератора: ${esc(x.note)}</p>` : "";
   const edit = x.has_edit ? '<p class="muted">Правка на проверке — пока видна прежняя версия</p>' : "";
@@ -904,8 +905,48 @@ async function showReceipt(id) {
   };
 }
 const SUB_TITLES = {author: "Объявления автора", applications: "Мои отклики", searches: "Мои поиски", settings: "Настройки", employer: "Статус работодателя",
-                    invite: "Пригласить друзей", resume: "Моё резюме", cvsearch: "Поиск сотрудников", payments: "История платежей", blocks: "Заблокированные", help: "Помощь и правила"};
+                    support: "Поддержка", faq: "Вопросы и ответы", ticket: "Обращение", invite: "Пригласить друзей", resume: "Моё резюме", cvsearch: "Поиск сотрудников", payments: "История платежей", blocks: "Заблокированные", help: "Помощь и правила"};
 let currentSubKey = "";
+const TICKET_STATUS = {open: "Ждёт ответа", answered: "Есть ответ", closed: "Закрыто"};
+// ---------- поддержка внутри приложения: без ников, ответ приходит сюда ----------
+async function renderSupport(body) {
+  const [rows, texts] = await Promise.all([api("/api/tickets"), api("/api/app-texts", {quiet: true}).catch(() => ({}))]);
+  body.innerHTML = `<article class="listing"><p class="muted">${esc(texts.support_note || "")}</p>
+    <form id="ticketForm" class="form"><label>Ваш вопрос или проблема<textarea name="text" rows="4" minlength="5" maxlength="1500" required placeholder="Опишите, что случилось. Для платежей укажите, что и когда покупали"></textarea></label>
+    <button class="submit" type="submit">Отправить</button></form></article>` +
+    (rows.length ? "<h3 class=\"dsub\">Мои обращения</h3>" + rows.map((t) => `<article class="listing" data-ticket="${t.id}"><div class="listing-top"><div><h3>${t.kind === "appeal" ? "Оспаривание: " : ""}${esc(t.preview)}</h3>
+      <div class="meta">${esc(fmtDate(t.updated_at))}</div></div><span class="status ${t.status === "answered" ? "approved" : t.status === "closed" ? "rejected" : "pending"}">${TICKET_STATUS[t.status] || t.status}</span></div></article>`).join("") : "");
+  $("#ticketForm").onsubmit = async (e) => {
+    e.preventDefault();
+    if (!(await requireConsent())) return;
+    try { await api("/api/tickets", {method: "POST", body: JSON.stringify({text: e.target.text.value.trim()})}); toast("Отправлено. Ответ придёт сюда и в уведомления"); renderSupport(body); }
+    catch (err) { toast(err.message); }
+  };
+}
+async function openTicket(id) {
+  const t = await api(`/api/tickets/${id}`);
+  openSub("ticket");
+  $("#subBody").innerHTML = `<article class="listing"><div class="meta">${TICKET_STATUS[t.status] || t.status}</div>` +
+    t.messages.map((m) => `<div class="review"><b>${m.staff ? "Поддержка" : "Вы"}</b> · ${esc(fmtDate(m.at))}<p style="white-space:pre-wrap">${esc(m.text)}</p></div>`).join("") +
+    (t.status !== "closed" ? `<form id="ticketReply" class="form"><label>Ответить<textarea name="text" rows="3" maxlength="1500" required></textarea></label><button class="submit" type="submit">Отправить</button></form>` : "") + "</article>";
+  const f = $("#ticketReply");
+  if (f) f.onsubmit = async (e) => {
+    e.preventDefault();
+    try { await api(`/api/tickets/${id}/messages`, {method: "POST", body: JSON.stringify({text: f.text.value.trim()})}); openTicket(id); } catch (err) { toast(err.message); }
+  };
+}
+// ---------- приветствие при первом открытии: текст задаётся в админке ----------
+async function showWelcomeOnce() {
+  if (localStorage.getItem("welcomeSeen")) return;
+  try {
+    const t = await api("/api/app-texts", {quiet: true});
+    $("#welcomeTitle").textContent = t.welcome_title || "KOREA HUB";
+    $("#welcomeText").textContent = t.welcome_text || "";
+    $("#welcomeSheet").classList.remove("hidden");
+  } catch (e) { return; }
+  const close = () => { localStorage.setItem("welcomeSeen", "1"); $("#welcomeSheet").classList.add("hidden"); };
+  $("#welcomeOk").onclick = close; $("#closeWelcome").onclick = close;
+}
 const CV_STATUS = {pending: "На проверке у модератора", approved: "Опубликовано: работодатели могут найти", rejected: "Отклонено", hidden: "Скрыто"};
 // ---------- «Ищу работу»: своё резюме ----------
 async function renderMyResume(body) {
@@ -1083,6 +1124,12 @@ async function openMenu(key) {
                   rejected: "Заявка отклонена. Можно подать снова с верными данными."}[st] || "";
     body.innerHTML = `<article class="listing"><p>${esc(text)}</p>
       ${(st === "none" || st === "rejected") ? '<div class="actions"><button data-own="employer-apply">Подать заявку</button></div>' : ""}</article>`;
+  }
+  if (key === "support") await renderSupport(body);
+  if (key === "faq") {
+    const rows = await api("/api/faq", {quiet: true});
+    body.innerHTML = rows.length ? rows.map((r) => `<article class="listing"><details><summary><b>${esc(r.question)}</b></summary><p style="white-space:pre-wrap">${esc(r.answer)}</p></details></article>`).join("")
+      : '<div class="empty">Ответы скоро появятся. Если вопрос срочный, напишите в поддержку.</div>';
   }
   if (key === "invite") {
     await ensureConfig();
@@ -1667,6 +1714,13 @@ document.addEventListener("click", async (e) => {
   }
   const rc = e.target.closest("[data-receipt]");
   if (rc) { try { await showReceipt(rc.dataset.receipt); } catch (err) { toast(err.message); } return; }
+  const rp = e.target.closest("[data-replyreview]");
+  if (rp) {
+    const text = await askText("Ответ на отзыв", "Коротко и вежливо. Без телефонов и ссылок");
+    if (!text) return;
+    try { await api(`/api/reviews/${rp.dataset.replyreview}/reply`, {method: "POST", body: JSON.stringify({text})}); toast("Ответ опубликован"); rp.remove(); } catch (err) { toast(err.message); }
+    return;
+  }
   const rr = e.target.closest("[data-reportreview]");
   if (rr) {
     if (!(await requireConsent())) return;
@@ -1697,7 +1751,7 @@ document.addEventListener("click", async (e) => {
       openSub("author");
       const c = r.card;
       $("#subBody").innerHTML = `<p class="author">${c.verified ? `<b class="badge-ok">✔ Проверенный работодатель${c.company ? ": " + esc(c.company) : ""}</b> · ` : ""}На сайте с ${c.since || "—"} · Активных: ${c.active}${rev?.reviews ? ` · <b class="rating">★ ${rev.rating}</b> (${rev.reviews})` : ""}</p>` +
-        (rev?.items?.length ? `<h3 class="dsub">Отзывы</h3>` + rev.items.map((v) => `<div class="review"><b class="rating">${"★".repeat(v.rating)}</b> ${esc(v.name)} · ${esc(v.at)}${v.text ? `<p>${esc(v.text)}</p>` : ""}<button class="linkbtn" data-reportreview="${v.id}">⚑</button></div>`).join("") : "") +
+        (rev?.items?.length ? `<h3 class="dsub">Отзывы</h3>` + rev.items.map((v) => `<div class="review"><b class="rating">${"★".repeat(v.rating)}</b> ${esc(v.name)} · ${esc(v.at)}${v.text ? `<p>${esc(v.text)}</p>` : ""}${v.reply ? `<p class="muted"><b>Ответ автора:</b> ${esc(v.reply)}</p>` : ""}${v.can_reply ? `<button class="linkbtn" data-replyreview="${v.id}">Ответить</button>` : ""}<button class="linkbtn" data-reportreview="${v.id}">⚑</button></div>`).join("") : "") +
         r.items.map(listingCard).join("");
     } catch (err) { toast(err.message); }
     return;
@@ -1723,6 +1777,8 @@ document.addEventListener("click", async (e) => {
     } catch (err) { toast(err.message); }
     return;
   }
+  const tk = e.target.closest("[data-ticket]");
+  if (tk) { try { await openTicket(tk.dataset.ticket); } catch (err) { toast(err.message); } return; }
   const own = e.target.closest("[data-own]");
   if (own) {
     const cardEl = own.closest("[data-id]");
@@ -1733,6 +1789,13 @@ document.addEventListener("click", async (e) => {
       if (act === "employer-apply") { $("#employerModal").classList.remove("hidden"); return; }
       if (act === "edit") { openEdit(item); return; }
       if (act === "reserve") { await api(`/api/listings/${id}/reserve`, {method: "POST", body: JSON.stringify({on: !item.reserved})}); toast(item.reserved ? "Резерв снят" : "Отмечено: зарезервировано"); homeLoaded = false; loadProfile(); return; }
+      if (act === "appeal") {
+        const text = await askText("Почему решение неверно?", "Объясните, что изменилось или что не учли");
+        if (!text) return;
+        await api("/api/tickets", {method: "POST", body: JSON.stringify({kind: "appeal", listing_id: +id, text})});
+        toast("Обращение отправлено. Ответ придёт в уведомления");
+        return;
+      }
       if (act === "applicants") { await showApplicants(id); return; }
       if (act === "promo") { await openServices(id, item.category); return; }
       if (act === "archive" && !(await confirmDialog("Удалить объявление? Его не будет видно другим."))) return;
@@ -1825,6 +1888,9 @@ applyTelegramTheme();
 tg?.onEvent?.("themeChanged", applyTelegramTheme);
 
 // ---------- старт ----------
+setTimeout(showWelcomeOnce, 1200);
+// Офлайн: страница-оболочка и скрипты кэшируются, чтобы приложение открывалось и при плохой связи
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
 function openFromLink() {
   const params = new URLSearchParams(location.search);
   const section = params.get("section");

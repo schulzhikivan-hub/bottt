@@ -88,6 +88,7 @@ const TABS = [
   {key: "market", label: "🛍 Барахолка", roles: MOD, title: "Барахолка, авто, услуги", cat: "marketplace"},
   {key: "dating", label: "💗 Знакомства", roles: MOD, title: "Анкеты знакомств"},
   {key: "employers", label: "🏢 Работодатели", roles: MOD, title: "Заявки работодателей"},
+  {key: "support", label: "💬 Поддержка", roles: SUPPORT, title: "Обращения пользователей"},
   {key: "resumes", label: "🧑‍💼 Резюме", roles: MOD, title: "Резюме соискателей"},
   {key: "reviews", label: "⭐ Отзывы", roles: MOD, title: "Отзывы"},
   {key: "reports", label: "🚩 Жалобы", roles: SUPPORT, title: "Жалобы"},
@@ -95,6 +96,7 @@ const TABS = [
   {sep: "Контент", roles: ADM},
   {key: "community", label: "🌍 Сообщество", roles: ADM, title: "Группы сообщества"},
   {key: "guide", label: "📘 Гид", roles: ADM, title: "Статьи гида"},
+  {key: "texts", label: "📝 Тексты, FAQ, курс", roles: ADM, title: "Тексты, вопросы и ответы, настройки"},
   {key: "marketing", label: "📣 Рассылки и баннеры", roles: ADM, title: "Рассылки и баннеры"},
   {sep: "Деньги", roles: ADM},
   {key: "payments", label: "💳 Платежи", roles: ADM, title: "Платежи и промокоды"},
@@ -386,6 +388,88 @@ $("#main").addEventListener("click", async (e) => {
   } catch (err) { say(err.message); }
 });
 
+// ---- поддержка: обращения и оспаривания ----
+async function loadSupport() {
+  const rows = await api("/api/admin/tickets?status=open");
+  const answered = await api("/api/admin/tickets?status=answered");
+  const card = (t) => `<div class="card" data-tid="${t.id}"><b>${t.kind === "appeal" ? "Оспаривание" : "Обращение"} #${t.id}</b> · пользователь ${esc(t.user)} · ${esc(fmt(t.updated_at))}
+    <p>${esc(t.preview)}</p><button class="act gray" data-tk="open">Открыть</button><div data-tbox></div></div>`;
+  $("#main").innerHTML = `<h3>Ждут ответа (${rows.length})</h3>` + (rows.length ? rows.map(card).join("") : '<div class="card muted">Нет.</div>') +
+    `<h3>Отвечено (${answered.length})</h3>` + (answered.length ? answered.map(card).join("") : '<div class="card muted">Нет.</div>');
+}
+$("#main").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-tk]");
+  if (!b) return;
+  const card = b.closest("[data-tid]");
+  const id = card.dataset.tid;
+  const box = card.querySelector("[data-tbox]");
+  try {
+    if (b.dataset.tk === "open") {
+      const t = await api(`/api/admin/tickets/${id}`);
+      box.innerHTML = t.messages.map((m) => `<div class="meta"><b>${m.staff ? "Поддержка" : "Пользователь"}</b> ${esc(fmt(m.at))}</div><p style="white-space:pre-wrap">${esc(m.text)}</p>`).join("") +
+        (t.listing ? `<div class="meta">Объявление #${t.listing.id} «${esc(t.listing.title)}» · статус: ${esc(STATUS_RU[t.listing.status] || t.listing.status)}${t.listing.note ? " · причина: " + esc(t.listing.note) : ""}</div>` : "") +
+        `<textarea data-treply rows="3" style="width:100%" placeholder="Ответ пользователю"></textarea>
+         <button class="act ok" data-tk="reply">Ответить</button>${t.listing ? '<button class="act warn" data-tk="restore">Вернуть объявление на проверку</button>' : ""}<button class="act gray" data-tk="close">Закрыть</button>`;
+      return;
+    }
+    if (b.dataset.tk === "reply") {
+      const text = card.querySelector("[data-treply]").value.trim();
+      if (text.length < 2) { say("Напишите ответ"); return; }
+      await post(`/api/admin/tickets/${id}/reply`, {text});
+    }
+    if (b.dataset.tk === "restore") await post(`/api/admin/tickets/${id}/restore-listing`);
+    if (b.dataset.tk === "close") await post(`/api/admin/tickets/${id}/close`);
+    reload();
+  } catch (err) { say(err.message); }
+});
+
+// ---- тексты, FAQ, курс, автомодерация ----
+async function loadTexts() {
+  const [st, faq, staff] = await Promise.all([api("/api/admin/app-settings"), api("/api/admin/faq"), api("/api/admin/staff-stats")]);
+  $("#main").innerHTML = `
+    <div class="card"><h3>Тексты в приложении</h3>
+      <label>Заголовок приветствия<input data-set="welcome_title" value="${esc(st.welcome_title)}" maxlength="200"></label>
+      <label>Текст приветствия (показывается один раз новому пользователю)<textarea data-set="welcome_text" rows="5">${esc(st.welcome_text)}</textarea></label>
+      <label>Подсказка в окне поддержки<textarea data-set="support_note" rows="2">${esc(st.support_note)}</textarea></label></div>
+    <div class="card"><h3>Курс воны</h3><p class="muted">Сколько рублей и долларов в одной воне. Пусто — не показывать пересчёт цены.</p>
+      <label>₽ за 1 ₩ (например 0.065)<input data-set="krw_rub" value="${esc(st.krw_rub)}"></label>
+      <label>$ за 1 ₩ (например 0.00072)<input data-set="krw_usd" value="${esc(st.krw_usd)}"></label></div>
+    <div class="card"><h3>Автоматическая проверка</h3>
+      <p class="muted">Новые объявления проверенных авторов публикуются сразу, если нет подозрений (дубли текста и фото, общий контакт, недавние отказы). Правки уже опубликованных объявлений всегда идут к модератору.</p>
+      <label><input type="checkbox" data-setbool="automod_enabled" ${st.automod_enabled === "1" ? "checked" : ""}> Включить</label>
+      <label>Достаточно опубликованных объявлений у автора<input data-set="automod_min_published" type="number" min="1" max="50" value="${esc(st.automod_min_published)}"></label></div>
+    <button class="act ok" id="saveTexts">Сохранить</button>
+    <div class="card"><h3>Вопросы и ответы</h3>${faq.map((f) => `<div class="card" data-faq="${f.id}">
+      <input data-fq value="${esc(f.question)}"><textarea data-fa rows="3">${esc(f.answer)}</textarea>
+      <label><input type="checkbox" data-fact ${f.active ? "checked" : ""}> показывать</label>
+      <button class="act ok" data-faqsave>Сохранить</button><button class="act no" data-faqdel>Удалить</button></div>`).join("") || '<p class="muted">Пока пусто.</p>'}
+      <h4>Добавить</h4><input id="newFq" placeholder="Вопрос"><textarea id="newFa" rows="3" placeholder="Ответ"></textarea><button class="act ok" id="addFaq">Добавить</button></div>
+    <div class="card"><h3>Работа сотрудников (30 дней)</h3>${staff.length ? `<table><tr><th>Кто</th><th>Решений</th><th>Ответов</th></tr>${staff.map((x) => `<tr><td>${esc(x.actor)}</td><td>${x.decisions}</td><td>${x.replies}</td></tr>`).join("")}</table>` : '<p class="muted">Пока нет данных.</p>'}</div>`;
+}
+$("#main").addEventListener("click", async (e) => {
+  const t = e.target;
+  try {
+    if (t.id === "saveTexts") {
+      const values = {};
+      $("#main").querySelectorAll("[data-set]").forEach((el) => { values[el.dataset.set] = el.value; });
+      $("#main").querySelectorAll("[data-setbool]").forEach((el) => { values[el.dataset.setbool] = el.checked ? "1" : "0"; });
+      await api("/api/admin/app-settings", {method: "PUT", body: JSON.stringify({values})});
+      say("Сохранено");
+    }
+    if (t.id === "addFaq") {
+      await post("/api/admin/faq", {question: $("#newFq").value.trim(), answer: $("#newFa").value.trim(), position: 0, active: true});
+      reload();
+    }
+    const card = t.closest("[data-faq]");
+    if (card && t.hasAttribute("data-faqsave")) {
+      await api(`/api/admin/faq/${card.dataset.faq}`, {method: "PUT", body: JSON.stringify({question: card.querySelector("[data-fq]").value.trim(),
+        answer: card.querySelector("[data-fa]").value.trim(), position: 0, active: card.querySelector("[data-fact]").checked})});
+      say("Сохранено");
+    }
+    if (card && t.hasAttribute("data-faqdel")) { await api(`/api/admin/faq/${card.dataset.faq}`, {method: "DELETE"}); reload(); }
+  } catch (err) { say(err.message); }
+});
+
 // ---- резюме ----
 async function loadResumes() {
   const rows = await api("/api/admin/resumes?status=pending");
@@ -668,7 +752,7 @@ $("#main").addEventListener("click", async (e) => {
 });
 
 const LOADERS = {dash: loadDash, listings: loadListings, jobs: loadSection, housing: loadSection, market: loadSection, dating: loadDating,
-                 employers: loadEmployers, reports: loadReports, reviews: loadReviews, resumes: loadResumes, users: loadUsers, community: loadCommunity, guide: loadGuide,
+                 employers: loadEmployers, reports: loadReports, reviews: loadReviews, resumes: loadResumes, support: loadSupport, texts: loadTexts, users: loadUsers, community: loadCommunity, guide: loadGuide,
                  marketing: loadMarketing, payments: loadPayments, pricing: loadPricing, audit: loadAudit, settings: loadSettings, admins: loadAdmins};
 
 // Старт: есть сессия — открываем; открыто из Telegram — входим сами; иначе показываем кнопку
