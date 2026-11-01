@@ -107,7 +107,7 @@ def user_card(tg_id: str, actor: str = Depends(staff(*SUPPORT)), db: Session = D
     tickets = db.scalars(select(Ticket).where(Ticket.user_tg_id == tg_id).order_by(Ticket.id.desc()).limit(10)).all()
     notes = db.scalars(select(UserNote).where(UserNote.user_tg_id == tg_id).order_by(UserNote.id.desc()).limit(30)).all()
     return {
-        "tg_id": tg_id, "name": user.display_name, "city": user.city, "visa": user.visa, "blocked": user.blocked,
+        "email": user.email or "", "has_password": bool(user.password_hash), "tg_id": tg_id, "name": user.display_name, "city": user.city, "visa": user.visa, "blocked": user.blocked,
         "block_reason": user.block_reason, "blocked_until": user.blocked_until.isoformat() if user.blocked_until else None,
         "trusted": user.trusted, "employer_status": user.employer_status, "company": user.company_name,
         "created_at": user.created_at.isoformat() if user.created_at else None,

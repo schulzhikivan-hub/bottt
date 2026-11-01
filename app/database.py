@@ -190,4 +190,9 @@ def migrate() -> None:
         conn.execute(text("ALTER TABLE ads ADD COLUMN IF NOT EXISTS max_shows INTEGER"))
         conn.execute(text("ALTER TABLE listings ADD COLUMN IF NOT EXISTS company_id INTEGER"))
         conn.execute(text("ALTER TABLE payments ADD COLUMN IF NOT EXISTS company_id INTEGER"))
+        for ddl in ("email VARCHAR(160)", "email_verified BOOLEAN NOT NULL DEFAULT FALSE", "password_hash VARCHAR(200)",
+                    "password_set_at TIMESTAMPTZ", "pw_fails INTEGER NOT NULL DEFAULT 0", "pw_locked_until TIMESTAMPTZ",
+                    "signup_skipped BOOLEAN NOT NULL DEFAULT FALSE"):
+            conn.execute(text(f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {ddl}"))
+        conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_email ON users (email)"))
         conn.execute(text("ALTER TABLE notifications ADD COLUMN IF NOT EXISTS tg_pending BOOLEAN NOT NULL DEFAULT FALSE"))

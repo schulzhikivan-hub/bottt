@@ -517,7 +517,25 @@
 <p class="muted">Заявку проверит модератор. После одобрения в профиле появится отметка работодателя.</p>
 <button class="submit" type="submit">Отправить заявку</button></form></div></div>
 
-<div id="webLogin" class="modal hidden"><div class="sheet"><div class="sheet-top"><b>Вход через Telegram</b><button id="closeWebLogin">✕</button></div>
+<div id="signupSheet" class="modal hidden"><div class="sheet"><div class="sheet-top"><b id="signupTitle">Завершите регистрацию</b><button id="signupClose" type="button">✕</button></div>
+<p class="muted" id="signupHint">Чтобы заходить на сайт из любого браузера по e-mail и паролю, задайте их сейчас. Telegram останется основным способом входа и восстановления.</p>
+<form id="signupForm" class="dform" autocomplete="on">
+<label>Имя<small class="muted"> видно в откликах и чатах, без ссылок и телефона</small><input name="display_name" maxlength="40" autocomplete="nickname" placeholder="Например: Иван"></label>
+<label>E-mail<input name="email" type="email" maxlength="160" autocomplete="email" required placeholder="name@example.com"></label>
+<label id="signupCurrentBox" hidden>Текущий пароль<input name="current_password" type="password" maxlength="72" autocomplete="current-password"></label>
+<label>Пароль<small class="muted"> от 8 знаков, буквы и цифры</small><input name="password" type="password" minlength="8" maxlength="72" autocomplete="new-password"></label>
+<label>Пароль ещё раз<input name="password2" type="password" minlength="8" maxlength="72" autocomplete="new-password"></label>
+<label class="check"><input type="checkbox" id="signupShow"> Показать пароль</label>
+<button class="submit" type="submit">Сохранить</button>
+<button class="secondary" type="button" id="signupLater">Заполню позже</button></form></div></div>
+
+<div id="webLogin" class="modal hidden"><div class="sheet"><div class="sheet-top"><b>Вход на сайт</b><button id="closeWebLogin">✕</button></div>
+<form id="pwLoginForm" class="dform" autocomplete="on"><b>По e-mail и паролю</b>
+<label>E-mail<input name="email" type="email" required autocomplete="username" maxlength="160"></label>
+<label>Пароль<input name="password" type="password" required autocomplete="current-password" maxlength="72"></label>
+<button class="submit" type="submit">Войти</button>
+<p class="muted" id="pwLoginInfo">Забыли пароль? Войдите через Telegram и задайте новый в «Настройки → Вход на сайт».</p></form>
+<hr><b>Через Telegram</b>
 <p>Нажмите кнопку, откроется Telegram. Там нажмите «Это я, войти» — сайт войдёт сам.</p>
 <button class="submit" id="webLoginBtn" type="button">Войти через Telegram</button>
 <p class="muted" id="webLoginInfo"></p>

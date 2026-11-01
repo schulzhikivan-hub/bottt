@@ -40,7 +40,7 @@ def users_list(q: str = Query(default="", max_length=40), flt: str = Query(defau
     q = q.strip()
     if q:
         like = f"%{q}%"
-        cond.append(or_(User.tg_id.contains(q), User.display_name.ilike(like), User.city.ilike(like)))
+        cond.append(or_(User.tg_id.contains(q), User.display_name.ilike(like), User.city.ilike(like), User.email.ilike(like)))
     week = now() - dt.timedelta(days=7)
     if flt == "blocked":
         cond.append(User.blocked.is_(True))

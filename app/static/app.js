@@ -1410,6 +1410,7 @@ async function openMenu(key) {
         <small class="muted">Имя видит только работодатель, когда вы откликаетесь</small></div></div>
       <div class="actions"><label class="btn secondary" style="flex:1;text-align:center;cursor:pointer;padding:10px;border-radius:10px">Загрузить фото<input type="file" id="setAvatarFile" accept="image/jpeg,image/png,image/webp" hidden></label>
         <button class="secondary" id="setAvatarDel">Убрать</button><button id="setNameSave">Сохранить имя</button></div>
+      <div class="set-row"><div><b>Вход на сайт</b><small>${me?.account?.email ? esc(me.account.email) + (me.account.has_password ? " · пароль задан" : " · пароль не задан") : "E-mail и пароль не заданы"}</small></div><button class="secondary" id="setLogin">${me?.account?.has_password ? "Изменить" : "Задать"}</button></div>
       <div class="set-row"><div><b>Город</b><small>${esc(me?.city || "не выбран")}</small></div><button class="secondary" id="setCity">Изменить</button></div>
       <div class="set-row"><div><b>Виза</b><small>Видна только вам: подставляется в отклики и фильтры</small></div>
         <select id="myVisa"><option value="">Не указана</option>${fieldDefs.visas.map((v) => `<option value="${v.value}">${v.label}</option>`).join("")}</select></div>
@@ -1437,6 +1438,7 @@ async function openMenu(key) {
       catch (err) { toast(err.message); }
     };
     $("#setCity").onclick = openCity;
+    $("#setLogin").onclick = () => openSignup("edit");
     $("#myVisa").onchange = async () => {
       try { const r = await api("/api/me/settings", {method: "PUT", body: JSON.stringify({visa: $("#myVisa").value})}); me.visa = r.visa; showProfileChips(); toast("Сохранено"); }
       catch (err) { toast(err.message); }
@@ -2697,12 +2699,64 @@ document.addEventListener("click", async (e) => {
 document.querySelectorAll(".bottom [data-view], .tiles [data-view]").forEach((b) => b.onclick = () => showView(b.dataset.view));
 
 // ---------- согласие, город, работодатель ----------
+// ---------- e-mail и пароль для входа на сайт ----------
+function openSignup(mode) {
+  const f = $("#signupForm");
+  f.reset();
+  const acc = me?.account || {};
+  f.display_name.value = me?.display_name || "";
+  f.email.value = acc.email || "";
+  $("#signupCurrentBox").hidden = !acc.has_password;
+  f.password.required = !acc.has_password;
+  f.password2.required = !acc.has_password;
+  $("#signupTitle").textContent = mode === "first" ? "Завершите регистрацию" : "Вход на сайт";
+  $("#signupHint").textContent = acc.has_password
+    ? "Здесь можно сменить e-mail или пароль. Чтобы изменить, введите текущий пароль. Остальные браузеры после смены пароля выйдут."
+    : "Чтобы заходить на сайт из любого браузера по e-mail и паролю, задайте их сейчас. Telegram останется основным способом входа и восстановления.";
+  $("#signupLater").hidden = mode !== "first";
+  $("#signupSheet").classList.remove("hidden");
+}
+async function maybeSignup() {
+  try { if (!me) me = await api("/api/me", {quiet: true}); } catch (e) { return; }
+  if (me?.consent && me.account?.needs_setup) openSignup("first");
+}
+$("#signupClose").onclick = () => { if ($("#signupLater").hidden) $("#signupSheet").classList.add("hidden"); else $("#signupLater").click(); };
+$("#signupShow").onchange = (e) => { for (const n of ["password", "password2", "current_password"]) $("#signupForm")[n].type = e.target.checked ? "text" : "password"; };
+$("#signupLater").onclick = async () => {
+  try { await api("/api/me/account/skip", {method: "POST"}); me.account = {...me.account, needs_setup: false, skipped: true}; } catch (e) { /* не страшно */ }
+  $("#signupSheet").classList.add("hidden");
+  toast("Задать e-mail и пароль можно в «Настройки → Вход на сайт»");
+};
+$("#signupForm").onsubmit = async (e) => {
+  e.preventDefault();
+  const f = e.target, d = Object.fromEntries(new FormData(f));
+  if (d.password !== d.password2) { toast("Пароли не совпадают"); return; }
+  const body = {display_name: d.display_name, email: d.email, current_password: d.current_password || ""};
+  if (d.password) body.password = d.password;
+  try {
+    const r = await api("/api/me/account", {method: "PUT", body: JSON.stringify(body)});
+    me.account = r; if (r.name) me.display_name = r.name;
+    $("#signupSheet").classList.add("hidden");
+    toast(r.has_password ? "Готово: теперь можно входить на сайт по e-mail и паролю" : "Сохранено");
+    if (currentView === "sub" && currentSubKey === "settings") openMenu("settings");
+  } catch (err) { toast(err.message); }
+};
+$("#pwLoginForm").onsubmit = async (e) => {
+  e.preventDefault();
+  const d = Object.fromEntries(new FormData(e.target));
+  try {
+    const r = await api("/api/auth/password-login", {method: "POST", body: JSON.stringify(d), quiet: true});
+    localStorage.setItem("webSession", r.session);
+    location.reload();
+  } catch (err) { $("#pwLoginInfo").textContent = err.message; $("#pwLoginInfo").style.color = "var(--bad)"; }
+};
 $("#consentOk").onclick = async () => {
   if (!$("#consentRules").checked || !$("#consentPrivacy").checked) { toast("Отметьте оба пункта, чтобы продолжить"); return; }
   try {
     await api("/api/me/consent", {method: "POST", body: JSON.stringify({accept: true})});
     $("#consent").classList.add("hidden");
     toast("Спасибо! Теперь можно пользоваться приложением");
+    me = null; setTimeout(maybeSignup, 600);          // сразу после согласия: имя, e-mail и пароль для входа на сайт
   } catch (err) { toast(err.message); }
 };
 function showCityChip() { $("#cityChipText").textContent = (me?.city || "Город").split(",")[0]; }
@@ -2809,7 +2863,7 @@ loadFavIds().then(() => {
   });
 });
 api("/api/me", {quiet: true})
-  .then((user) => { me = user; showCityChip(); showBell(user.unread || 0); if (!me.consent) $("#consent").classList.remove("hidden"); })
+  .then((user) => { me = user; showCityChip(); showBell(user.unread || 0); if (!me.consent) $("#consent").classList.remove("hidden"); else setTimeout(maybeSignup, 1500); })
   .catch(() => { if (!inTelegram) $("#loginTop").hidden = false; });
 
 // ---------- страница не двигается ----------

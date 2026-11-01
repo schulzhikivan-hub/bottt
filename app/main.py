@@ -32,7 +32,7 @@ from app.guard import rate_limit, check_text, duplicate_note, notify_user
 from app import admin_ops as ops
 from app import catalog
 from app import photos, applications, searches, inbox, promos, adminx, observe, site
-from app import geo, reviews, resumes, referrals, support, extras, adminplus, adminview, datingsvc, ads, rules, adminreports
+from app import geo, reviews, resumes, referrals, support, extras, adminplus, adminview, datingsvc, ads, rules, adminreports, account
 from app import fields as listing_fields
 from app.users import get_or_create_user, writer, is_blocked_pair
 from app.models import Admin, AuditLog, ConvHide, DatingProfile, TypingMark
@@ -53,6 +53,7 @@ with startup_lock():   # with several workers only one prepares the database at 
         _company_boot.migrate_employers(_db)      # people who were employers before get a company
 
 app = FastAPI(title="KOREA HUB API", version="0.4.0")
+app.include_router(account.router)
 app.include_router(company_mod_router)
 app.include_router(adminreports.router)
 app.include_router(rules.router)
@@ -145,6 +146,7 @@ def me(user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
             "region_code": user.region_code, "district_id": user.district_id,
             "language": "ru", "blocked": user.blocked, "block_reason": user.block_reason,
             "employer_status": user.employer_status, "company_name": user.company_name, "visa": user.visa,
+            "account": account.view(user),
             "notify_messages": user.notify_messages, "display_name": user.display_name,
             "avatar": photos.url(user.avatar_key) if user.avatar_key else None,
             "unread": inbox.unread_count(db, user_id)}

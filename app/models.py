@@ -35,6 +35,13 @@ class User(Base):
     blocked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)   # temporary block ends here
     trusted: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())   # «Проверенный автор»: a moderator checked this person
     visa: Mapped[str] = mapped_column(String(8), default="")  # private; used for job filters and applications
+    email: Mapped[str | None] = mapped_column(String(160), unique=True, nullable=True)      # for signing in on the website
+    email_verified: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    password_hash: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    password_set_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    pw_fails: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    pw_locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    signup_skipped: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())   # «заполню позже» at the first sign-in
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
