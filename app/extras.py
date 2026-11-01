@@ -57,10 +57,27 @@ def listing_stats(listing_id: int, user_id: str = Depends(writer), db: Session =
     if item is None or not company.can_manage(db, user_id, item, write=False):
         raise HTTPException(404, "Объявление не найдено")
     count = lambda stmt: db.scalar(stmt) or 0   # noqa: E731
-    return {"views": item.views or 0,
-            "favorites": count(select(func.count()).select_from(Favorite).where(Favorite.listing_id == listing_id)),
-            "chats": count(select(func.count()).select_from(Conversation).where(Conversation.listing_id == listing_id)),
-            "applications": count(select(func.count()).select_from(Application).where(Application.listing_id == listing_id))}
+    views = item.views or 0
+    favorites = count(select(func.count()).select_from(Favorite).where(Favorite.listing_id == listing_id))
+    chats = count(select(func.count()).select_from(Conversation).where(Conversation.listing_id == listing_id))
+    applications = count(select(func.count()).select_from(Application).where(Application.listing_id == listing_id))
+    from app.models import Placement
+    from app.payments import aware, now
+    promoted = any(aware(pl.ends_at) > now() for pl in db.scalars(select(Placement).where(
+        Placement.listing_id == listing_id, Placement.status == "active")).all())
+    days_left = max(0, (aware(item.expires_at) - now()).days) if item.expires_at else None
+    advice, promote = [], False
+    if views < 20 and not promoted:
+        advice.append("Мало просмотров: поднятие или VIP покажет объявление выше в ленте."); promote = True
+    elif views >= 50 and chats == 0:
+        advice.append("Объявление смотрят, но не пишут: проверьте цену, фото и описание.")
+    if views >= 20 and favorites and chats == 0:
+        advice.append("Его сохраняют в избранное: небольшое снижение цены вернёт этих людей (они получат уведомление).")
+    if days_left is not None and days_left <= 3:
+        advice.append(f"Срок показа заканчивается через {days_left} дн.: продлите, чтобы не потерять место."); 
+    return {"views": views, "favorites": favorites, "chats": chats, "applications": applications,
+            "conversion": round(100 * chats / views, 1) if views else 0.0, "days_left": days_left,
+            "promoted": promoted, "advice": advice, "promote": promote}
 
 
 # ---- price drop alert for people who saved the listing ----

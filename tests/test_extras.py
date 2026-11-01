@@ -42,6 +42,7 @@ def test_stats_and_my_reviews_with_tags():
     c.post(f"/api/favorites/{lid}", headers=as_user(2))
     st = c.get(f"/api/listings/{lid}/stats", headers=as_user(1)).json()
     assert st["favorites"] == 1 and st["chats"] == 1
+    assert st["promote"] is True and st["promoted"] is False and st["advice"]      # few views and no promotion: the app suggests it
     assert c.get(f"/api/listings/{lid}/stats", headers=as_user(2)).status_code == 404
     assert c.post("/api/reviews", json={"listing_id": lid, "rating": 5, "tags": ["polite", "hack", "fast"]}, headers=as_user(2)).status_code == 201
     mine = c.get("/api/me/reviews", headers=as_user(1)).json()

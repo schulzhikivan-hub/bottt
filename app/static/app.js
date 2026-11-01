@@ -2758,8 +2758,10 @@ document.addEventListener("click", async (e) => {
       if (act === "stats") {
         const st = await api(`/api/listings/${id}/stats`);
         let line = cardEl.querySelector(".statline");
-        if (!line) { line = document.createElement("p"); line.className = "meta-line statline"; cardEl.appendChild(line); }
-        line.textContent = `👁 ${st.views} · ♥ в избранном ${st.favorites} · 💬 чатов ${st.chats}` + (st.applications ? ` · 📨 откликов ${st.applications}` : "");
+        if (!line) { line = document.createElement("div"); line.className = "statline"; cardEl.appendChild(line); }
+        line.innerHTML = `<p class="meta-line">👁 ${st.views} · ♥ в избранном ${st.favorites} · 💬 чатов ${st.chats}` + (st.applications ? ` · 📨 откликов ${st.applications}` : "") +
+          (st.views ? ` · конверсия в чат ${st.conversion}%` : "") + (st.days_left !== null ? ` · осталось дней: ${st.days_left}` : "") + "</p>" +
+          st.advice.map((t) => `<p class="note">💡 ${esc(t)}</p>`).join("") + (st.promote ? '<div class="actions"><button data-own="promo">🚀 Продвинуть</button></div>' : "");
         return;
       }
       if (act === "appeal") {
