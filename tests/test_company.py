@@ -134,3 +134,80 @@ def test_public_page_only_for_verified_and_suspend_hides_listings(client):
     client.post(f"/api/admin/companies/{cid}/restore", json={}, headers=ADMIN)
     with SessionLocal() as db:
         assert db.get(Listing, lid).status == "approved"
+
+
+def approved_company_listing(client, cid, owner=1):
+    lid = client.post("/api/listings", json=JOB | {"company_id": cid}, headers=as_user(owner)).json()["id"]
+    client.post(f"/api/admin/listings/{lid}/approve", headers=ADMIN)
+    return lid
+
+
+def test_topup_goes_to_the_company_purse_once(client, monkeypatch):
+    from app import payments
+    monkeypatch.setattr(payments, "telegram_call", lambda method, payload: "https://t.me/invoice/x")
+    cid = verified_company(client)
+    team_member(client, cid, 2, "recruiter")
+    assert client.post(f"/api/company/{cid}/topup", json={"stars": 100}, headers=as_user(2)).status_code == 403     # money: owner and admins
+    assert client.post(f"/api/company/{cid}/topup", json={"stars": 5}, headers=as_user(1)).status_code == 400       # below the minimum
+    r = client.post(f"/api/company/{cid}/topup", json={"stars": 200}, headers=as_user(1)).json()
+    assert r["invoice_url"].startswith("https://")
+    with SessionLocal() as db:
+        pay = db.query(Payment).one()
+        assert pay.company_id == cid and pay.service_code == "topup" and pay.status == "pending"
+        done = payments.process_successful_payment(db, "1", pay.payload, "charge-1", "XTR", 200)
+        assert done.kind == "topup" and done.credited == 200
+        payments.process_successful_payment(db, "1", pay.payload, "charge-1", "XTR", 200)        # the same notice again: nothing added
+        assert db.get(co.Company, cid).balance_stars == 200 and (db.get(User, "1").balance_stars or 0) == 0
+        pid = pay.id
+    assert client.post(f"/api/admin/payments/{pid}/refund?mode=balance", headers=ADMIN).status_code == 400          # not by the button
+    assert client.get(f"/api/company/{cid}/balance", headers=as_user(1)).json()["history"][0]["service"] == "Пополнение баланса"
+    me = client.post("/api/me/balance/topup", json={"stars": 50}, headers=as_user(3)).json()
+    with SessionLocal() as db:
+        p2 = db.query(Payment).filter_by(user_tg_id="3").one()
+        payments.process_successful_payment(db, "3", p2.payload, "charge-2", "XTR", 50)
+        assert db.get(User, "3").balance_stars == 50 and me["stars"] == 50
+
+
+def test_company_listing_shows_only_the_company_not_the_person(client):
+    cid = verified_company(client)
+    mine = client.post("/api/listings", json=JOB | {"title": "Личная подработка"}, headers=as_user(1)).json()["id"]
+    client.post(f"/api/admin/listings/{mine}/approve", headers=ADMIN)
+    lid = approved_company_listing(client, cid)
+    a = client.get(f"/api/listings/{lid}").json()["author"]
+    assert a["is_company"] is True and a["company"] == "Кафе Сеул" and a["active"] == 1 and a["trusted"] is False and a["reviews"] == 0
+    p = client.get(f"/api/listings/{mine}").json()["author"]
+    assert p["is_company"] is False and p["active"] == 1 and p["company_id"] is None            # the personal one knows nothing of the company
+    page = client.get(f"/api/authors/{lid}").json()
+    assert [x["id"] for x in page["items"]] == [lid]
+    assert [x["id"] for x in client.get(f"/api/authors/{mine}").json()["items"]] == [mine]
+    # reviews are about people, not about a company's employee
+    assert client.get(f"/api/listings/{lid}/review-state", headers=as_user(3)).json()["can"] is False
+
+
+def test_chats_of_a_company_listing_belong_to_the_team(client):
+    cid = verified_company(client)
+    team_member(client, cid, 2, "recruiter")
+    lid = approved_company_listing(client, cid)
+    assert client.post(f"/api/listings/{lid}/conversation", headers=as_user(2)).status_code == 400          # a colleague can not "buy" it
+    conv = client.post(f"/api/listings/{lid}/conversation", headers=as_user(3)).json()["id"]
+    assert client.post(f"/api/conversations/{conv}/messages", json={"text": "Вакансия ещё актуальна?"}, headers=as_user(3)).status_code == 201
+    assert [c["id"] for c in client.get("/api/conversations", headers=as_user(2)).json()] == [conv]          # the recruiter sees it
+    assert client.get("/api/conversations", headers=as_user(3)).json()[0]["other_name"] == "Кафе Сеул"       # the buyer sees the company
+    assert client.post(f"/api/conversations/{conv}/messages", json={"text": "Да, приходите"}, headers=as_user(2)).status_code == 201
+    assert client.delete(f"/api/company/{cid}/team/2", headers=as_user(1)).status_code == 200
+    assert client.get(f"/api/conversations/{conv}/messages", headers=as_user(2)).status_code == 404         # access left with the person
+    assert client.get(f"/api/conversations/{conv}/messages", headers=as_user(1)).status_code == 200
+
+
+def test_close_company_needs_an_empty_balance(client):
+    cid = verified_company(client)
+    lid = approved_company_listing(client, cid)
+    client.post(f"/api/admin/companies/{cid}/credit", json={"stars": 10}, headers=ADMIN)
+    assert client.post(f"/api/company/{cid}/close", headers=as_user(1)).status_code == 409
+    with SessionLocal() as db:
+        db.get(co.Company, cid).balance_stars = 0
+        db.commit()
+    assert client.post(f"/api/company/{cid}/close", headers=as_user(1)).status_code == 200
+    with SessionLocal() as db:
+        assert db.get(Listing, lid).status == "closed"
+    assert client.get("/api/company/mine", headers=as_user(1)).json() == []
