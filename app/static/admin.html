@@ -55,7 +55,10 @@ th{background:#f6f8fc;color:var(--hint);font-weight:600}
   #tabs{flex-direction:row;padding:6px}
   #tabs button{white-space:nowrap}#tabs .sep,aside .foot{display:none}
   main{padding:14px}
-  header.top{position:static}
+  header.top{position:static;flex-wrap:wrap;padding:12px 14px}
+  .gsearch{order:3;flex:1 1 100%;margin:4px 0 0}.gsearch input{min-width:0;flex:1}
+  main table{display:block;overflow-x:auto;max-width:100%}
+  main{min-width:0}
 }
 .gsearch{display:flex;gap:6px;margin-left:auto;margin-right:12px}.gsearch input{min-width:200px}
 nav#tabs em[data-badge]{background:#d93025}nav#tabs em.warn{background:#b45309}
