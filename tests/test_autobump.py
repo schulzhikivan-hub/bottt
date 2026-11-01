@@ -41,3 +41,25 @@ def test_autobump_lifts_the_listing_once_a_day_and_is_not_sold_as_a_placement(cl
     assert client.get("/api/catalog?category=job").status_code == 200       # the feed does not choke on the new kind
     assert client.get(f"/api/listings/{lid}").json()["promo"] in {"bump", None}
     assert client.get("/api/me/listings", headers=as_user(1)).status_code == 200
+
+
+def test_pack_gives_several_services_for_one_cheaper_price_and_refunds_together(client):
+    lid = client.post("/api/listings", json={"category": "job", "title": "Повар", "city": "Сеул", "description": "ok", "contact": ""}, headers=as_user(1)).json()["id"]
+    client.post(f"/api/admin/listings/{lid}/approve", headers=ADMIN)
+    with SessionLocal() as db:
+        db.get(User, "1").balance_stars = 1000
+        db.commit()
+    price = {s["code"]: s["stars"] for s in client.get("/api/services?category=job").json()}
+    assert price["job_pack"] < price["job_vip"] + price["job_pin"] + price["job_highlight"] + price["job_autobump"]      # really cheaper
+    r = client.post("/api/payments/invoice", json={"listing_id": lid, "service_code": "job_pack", "use_balance": True}, headers=as_user(1))
+    assert r.status_code == 200 and r.json()["paid"] is True
+    with SessionLocal() as db:
+        kinds = sorted(p.kind for p in db.query(Placement).filter(Placement.status == "active"))
+        assert kinds == ["autobump", "highlight", "pin", "vip"]
+        assert db.get(User, "1").balance_stars == 1000 - price["job_pack"]
+    again = client.post("/api/payments/invoice", json={"listing_id": lid, "service_code": "job_vip", "use_balance": True}, headers=as_user(1))
+    assert again.status_code == 400                                          # VIP is already inside the pack
+    with SessionLocal() as db:
+        pid = db.query(payments.Payment).filter_by(service_code="job_pack").one().id
+        _, credit = payments.refund_to_balance(db, pid, "тест")
+        assert credit > 0 and db.query(Placement).filter(Placement.status == "active", Placement.kind != "bump").count() == 0

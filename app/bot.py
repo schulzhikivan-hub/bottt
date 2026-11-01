@@ -373,16 +373,26 @@ def _expire_once() -> list[tuple[str, str]]:
                     messages.append((row.applicant_tg_id, f"Вакансия «{item.title}» закрыта: срок объявления истёк.", "applications"))
         payments.run_autobump(db)                    # paid «автоподнятие»: one bump a day
         ended = payments.expire_placements(db)
+        told = set()                                  # a pack ends as several placements at once: one message
         for placement in ended:
             if placement.kind == "bump" and placement.payment_id is None:
                 continue                              # a bump made by the autobump: nothing to tell
+            if placement.payment_id is not None:
+                if (placement.listing_id, placement.payment_id) in told:
+                    continue
+                told.add((placement.listing_id, placement.payment_id))
             listing = db.get(Listing, placement.listing_id)
             if listing is None or not listing.author_telegram_id.isdigit():
                 continue
             messages.append((listing.author_telegram_id,
                              f"Срок услуги «{placement.kind}» для #{listing.id} {listing.title} закончился. "
                              "Продлить можно в приложении: Профиль → Мои объявления.", "payments"))
+        told_soon = set()
         for placement in payments.placements_ending_soon(db):
+            if placement.payment_id is not None:
+                if (placement.listing_id, placement.payment_id) in told_soon:
+                    continue
+                told_soon.add((placement.listing_id, placement.payment_id))
             listing = db.get(Listing, placement.listing_id)
             if listing is not None and listing.author_telegram_id.isdigit():
                 messages.append((listing.author_telegram_id,

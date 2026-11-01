@@ -226,13 +226,14 @@ def grant(db: Session, actor: str, tg_id: str, service_code: str, listing_id: in
 
 
 def _extend_or_add_placement(db: Session, item: Listing, pricing, at: dt.datetime, pay: Payment, promo: bool) -> None:
-    running = db.scalar(select(Placement).where(Placement.listing_id == item.id, Placement.kind == pricing.kind, Placement.status == "active"))
-    if running is not None:                # terms are added, not replaced
-        running.ends_at = aware(running.ends_at) + dt.timedelta(days=pricing.duration_days)
-        running.promo = bool(running.promo and promo)
-        return
-    db.add(Placement(listing_id=item.id, kind=pricing.kind, starts_at=at, ends_at=at + dt.timedelta(days=pricing.duration_days),
-                     status="active", payment_id=pay.id, promo=promo))
+    for kind in payments.kinds_of(pricing):
+        running = db.scalar(select(Placement).where(Placement.listing_id == item.id, Placement.kind == kind, Placement.status == "active"))
+        if running is not None:            # terms are added, not replaced
+            running.ends_at = aware(running.ends_at) + dt.timedelta(days=pricing.duration_days)
+            running.promo = bool(running.promo and promo)
+            continue
+        db.add(Placement(listing_id=item.id, kind=kind, starts_at=at, ends_at=at + dt.timedelta(days=pricing.duration_days),
+                         status="active", payment_id=pay.id, promo=promo))
 
 
 @router.post("/api/admin/grants", status_code=201)

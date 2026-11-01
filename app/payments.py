@@ -38,6 +38,9 @@ PRICING_SEED = [
     ("job_autobump", "job", "autobump", "Автоподнятие на 7 дней", 120, 7),
     ("housing_autobump", "housing", "autobump", "Автоподнятие на 7 дней", 90, 7),
     ("marketplace_autobump", "marketplace", "autobump", "Автоподнятие на 7 дней", 70, 7),
+    ("job_pack", "job", "pack", "Пакет «Максимум»: VIP + закрепление + выделение + автоподнятие, 7 дней", 250, 7),
+    ("housing_pack", "housing", "pack", "Пакет «Максимум»: VIP + закрепление + автоподнятие, 7 дней", 170, 7),
+    ("marketplace_pack", "marketplace", "pack", "Пакет «Максимум»: VIP + выделение + автоподнятие, 7 дней", 110, 7),
     ("dating_bump", "dating", "bump", "Поднять анкету наверх на 24 часа", 20, 1),
     ("dating_vip", "dating", "vip", "VIP-анкета на 7 дней", 70, 7),
     ("dating_invisible", "dating", "invisible", "Невидимка на 30 дней", 60, 30),
@@ -46,6 +49,21 @@ PRICING_SEED = [
 ]
 # Higher number = shown higher in the listing feed
 KIND_PRIORITY = {"pin": 4, "vip": 3, "bump": 2, "highlight": 1}
+PACKS = {"job": ("vip", "pin", "highlight", "autobump"), "housing": ("vip", "pin", "autobump"), "marketplace": ("vip", "highlight", "autobump")}
+
+
+def kinds_of(pricing) -> tuple:
+    """What a service gives: one kind, or for a pack several kinds at once for one price (cheaper than buying them one by one)."""
+    return PACKS.get(pricing.category, ()) if pricing.kind == "pack" else (pricing.kind,)
+
+
+def add_placements(db, payment, pricing, current, promo: bool = False) -> list:
+    out = [Placement(listing_id=payment.listing_id, kind=k, starts_at=current, ends_at=current + dt.timedelta(days=pricing.duration_days),
+                     status="active", payment_id=payment.id, promo=promo) for k in kinds_of(pricing)]
+    db.add_all(out)
+    return out
+
+
 PLACED_KINDS = tuple(KIND_PRIORITY)     # «autobump» is a subscription that creates daily bumps, it has no place of its own
 
 
@@ -120,6 +138,7 @@ KIND_TEXT = {
     "pin": "Закрепление: объявление всегда вверху списка",
     "highlight": "Цветная рамка: объявление заметнее в ленте",
     "autobump": "Каждый день объявление поднимается само, пока действует услуга",
+    "pack": "Всё сразу для объявления на неделю: VIP, закрепление, выделение и автоподнятие дешевле, чем по отдельности",
 }
 
 
@@ -160,7 +179,7 @@ def service_options(db: Session, listing: Listing) -> list[dict]:
                 left = aware(last.starts_at) + BUMP_COOLDOWN - current
                 reason = f"Поднять можно через {max(1, int(left.total_seconds() // 3600) + 1)} ч"
         else:
-            busy = db.scalar(select(Placement).where(Placement.listing_id == listing.id, Placement.kind == p.kind,
+            busy = db.scalar(select(Placement).where(Placement.listing_id == listing.id, Placement.kind.in_(kinds_of(p)),
                                                      Placement.status == "active", Placement.ends_at > current))
             if busy is not None:
                 until, reason = busy.ends_at, "Уже действует"
@@ -293,7 +312,7 @@ def create_invoice(db: Session, user_id: str, listing_id: int, service_code: str
             raise PaymentError("Поднимать объявление можно раз в 24 часа")
     else:
         busy = db.scalar(select(Placement).where(
-            Placement.listing_id == listing_id, Placement.kind == pricing.kind,
+            Placement.listing_id == listing_id, Placement.kind.in_(kinds_of(pricing)),
             Placement.status == "active"))
         if busy is not None:
             raise PaymentError("Эта услуга уже активна. Дождитесь окончания")
@@ -334,8 +353,7 @@ def pay_from_balance(db: Session, payment: Payment) -> Payment:
         from app import datingsvc
         datingsvc.activate(db, payment, pricing, current)
     else:
-        db.add(Placement(listing_id=payment.listing_id, kind=pricing.kind, starts_at=current,
-                         ends_at=current + dt.timedelta(days=pricing.duration_days), status="active", payment_id=payment.id))
+        add_placements(db, payment, pricing, current)
     db.commit()
     return payment
 
@@ -404,10 +422,7 @@ def process_successful_payment(db: Session, user_id: str, payload: str,
         datingsvc.activate(db, payment, pricing, current)
         db.commit()
         return datingsvc.result_of(db, payment)
-    placement = Placement(listing_id=payment.listing_id, kind=pricing.kind, starts_at=current,
-                          ends_at=current + dt.timedelta(days=pricing.duration_days),
-                          status="active", payment_id=payment.id)
-    db.add(placement)
+    placement = add_placements(db, payment, pricing, current)[0]
     try:
         db.commit()
     except IntegrityError:
