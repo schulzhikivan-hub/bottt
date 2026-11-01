@@ -66,7 +66,7 @@ def users_list(q: str = Query(default="", max_length=40), flt: str = Query(defau
         "employer_status": u.employer_status, "company": u.company_name, "consent": u.consent_at is not None,
         "created_at": u.created_at.isoformat() if u.created_at else None,
         "last_seen_at": u.last_seen_at.isoformat() if u.last_seen_at else None,
-        "listings": ads.get(u.tg_id, 0), "reports_against": reps.get(u.tg_id, 0)} for u in rows]}
+        "listings": ads.get(u.tg_id, 0), "reports_against": reps.get(u.tg_id, 0), "balance": u.balance_stars or 0} for u in rows]}
 
 
 class UserEditIn(BaseModel):

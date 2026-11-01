@@ -902,24 +902,60 @@ $("#main").addEventListener("click", async (e) => {
 
 // ---- пользователи ----
 let userFilter = {q: "", flt: "", sort: "new"}, userLimit = 30;
+// ---- люди: таблица с колонками, сохранёнными видами и общим доступом ----
+const USER_COLS = {name: ["Имя", (u) => `${u.name ? esc(u.name) : "<i>без имени</i>"}${u.trusted ? " ✔" : ""}`], tg_id: ["ID", (u) => esc(u.tg_id)], city: ["Город", (u) => esc(u.city)],
+  status: ["Статус", (u) => u.deleted ? "удалён" : u.blocked ? `<b class="bad">блок${u.blocked_until ? " до " + esc(fmt(u.blocked_until).slice(0, 10)) : ""}</b>` : '<span class="good">активен</span>'],
+  created: ["Регистрация", (u) => esc(fmt(u.created_at).slice(0, 10))], seen: ["Был в сети", (u) => esc(u.last_seen_at ? fmt(u.last_seen_at) : "—")],
+  listings: ["Объявл.", (u) => u.listings], reports: ["Жалобы", (u) => u.reports_against ? `<b class="bad">${u.reports_against}</b>` : "0"],
+  balance: ["Баланс ⭐", (u) => u.balance], company: ["Компания", (u) => esc(u.employer_status === "approved" ? u.company : "—")], consent: ["Правила", (u) => (u.consent ? "приняты" : "нет")]};
+const USER_COLS_DEFAULT = ["name", "city", "status", "created", "seen", "listings", "reports"];
+let userCols = (() => { try { const c = JSON.parse(localStorage.getItem("adminUserCols") || "null"); return Array.isArray(c) && c.length ? c.filter((k) => USER_COLS[k]) : USER_COLS_DEFAULT; } catch (e) { return USER_COLS_DEFAULT; } })();
 async function loadUsers() {
-  $("#main").innerHTML = `<form id="userForm" class="filters"><input name="q" placeholder="Имя, ID или город" value="${esc(userFilter.q)}" style="width:180px">
+  const views = await api("/api/admin/views?tab=users").catch(() => ({mine: [], shared: []}));
+  const all = [...views.mine, ...views.shared];
+  $("#main").innerHTML = `<form id="userForm" class="filters"><input name="q" placeholder="Имя, ID, город или e-mail" value="${esc(userFilter.q)}" style="width:200px">
     <select name="flt">${[["", "Все"], ["blocked", "Заблокированные"], ["employers", "Работодатели"], ["trusted", "Проверенные авторы"], ["new7", "Новые за неделю"], ["deleted", "Удалённые"]].map(([k, v]) => `<option value="${k}" ${userFilter.flt === k ? "selected" : ""}>${v}</option>`).join("")}</select>
     <select name="sort"><option value="new" ${userFilter.sort === "new" ? "selected" : ""}>Сначала новые</option><option value="seen" ${userFilter.sort === "seen" ? "selected" : ""}>По последнему визиту</option></select>
-    <button class="act" type="submit">Показать</button><span class="muted" id="userTotal"></span></form><div id="usersList"></div>`;
+    <button class="act" type="submit">Показать</button><span class="muted" id="userTotal"></span></form>
+    <div class="filters"><select id="viewPick"><option value="">Сохранённые виды…</option>${views.mine.map((v) => `<option value="${v.id}">${esc(v.name)}${v.shared ? " (общий)" : ""}</option>`).join("")}${views.shared.length ? '<optgroup label="Общие от коллег">' + views.shared.map((v) => `<option value="${v.id}">${esc(v.name)} · ${esc(v.owner)}</option>`).join("") + "</optgroup>" : ""}</select>
+      <button class="act gray" id="viewSave">💾 Сохранить этот вид</button><button class="act gray" id="viewShare">👥 Поделиться</button><button class="act gray" id="viewDel">🗑</button>
+      <details><summary class="act gray" style="display:inline-block;list-style:none">☰ Колонки</summary><div class="card" style="position:absolute;z-index:6">${Object.entries(USER_COLS).map(([k, [n]]) => `<label style="display:block"><input type="checkbox" data-col="${k}" ${userCols.includes(k) ? "checked" : ""}> ${n}</label>`).join("")}</div></details></div>
+    <div id="usersList"></div>`;
+  window.__views = all;
   const qs = new URLSearchParams({limit: String(userLimit), ...Object.fromEntries(Object.entries(userFilter).filter(([, v]) => v))});
   const r = await api("/api/admin/users-list?" + qs);
   $("#userTotal").textContent = "Найдено: " + r.total;
-  $("#usersList").innerHTML = (r.items.length ? r.items.map((u) => `
-    <div class="card" data-uid="${esc(u.tg_id)}"><b>${u.name ? esc(u.name) : "<i>без имени</i>"}</b> <span class="muted">ID ${esc(u.tg_id)} · ${esc(u.city)}</span>
-      ${u.trusted ? ' · <span class="good">✔ проверенный автор</span>' : ""}${u.employer_status === "approved" ? ` · 🏢 ${esc(u.company)}` : ""}${u.deleted ? " · аккаунт удалён" : ""}${u.blocked ? ` · <b class="bad">заблокирован${u.blocked_until ? " до " + esc(fmt(u.blocked_until)) : ""}</b>` : ""}${!u.consent ? ' · <span class="muted">не принял правила</span>' : ""}
-      <div class="meta">с ${esc(fmt(u.created_at).slice(0, 10))} · был в сети ${esc(u.last_seen_at ? fmt(u.last_seen_at) : "—")} · объявлений: ${u.listings}${u.reports_against ? ` · <span class="bad">жалоб на него: ${u.reports_against}</span>` : ""}${u.block_reason ? " · причина блокировки: " + esc(u.block_reason) : ""}</div>
-      <div data-act-box></div>
-      <button class="act gray" data-ux="card">Карточка</button><button class="act gray" data-ux="activity">Активность</button>
-      <button class="act gray" data-ux="${u.trusted ? "untrust" : "trust"}">${u.trusted ? "Снять «проверен»" : "«Проверенный автор»"}</button>
-      ${u.blocked ? '<button class="act ok" data-ux="unblock">Разблокировать</button>' : '<button class="act no" data-ux="block">Заблокировать</button><button class="act warn" data-ux="blockfor">На срок</button>'}</div>`).join("")
+  $("#usersList").innerHTML = (r.items.length ? `<table><tr>${userCols.map((k) => `<th>${USER_COLS[k][0]}</th>`).join("")}<th></th></tr>${r.items.map((u) => `<tr data-uid="${esc(u.tg_id)}">${userCols.map((k) => `<td>${USER_COLS[k][1](u)}</td>`).join("")}
+    <td style="white-space:nowrap"><button class="act gray" data-ux="card">Карточка</button>${u.blocked ? '<button class="act ok" data-ux="unblock">Разблок.</button>' : '<button class="act no" data-ux="blockterms">Блок…</button>'}</td></tr>`).join("")}</table>`
     : '<div class="card muted">Никого не нашли.</div>') + (r.total > r.items.length ? '<button class="act gray" id="userMore">Показать ещё</button>' : "");
 }
+$("#main").addEventListener("change", (e) => {
+  const c = e.target.closest("[data-col]");
+  if (c) {
+    userCols = [...document.querySelectorAll("[data-col]")].filter((x) => x.checked).map((x) => x.dataset.col);
+    if (!userCols.length) userCols = USER_COLS_DEFAULT;
+    localStorage.setItem("adminUserCols", JSON.stringify(userCols)); reload(); return;
+  }
+  if (e.target.id === "viewPick" && e.target.value) {
+    const v = (window.__views || []).find((x) => String(x.id) === e.target.value);
+    if (v) { userFilter = {q: "", flt: "", sort: "new", ...(v.state.filter || {})}; if (v.state.cols) { userCols = v.state.cols.filter((k) => USER_COLS[k]); localStorage.setItem("adminUserCols", JSON.stringify(userCols)); } userLimit = 30; reload(); }
+  }
+});
+$("#main").addEventListener("click", async (e) => {
+  try {
+    if (e.target.id === "viewSave") {
+      const name = prompt("Как назвать этот вид?", ""); if (!name) return;
+      await post("/api/admin/views", {tab: "users", name, state: {filter: userFilter, cols: userCols}, shared: false}); say("Вид сохранён"); reload();
+    }
+    const pick = $("#viewPick");
+    if (e.target.id === "viewShare" && pick?.value) {
+      const v = window.__views.find((x) => String(x.id) === pick.value);
+      if (!v?.mine) { say("Делиться можно только своим видом"); return; }
+      await api(`/api/admin/views/${v.id}/share`, {method: "PUT", body: JSON.stringify({shared: !v.shared})}); say(v.shared ? "Вид снова личный" : "Теперь вид видят все сотрудники"); reload();
+    }
+    if (e.target.id === "viewDel" && pick?.value && confirm("Удалить этот вид?")) { await api(`/api/admin/views/${pick.value}`, {method: "DELETE"}); say("Удалён"); reload(); }
+  } catch (err) { say(err.message); }
+});
 $("#main").addEventListener("submit", (e) => {
   if (e.target.id !== "userForm") return;
   e.preventDefault();
