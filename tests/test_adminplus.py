@@ -132,3 +132,60 @@ def test_resume_and_ticket_bulk():
     t1 = c.post("/api/tickets", json={"text": "Первое обращение"}, headers=as_user(1)).json()["id"]
     t2 = c.post("/api/tickets", json={"text": "Второе обращение"}, headers=as_user(2)).json()["id"]
     assert c.post("/api/admin/tickets-bulk-close", json={"ids": [str(t1), str(t2)]}, headers=ADM).json() == {"done": 2}
+
+
+def test_users_list_filters_edit_and_preview():
+    c, lid = world()
+    with SessionLocal() as db:
+        db.get(User, "1").display_name = "Анна"; db.get(User, "2").display_name = "Борис"; db.get(User, "2").blocked = True
+        db.commit()
+    got = c.get("/api/admin/users-list", headers=ADM).json()
+    assert got["total"] >= 2 and {u["name"] for u in got["items"]} >= {"Анна", "Борис"}
+    assert [u["name"] for u in c.get("/api/admin/users-list?flt=blocked", headers=ADM).json()["items"]] == ["Борис"]
+    assert [u["name"] for u in c.get("/api/admin/users-list?q=Анн", headers=ADM).json()["items"]] == ["Анна"]
+    assert c.get("/api/admin/users-list?limit=1&offset=1", headers=ADM).json()["items"].__len__() == 1
+    # edit a person
+    ed = c.put("/api/admin/users/1/edit", json={"display_name": "Анна К.", "visa": "E-9"}, headers=ADM).json()
+    assert len(ed["changed"]) == 2
+    assert c.put("/api/admin/users/1/edit", json={"display_name": "ссылка t.me/x"}, headers=ADM).status_code == 400
+    assert c.put("/api/admin/users/1/edit", json={"visa": "ZZ"}, headers=ADM).status_code == 400
+    assert any("изменил данные" in n["text"] for n in c.get("/api/me/notifications", headers=as_user(1)).json()["items"])
+    # preview shows a not yet published listing with a banner and does not save the waiting edit
+    with SessionLocal() as db:
+        db.get(Listing, lid).pending_changes = {"title": "Диван новый вариант"}; db.commit()
+    page = c.get(f"/api/admin/listings/{lid}/preview", headers=ADM)
+    assert page.status_code == 200 and "ПРЕДПРОСМОТР" in page.text and "Диван новый вариант" in page.text
+    with SessionLocal() as db:
+        assert db.get(Listing, lid).title == "Диван кожаный"
+    assert c.get(f"/api/admin/listings/{lid}/preview?with_changes=false", headers=ADM).text.count("Диван новый вариант") == 0
+    assert c.get(f"/api/admin/listings/{lid}/preview").status_code == 401
+
+
+def test_payments_filters_reports_with_names_and_reasons():
+    c, lid = world()
+    with SessionLocal() as db:
+        from app.models import Payment, Pricing
+        db.get(User, "2").display_name = "Борис"
+        db.add(Payment(user_tg_id="2", listing_id=lid, service_code="bump", stars=50, status="paid", paid_at=now(), payload="q1", telegram_payment_charge_id="c1"))
+        db.add(Payment(user_tg_id="1", listing_id=lid, service_code="vip", stars=150, status="pending", payload="q2"))
+        db.commit()
+    allp = c.get("/api/admin/payments-list", headers=ADM).json()
+    assert allp["total"] == 2 and allp["paid_stars"] == 50
+    assert [p["name"] for p in c.get("/api/admin/payments-list?q=Бор", headers=ADM).json()["items"]] == ["Борис"]
+    assert c.get("/api/admin/payments-list?status=pending", headers=ADM).json()["total"] == 1
+    assert c.get("/api/admin/payments-list?since=bad", headers=ADM).status_code == 400
+    c.post("/api/reports", json={"target_type": "listing", "target_id": str(lid), "reason": "spam"}, headers=as_user(2))
+    rep = c.get("/api/admin/reports", headers=ADM).json()[0]
+    assert rep["reporter_name"] == "Борис" and "Диван" in rep["target_label"] and rep["target_link"] == f"listing:{lid}"
+    c.post(f"/api/admin/reports/{rep['id']}/reject?reason=Нарушений+нет", headers=ADM)
+    assert any("Нарушений нет" in n["text"] for n in c.get("/api/me/notifications", headers=as_user(2)).json()["items"])
+    # employers: a refusal needs a reason and the person is told
+    with SessionLocal() as db:
+        db.get(User, "1").employer_status = "pending"; db.commit()
+    assert c.post("/api/admin/employers/1/reject", headers=ADM).status_code == 400
+    assert c.post("/api/admin/employers/1/reject?reason=Номер+не+найден", headers=ADM).status_code == 200
+    assert any("Номер не найден" in n["text"] for n in c.get("/api/me/notifications", headers=as_user(1)).json()["items"])
+    # queue: sorted old first, filters, author info
+    q = c.get("/api/admin/listings?category=marketplace", headers=ADM).json()
+    assert q and "author_name" in q[0] and "author_rejects" in q[0]
+    assert c.get("/api/admin/listings?category=job", headers=ADM).json() == []

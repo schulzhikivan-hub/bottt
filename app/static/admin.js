@@ -27,6 +27,10 @@ function ask(question) {
   if (value.trim().length < 3) { say("Причина должна быть не короче 3 символов"); return null; }
   return value.trim();
 }
+const REASON_RU = {fraud: "мошенничество", fake: "фейк", spam: "спам", offensive: "оскорбления", inappropriate: "неприемлемое", rights: "нарушение прав", minor: "несовершеннолетний", profile: "анкета/профиль"};
+const PAY_RU = {paid: "оплачен", pending: "ожидает", refunded: "возвращён", failed: "ошибка", cancelled: "отменён"};
+const askOpt = (q) => { const v = prompt(q + " (можно пропустить)", ""); return v === null ? null : v.trim(); };
+const who = (name, id) => (name ? `${esc(name)} <span class="muted">(${esc(id)})</span>` : `ID ${esc(id)}`);
 const fmt = (s) => (s ? String(s).slice(0, 16).replace("T", " ") : "");
 
 // ---- вход: автоматически из Telegram или кнопкой на сайте ----
@@ -167,8 +171,10 @@ $("#main").addEventListener("click", async (e) => {
   if (gl) {
     try { const x = await api("/api/admin/listings/" + gl.dataset.gl); gl.closest(".card").querySelector("[data-gbox]").innerHTML = listingCardHtml(x); } catch (err) { say(err.message); }
   }
+  const gopen = e.target.closest("[data-gl-open]");
+  if (gopen) { e.preventDefault(); const box = gopen.closest(".card").querySelector("[data-ctx]"); try { const x = await api("/api/admin/listings/" + gopen.dataset.glOpen); box.innerHTML = listingCardHtml(x); } catch (err) { say(err.message); } }
   const gu = e.target.closest("[data-gu]");
-  if (gu) openUserCard(gu.dataset.gu);
+  if (gu) { e.preventDefault(); openUserCard(gu.dataset.gu); }
 });
 
 function show(tab) {
@@ -195,7 +201,7 @@ async function fillSystem() {
       <b>Бот</b><span>${ok(x.bot_ok, x.bot_age_s == null ? "нет сигнала" : "отзывается " + x.bot_age_s + " с назад")}</span>
       <b>Свободно на диске</b><span>${x.disk_free_mb == null ? "—" : ok(x.disk_free_mb > 2000, Math.round(x.disk_free_mb / 1024) + " ГБ")}</span>
       <b>Сертификат HTTPS</b><span>${x.cert_days == null ? "не проверяется" : ok(x.cert_days > 14, "ещё " + x.cert_days + " дн.")}</span>
-      <b>Ошибки у людей за сутки</b><span>${ok(x.client_errors_24h === 0, x.client_errors_24h)}</span><b>Пользователей</b><span>${x.users}</span></div>`;
+      <b>Ошибки у людей за сутки</b><span>${ok(x.client_errors_24h === 0, x.client_errors_24h)}</span></div>`;
   } catch (err) { $("#sysCard").innerHTML = ""; }
 }
 async function loadDash() {
@@ -278,7 +284,7 @@ function listingCardHtml(x, opts = {}) {
     ${edit ? `<div><b>Что меняется:</b><ul>${diff || "<li>только фото</li>"}</ul></div>` : `<p>${esc(x.description || "")}</p>`}
     <div class="thumbs">${photos || '<span class="muted">Фото нет</span>'}${waiting ? ` <span class="muted">(ждут решения: ${waiting})</span>` : ""}</div>
     ${photos ? '<button class="act gray" data-banphotos>🚫 Запретить эти фото</button>' : ""}
-    <p class="muted">Контакт: ${esc(x.contact || "—")} · Автор: ${esc(x.author_id || "—")} · просмотров: ${x.views || 0}${x.note ? " · комментарий: " + esc(x.note) : ""}</p>
+    <p class="muted">Контакт: ${esc(x.contact || "—")} · Автор: <a href="#" data-gu="${esc(x.author_id || "")}">${who(x.author_name, x.author_id || "—")}</a>${x.author_rejects ? ` · <span class="bad">отказов у автора: ${x.author_rejects}</span>` : ""} · просмотров: ${x.views || 0}${x.note ? " · комментарий: " + esc(x.note) : ""}</p>
     ${buttons}${extraButtons(x)}<div data-editbox></div></div>`;
 }
 const hoursSince = (iso) => (iso ? Math.max(0, Math.floor((Date.now() - new Date(iso.endsWith("Z") || iso.includes("+") ? iso : iso + "Z").getTime()) / 3600000)) : 0);
@@ -286,7 +292,7 @@ function extraButtons(x) {
   const wait = x.status === "pending" || x.has_edit ? `<span class="wait ${hoursSince(x.created_at) >= 24 ? "late" : ""}">ждёт ${hoursSince(x.created_at)} ч</span> ` : "";
   const undo = ["approved", "rejected", "needs_fix", "hidden"].includes(x.status) ? '<button class="act gray" data-undo>↶ Отменить решение</button>' : "";
   const claimed = claimsMap[x.id] ? `<span class="wait late">🔒 в работе: ${esc(claimsMap[x.id])}</span> ` : '<button class="act gray" data-claim>🔒 Взять в работу</button>';
-  return `<div class="row" style="margin-top:6px">${wait}${claimed}<button class="act gray" data-edit>✏ Править</button>${undo}</div>`;
+  return `<div class="row" style="margin-top:6px">${wait}${claimed}<button class="act gray" data-edit>✏ Править</button><button class="act gray" data-preview="${x.id}">👁 Предпросмотр</button>${undo}</div>`;
 }
 let claimsMap = {};
 async function loadClaims(kind) { try { claimsMap = await api("/api/admin/claims?kind=" + kind); } catch (e) { claimsMap = {}; } }
@@ -340,11 +346,22 @@ async function listingAction(e) {
 }
 
 // ---- модерация: очередь, поиск, массовые действия ----
+let queueFilter = {category: "", city: "", sort: "old"};
+$("#main").addEventListener("submit", (e) => {
+  if (e.target.id !== "queueFilter") return;
+  e.preventDefault();
+  queueFilter = Object.fromEntries(new FormData(e.target).entries());
+  reload();
+});
 async function loadListings() {
   await loadClaims("listing");
   TEMPLATES = await api("/api/admin/templates");
-  const rows = await api("/api/admin/listings");
+  const qs = new URLSearchParams(Object.entries(queueFilter).filter(([, v]) => v));
+  const rows = await api("/api/admin/listings?" + qs);
   $("#main").innerHTML = `
+    <form id="queueFilter" class="filters"><select name="category"><option value="">Все разделы</option><option value="job" ${queueFilter.category === "job" ? "selected" : ""}>Работа</option><option value="housing" ${queueFilter.category === "housing" ? "selected" : ""}>Жильё</option><option value="marketplace" ${queueFilter.category === "marketplace" ? "selected" : ""}>Барахолка</option></select>
+      <input name="city" placeholder="Город" value="${esc(queueFilter.city)}" style="width:140px"><select name="sort"><option value="old" ${queueFilter.sort === "old" ? "selected" : ""}>Сначала старые</option><option value="new" ${queueFilter.sort === "new" ? "selected" : ""}>Сначала новые</option></select>
+      <button class="act" type="submit">Применить</button></form>
     <div class="card"><b>Найти объявление по номеру</b>
       <div class="row"><input id="findId" type="number" min="1" placeholder="Например: 125" style="width:140px"><button class="act" id="findBtn">Найти</button></div><div id="found"></div></div>
     <div class="toolbar"><label><input type="checkbox" id="pickAll"> выбрать все</label>
@@ -433,14 +450,16 @@ async function loadEmployers() {
   const rows = await api("/api/admin/employers?status=pending");
   $("#main").innerHTML = rows.length ? rows.map((u) => `
     <div class="card" data-eid="${esc(u.tg_id)}"><b>${esc(u.company_name)}</b> · рег. номер ${esc(u.registration_no)}
-      <div class="meta">Контакт: ${esc(u.contact_person)} · ID ${esc(u.tg_id)}</div>
+      <div class="meta">Контакт: ${esc(u.contact_person || "не указан")} · <a href="#" data-gu="${esc(u.tg_id)}">карточка человека (ID ${esc(u.tg_id)})</a></div>
       <button class="act ok" data-emp="approve">Подтвердить</button><button class="act no" data-emp="reject">Отклонить</button></div>`).join("")
     : '<div class="card muted">Заявок на проверке нет.</div>';
 }
 $("#main").addEventListener("click", async (e) => {
   const btn = e.target.closest("[data-emp]");
   if (!btn) return;
-  try { await post(`/api/admin/employers/${btn.closest("[data-eid]").dataset.eid}/${btn.dataset.emp}`); reload(); } catch (err) { say(err.message); }
+  let q = "";
+  if (btn.dataset.emp === "reject") { const why = ask("Причина отказа (человек её увидит):"); if (!why) return; q = "?reason=" + encodeURIComponent(why); }
+  try { await post(`/api/admin/employers/${btn.closest("[data-eid]").dataset.eid}/${btn.dataset.emp}${q}`); reload(); } catch (err) { say(err.message); }
 });
 
 // ---- жалобы с контекстом ----
@@ -457,8 +476,10 @@ async function loadReports() {
     } catch (err) { /* сводка необязательна */ }
   }
   $("#main").innerHTML = summary + (rows.length ? rows.map((r) => `
-    <div class="card" data-rid="${r.id}"><b>Жалоба #${r.id}</b> · ${esc(r.target_type)} ${esc(r.target_id)} · причина: ${esc(r.reason)}
-      <div class="meta">${esc(r.created_at)}</div><p>${esc(r.comment || "")}</p><div data-ctx></div>
+    <div class="card" data-rid="${r.id}"><b>Жалоба #${r.id}</b> · причина: <b>${esc(REASON_RU[r.reason] || r.reason)}</b>
+      <div class="meta">${esc(fmt(r.created_at))} · от ${who(r.reporter_name, r.reporter)} · на ${esc({listing: "объявление", user: "человека", review: "отзыв", dating: "анкету", message: "сообщение"}[r.target_type] || r.target_type)}:
+        ${r.target_link && r.target_link.startsWith("listing:") ? `<a href="#" data-gl-open="${r.target_link.slice(8)}">${esc(r.target_label)}</a> <button class="act gray" data-preview="${r.target_link.slice(8)}">👁 Предпросмотр</button>` : r.target_link && r.target_link.startsWith("user:") ? `<a href="#" data-gu="${esc(r.target_link.slice(5))}">${esc(r.target_label)}</a>` : esc(r.target_label || r.target_id)}</div>
+      <p>${esc(r.comment || "без комментария")}</p><div data-ctx></div>
       <button class="act gray" data-rep="context">Показать контекст</button>
       <button class="act ok" data-rep="resolve">Принять (скрыть / заблокировать)</button>
       <button class="act no" data-rep="reject">Отклонить жалобу</button></div>`).join("") : '<div class="card muted">Новых жалоб нет.</div>');
@@ -474,7 +495,9 @@ $("#main").addEventListener("click", async (e) => {
         (c.messages.length ? `<table>${c.messages.map((m) => `<tr><td>${m.from === "reporter" ? "жалующийся" : "на кого жалоба"}</td><td>${esc(m.text)}</td><td>${esc(fmt(m.at))}</td></tr>`).join("")}</table>` : '<p class="muted">Переписки между ними нет.</p>');
       return;
     }
-    await post(`/api/admin/reports/${card.dataset.rid}/${btn.dataset.rep}`);
+    const note = askOpt(btn.dataset.rep === "resolve" ? "Комментарий жалующемуся (что сделали)" : "Почему жалоба отклонена");
+    if (note === null) return;
+    await post(`/api/admin/reports/${card.dataset.rid}/${btn.dataset.rep}${note ? "?reason=" + encodeURIComponent(note) : ""}`);
     reload();
   } catch (err) { say(err.message); }
 });
@@ -600,8 +623,8 @@ $("#main").addEventListener("click", async (e) => {
 // ---- отзывы ----
 async function loadReviews() {
   const [shown, hidden] = await Promise.all([api("/api/admin/reviews?status=published"), api("/api/admin/reviews?status=hidden")]);
-  const row = (r, act, label) => `<div class="card" data-revid="${r.id}"><b>${"★".repeat(r.rating)}</b> · объявление #${r.listing_id} · автор ${esc(r.target)} · от ${esc(r.reviewer)}
-    <div class="meta">${esc(r.created_at)}</div><p>${esc(r.text || "(без текста)")}</p><button class="act ${act === "hide" ? "no" : "ok"}" data-rev="${act}">${label}</button></div>`;
+  const row = (r, act, label) => `<div class="card" data-revid="${r.id}"><b class="rating">${"★".repeat(r.rating)}</b> · «${esc(r.listing_title || "#" + r.listing_id)}» · о ${who(r.target_name, r.target)} · от ${who(r.reviewer_name, r.reviewer)}
+    <div class="meta">${esc(fmt(r.created_at))}${r.tags ? " · " + esc(r.tags) : ""}</div><p>${esc(r.text || "(без текста)")}</p>${r.reply ? `<p class="muted"><b>Ответ автора:</b> ${esc(r.reply)}</p>` : ""}<button class="act gray" data-gu="${esc(r.reviewer)}">Автор отзыва</button> <button class="act gray" data-preview="${r.listing_id}">👁 Объявление</button> <button class="act ${act === "hide" ? "no" : "ok"}" data-rev="${act}">${label}</button></div>`;
   $("#main").innerHTML = `<h3>Опубликованы</h3>` + (shown.length ? shown.map((r) => row(r, "hide", "Скрыть")).join("") : '<div class="card muted">Пока нет.</div>') +
     `<h3>Скрытые</h3>` + (hidden.length ? hidden.map((r) => row(r, "show", "Вернуть")).join("") : '<div class="card muted">Нет.</div>');
 }
@@ -609,6 +632,25 @@ $("#main").addEventListener("click", async (e) => {
   const b = e.target.closest("[data-rev]");
   if (!b) return;
   try { await post(`/api/admin/reviews/${b.closest("[data-revid]").dataset.revid}/${b.dataset.rev}`); reload(); } catch (err) { say(err.message); }
+});
+
+// ---- предпросмотр объявления: так его увидят люди ----
+let previewId = null;
+async function openPreview(id) {
+  previewId = id;
+  $("#previewTitle").textContent = "Предпросмотр #" + id;
+  const r = await fetch(`/api/admin/listings/${id}/preview?with_changes=${$("#previewChanges").checked}`, {headers: {"X-Admin-Session": session()}});
+  if (!r.ok) { say((await r.json().catch(() => ({}))).detail || "Не удалось открыть предпросмотр"); return; }
+  $("#previewFrame").srcdoc = await r.text();
+  $("#previewModal").hidden = false;
+}
+$("#previewClose").onclick = () => { $("#previewModal").hidden = true; $("#previewFrame").srcdoc = ""; };
+$("#previewChanges").onchange = () => { if (previewId) openPreview(previewId); };
+$("#previewModal").addEventListener("click", (e) => { if (e.target.id === "previewModal") $("#previewClose").click(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("#previewModal").hidden) $("#previewClose").click(); });
+$("#main").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-preview]");
+  if (b) openPreview(b.dataset.preview).catch((err) => say(err.message));
 });
 
 // ---- карточка человека ----
@@ -628,14 +670,30 @@ async function openUserCard(id) {
       <b>Заплатил</b><span>${u.stars_paid} ⭐</span><b>Резюме</b><span>${u.has_resume ? "есть" : "нет"}</span></div>
       <div style="margin-top:10px">${u.blocked ? '<button class="act ok" data-ux="unblock">Разблокировать</button>' : '<button class="act no" data-ux="block">Заблокировать бессрочно</button><button class="act warn" data-ux="blockfor">Заблокировать на срок</button>'}
         <button class="act gray" data-ux="${u.trusted ? "untrust" : "trust"}">${u.trusted ? "Снять «проверенный автор»" : "Отметить «проверенный автор»"}</button></div></div>
+      <div class="card"><h3>Править профиль</h3><div class="gridform" id="ueForm">
+        <label>Имя<input data-ue="display_name" value="${esc(u.name || "")}" maxlength="40"></label>
+        <label>Виза<select data-ue="visa"><option value="">не указана</option>${["E-9", "E-7", "F-2", "F-4", "F-5", "F-6", "D-2", "D-4", "H-2", "C-4", "G-1"].map((v) => `<option value="${v}" ${u.visa === v ? "selected" : ""}>${v}</option>`).join("")}</select></label>
+        <label>Город<select data-ue="region_code"><option value="">оставить: ${esc(u.city)}</option></select></label>
+        ${u.employer_status === "approved" ? `<label>Компания<input data-ue="company_name" value="${esc(u.company || "")}" maxlength="160"></label>` : ""}</div>
+        <label><input type="checkbox" id="ueAvatar"> убрать фото профиля</label><br>
+        <button class="act ok" id="ueSave">Сохранить правку</button> <span class="muted">Человек получит уведомление</span></div>
       <div class="card"><h3>Заметки сотрудников</h3>${u.notes.map((n) => `<div class="meta"><b>${esc(n.author)}</b> ${esc(fmt(n.at))} <button class="act gray" data-delnote="${n.id}">убрать</button></div><p>${esc(n.text)}</p>`).join("") || '<p class="muted">Заметок нет.</p>'}
         <textarea id="noteText" rows="2" maxlength="500" placeholder="Например: предупреждён о телефонах в описании"></textarea><button class="act ok" id="noteAdd">Добавить заметку</button></div>
       <div class="card"><h3>Объявления</h3>${u.listings.map((x) => `<div>#${x.id} ${esc(x.title)} <span class="badge">${esc(STATUS_RU[x.status] || x.status)}</span> <button class="act gray" data-gl="${x.id}">Открыть</button><div data-gbox></div></div>`).join("") || '<p class="muted">Нет.</p>'}</div>
       <div class="card"><h3>Обращения в поддержку</h3>${u.tickets.map((t) => `<div>#${t.id} · ${esc(t.kind)} · ${esc(t.status)}</div>`).join("") || '<p class="muted">Нет.</p>'}</div>`;
     say("");
+    fetch("/api/geo").then((r) => r.json()).then((g) => { const sel = document.querySelector('[data-ue="region_code"]'); if (sel) sel.insertAdjacentHTML("beforeend", g.regions.map((r) => `<option value="${esc(r.code)}">${esc(r.name)}</option>`).join("")); }).catch(() => {});
   } catch (err) { say(err.message); }
 }
 $("#main").addEventListener("click", async (e) => {
+  if (e.target.id === "ueSave") {
+    const holder0 = document.querySelector('#main > .card[data-uid]');
+    const body = {clear_avatar: $("#ueAvatar").checked};
+    document.querySelectorAll("[data-ue]").forEach((el) => { if (el.dataset.ue === "region_code") { if (el.value) body.region_code = el.value; } else body[el.dataset.ue] = el.value; });
+    try { const r = await api(`/api/admin/users/${holder0.dataset.uid}/edit`, {method: "PUT", body: JSON.stringify(body)}); say(r.changed.length ? "Сохранено: " + r.changed.join("; ") : "Изменений нет"); openUserCard(holder0.dataset.uid); }
+    catch (err) { say(err.message); }
+    return;
+  }
   const holder = document.querySelector('#main > .card[data-uid]');
   if (e.target.id === "noteAdd" && holder) {
     try { await post(`/api/admin/users/${holder.dataset.uid}/notes`, {text: $("#noteText").value.trim()}); openUserCard(holder.dataset.uid); } catch (err) { say(err.message); }
@@ -645,23 +703,32 @@ $("#main").addEventListener("click", async (e) => {
 });
 
 // ---- пользователи ----
+let userFilter = {q: "", flt: "", sort: "new"}, userLimit = 30;
 async function loadUsers() {
-  $("#main").innerHTML = `<div class="toolbar"><input id="userQuery" placeholder="ID пользователя"><button class="act" id="userSearch">Найти</button></div><div id="usersList"></div>`;
-  const run = async () => {
-    const rows = await api("/api/admin/users?q=" + encodeURIComponent($("#userQuery").value.trim()));
-    $("#usersList").innerHTML = rows.length ? rows.map((u) => `
-      <div class="card" data-uid="${esc(u.tg_id)}"><b>ID ${esc(u.tg_id)}</b> · ${esc(u.city)} · согласие: ${u.consent ? "да" : "нет"}${u.trusted ? " · ✔ проверенный автор" : ""}
-        ${u.deleted ? " · аккаунт удалён" : ""}${u.blocked ? " · <b>заблокирован</b>" : ""}${u.block_reason ? `<div class="meta">Причина: ${esc(u.block_reason)}</div>` : ""}
-        <div data-act-box></div>
-        <button class="act gray" data-ux="card">Карточка</button>
-        <button class="act gray" data-ux="activity">Активность</button>
-        <button class="act gray" data-ux="${u.trusted ? "untrust" : "trust"}">${u.trusted ? "Снять отметку «проверен»" : "Отметить «проверенный автор»"}</button>
-        ${u.blocked ? '<button class="act ok" data-ux="unblock">Разблокировать</button>' : '<button class="act no" data-ux="block">Заблокировать</button>'}</div>`).join("")
-      : '<div class="card muted">Никого не нашли.</div>';
-  };
-  $("#userSearch").onclick = () => run().catch((e) => say(e.message));
-  await run();
+  $("#main").innerHTML = `<form id="userForm" class="filters"><input name="q" placeholder="Имя, ID или город" value="${esc(userFilter.q)}" style="width:180px">
+    <select name="flt">${[["", "Все"], ["blocked", "Заблокированные"], ["employers", "Работодатели"], ["trusted", "Проверенные авторы"], ["new7", "Новые за неделю"], ["deleted", "Удалённые"]].map(([k, v]) => `<option value="${k}" ${userFilter.flt === k ? "selected" : ""}>${v}</option>`).join("")}</select>
+    <select name="sort"><option value="new" ${userFilter.sort === "new" ? "selected" : ""}>Сначала новые</option><option value="seen" ${userFilter.sort === "seen" ? "selected" : ""}>По последнему визиту</option></select>
+    <button class="act" type="submit">Показать</button><span class="muted" id="userTotal"></span></form><div id="usersList"></div>`;
+  const qs = new URLSearchParams({limit: String(userLimit), ...Object.fromEntries(Object.entries(userFilter).filter(([, v]) => v))});
+  const r = await api("/api/admin/users-list?" + qs);
+  $("#userTotal").textContent = "Найдено: " + r.total;
+  $("#usersList").innerHTML = (r.items.length ? r.items.map((u) => `
+    <div class="card" data-uid="${esc(u.tg_id)}"><b>${u.name ? esc(u.name) : "<i>без имени</i>"}</b> <span class="muted">ID ${esc(u.tg_id)} · ${esc(u.city)}</span>
+      ${u.trusted ? ' · <span class="good">✔ проверенный автор</span>' : ""}${u.employer_status === "approved" ? ` · 🏢 ${esc(u.company)}` : ""}${u.deleted ? " · аккаунт удалён" : ""}${u.blocked ? ` · <b class="bad">заблокирован${u.blocked_until ? " до " + esc(fmt(u.blocked_until)) : ""}</b>` : ""}${!u.consent ? ' · <span class="muted">не принял правила</span>' : ""}
+      <div class="meta">с ${esc(fmt(u.created_at).slice(0, 10))} · был в сети ${esc(u.last_seen_at ? fmt(u.last_seen_at) : "—")} · объявлений: ${u.listings}${u.reports_against ? ` · <span class="bad">жалоб на него: ${u.reports_against}</span>` : ""}${u.block_reason ? " · причина блокировки: " + esc(u.block_reason) : ""}</div>
+      <div data-act-box></div>
+      <button class="act gray" data-ux="card">Карточка</button><button class="act gray" data-ux="activity">Активность</button>
+      <button class="act gray" data-ux="${u.trusted ? "untrust" : "trust"}">${u.trusted ? "Снять «проверен»" : "«Проверенный автор»"}</button>
+      ${u.blocked ? '<button class="act ok" data-ux="unblock">Разблокировать</button>' : '<button class="act no" data-ux="block">Заблокировать</button><button class="act warn" data-ux="blockfor">На срок</button>'}</div>`).join("")
+    : '<div class="card muted">Никого не нашли.</div>') + (r.total > r.items.length ? '<button class="act gray" id="userMore">Показать ещё</button>' : "");
 }
+$("#main").addEventListener("submit", (e) => {
+  if (e.target.id !== "userForm") return;
+  e.preventDefault();
+  userFilter = Object.fromEntries(new FormData(e.target).entries()); userLimit = 30;
+  reload();
+});
+$("#main").addEventListener("click", (e) => { if (e.target.id === "userMore") { userLimit += 30; reload(); } });
 $("#main").addEventListener("click", async (e) => {
   const btn = e.target.closest("[data-ux]");
   if (!btn) return;
@@ -700,15 +767,16 @@ $("#main").addEventListener("click", async (e) => {
 // ---- сообщество ----
 async function loadCommunity() {
   const rows = await api("/api/admin/groups");
-  const row = (g = {}) => `<tr data-gid="${g.id || ""}"><td><input data-f="flag" value="${esc(g.flag || "")}" style="width:50px"></td>
-    <td><input data-f="name" value="${esc(g.name || "")}" placeholder="Название"></td>
-    <td><input data-f="telegram_link" value="${esc(g.telegram_link || "")}" placeholder="https://t.me/…"></td>
-    <td><input data-f="members_count" type="number" min="0" value="${g.members_count || 0}" style="width:90px"></td>
-    <td><select data-f="kind"><option value="nation" ${g.kind !== "city" ? "selected" : ""}>национальность</option><option value="city" ${g.kind === "city" ? "selected" : ""}>город</option></select></td>
-    <td><input data-f="description" value="${esc(g.description || "")}" placeholder="Описание"></td>
-    <td><button class="act" data-gsave>${g.id ? "Сохранить" : "Добавить"}</button>${g.id ? '<button class="act no" data-gdel>Удалить</button>' : ""}</td></tr>`;
+  const row = (g = {}) => `<div class="card" data-gid="${g.id || ""}"><div class="gridform">
+    <label>Флаг<input data-f="flag" value="${esc(g.flag || "")}" maxlength="8"></label>
+    <label>Название<input data-f="name" value="${esc(g.name || "")}" placeholder="Название"></label>
+    <label>Ссылка на группу<input data-f="telegram_link" value="${esc(g.telegram_link || "")}" placeholder="https://t.me/…"></label>
+    <label>Участников<input data-f="members_count" type="number" min="0" value="${g.members_count || 0}"></label>
+    <label>Раздел<select data-f="kind"><option value="nation" ${g.kind !== "city" ? "selected" : ""}>национальность</option><option value="city" ${g.kind === "city" ? "selected" : ""}>город</option></select></label>
+    <label>Описание<input data-f="description" value="${esc(g.description || "")}" placeholder="Описание"></label></div>
+    <button class="act" data-gsave>${g.id ? "Сохранить" : "Добавить"}</button>${g.id ? '<button class="act no" data-gdel>Удалить</button>' : ""}</div>`;
   $("#main").innerHTML = `<p class="muted">Ссылки только на группы в Telegram (https://t.me/…). Группа без ссылки в приложении показана серой.</p>
-    <table><tr><th>Флаг</th><th>Название</th><th>Ссылка</th><th>Участников</th><th>Раздел</th><th>Описание</th><th></th></tr>${rows.map(row).join("")}${row()}</table>`;
+    <h3>Новая группа</h3>${row()}<h3>Все группы (${rows.length})</h3>${rows.map(row).join("")}`;
 }
 $("#main").addEventListener("click", async (e) => {
   const tr = e.target.closest("[data-gid]");
@@ -800,12 +868,16 @@ $("#main").addEventListener("click", async (e) => {
 });
 
 // ---- платежи и промокоды ----
+let payFilter = {q: "", status: "", service: "", since: "", until: ""}, payLimit = 30;
+$("#main").addEventListener("click", (e) => { if (e.target.id === "payMore") { payLimit += 30; reload(); } });
 async function loadPayments() {
-  const [rows, promos, an] = await Promise.all([api("/api/admin/payments"), api("/api/admin/promos"), api("/api/admin/analytics?days=30")]);
+  const qs = new URLSearchParams({limit: String(payLimit), ...Object.fromEntries(Object.entries(payFilter).filter(([, v]) => v))});
+  const [pl, promos, an] = await Promise.all([api("/api/admin/payments-list?" + qs), api("/api/admin/promos"), api("/api/admin/analytics?days=30")]);
   const sold = an.days.filter((d) => d.payments).reverse();
+  const svcOptions = Object.entries(pl.services).map(([k, v]) => `<option value="${esc(k)}" ${payFilter.service === k ? "selected" : ""}>${esc(v)}</option>`).join("");
   $("#main").innerHTML = `
     <div class="card"><h3>Заработано звёзд за 30 дней: ${an.totals.stars} ⭐</h3>
-      ${sold.length ? `<table><tr><th>День</th><th>Продаж</th><th>⭐</th></tr>${sold.map((d) => `<tr><td>${esc(d.date)}</td><td>${d.payments}</td><td>${d.stars}</td></tr>`).join("")}</table>` : '<p class="muted">Продаж не было.</p>'}
+      ${sold.length ? `<table><tr><th>День</th><th>Продаж</th><th>⭐</th></tr>${sold.map((d) => `<tr><td>${esc(d.date)}</td><td>${d.payments}</td><td>${d.stars}</td></tr>`).join("")}</table>` : '<p class="muted">Продаж пока не было.</p>'}
       ${an.stars_by_service.length ? `<h3 style="margin-top:12px">По услугам</h3><table><tr><th>Услуга</th><th>⭐</th></tr>${an.stars_by_service.map((x) => `<tr><td>${esc(x.service)}</td><td>${x.stars}</td></tr>`).join("")}</table>` : ""}</div>
     <div class="card"><h3>Промокоды</h3><div class="row"><input id="pCode" placeholder="КОД" maxlength="24" style="width:130px;text-transform:uppercase">
       <input id="pPercent" type="number" min="1" max="90" placeholder="% скидки" style="width:100px"><input id="pFixed" type="number" min="1" placeholder="или звёзд" style="width:100px">
@@ -813,15 +885,26 @@ async function loadPayments() {
       <table><tr><th>Код</th><th>Скидка</th><th>Использовано</th><th>До</th><th></th></tr>${promos.map((p) => `<tr data-pid="${p.id}"><td>${esc(p.code)}</td>
       <td>${p.percent ? "−" + p.percent + "%" : "−" + p.fixed_stars + " ⭐"}</td><td>${p.used}${p.max_uses ? "/" + p.max_uses : ""}</td><td>${esc(fmt(p.valid_until) || "без срока")}</td>
       <td><button class="act ${p.active ? "gray" : "ok"}" data-ptoggle>${p.active ? "Выключить" : "Включить"}</button></td></tr>`).join("")}</table></div>
-    ${rows.length ? `<table><tr><th>№</th><th>Пользователь</th><th>Объявление</th><th>Услуга</th><th>⭐</th><th>Статус</th><th></th></tr>
-    ${rows.map((p) => `<tr data-pay="${p.id}"><td>${p.id}</td><td>${esc(p.user)}</td><td>#${p.listing_id}</td><td>${esc(p.service)}</td><td>${p.stars}</td><td>${esc(p.status)}</td>
-      <td>${p.status === "paid" ? '<button class="act no" data-refund>Вернуть</button>' : ""}</td></tr>`).join("")}</table>` : '<div class="card muted">Платежей пока нет.</div>'}`;
+    <form id="payFilter" class="filters"><input name="q" placeholder="Имя или ID" value="${esc(payFilter.q)}" style="width:140px">
+      <select name="status"><option value="">Любой статус</option>${Object.entries(PAY_RU).map(([k, v]) => `<option value="${k}" ${payFilter.status === k ? "selected" : ""}>${v}</option>`).join("")}</select>
+      <select name="service"><option value="">Любая услуга</option>${svcOptions}</select><input name="since" type="date" value="${esc(payFilter.since)}"><input name="until" type="date" value="${esc(payFilter.until)}">
+      <button class="act" type="submit">Показать</button><span class="muted">Найдено: ${pl.total} · оплачено: ${pl.paid_stars} ⭐</span></form>
+    ${pl.items.length ? `<table><tr><th>№</th><th>Кто</th><th>Объявление</th><th>Услуга</th><th>⭐</th><th>Когда</th><th>Статус</th><th></th></tr>
+    ${pl.items.map((p) => `<tr data-pay="${p.id}"><td>${p.id}</td><td><a href="#" data-gu="${esc(p.user)}">${who(p.name, p.user)}</a></td><td><a href="#" data-preview="${p.listing_id}">#${p.listing_id}</a></td><td>${esc(p.service_title)}${p.promo ? ` · код ${esc(p.promo)}` : ""}</td><td>${p.stars}</td><td>${esc(fmt(p.paid_at || p.created_at))}</td><td>${esc(PAY_RU[p.status] || p.status)}</td>
+      <td>${p.status === "paid" ? '<button class="act no" data-refund>Вернуть</button>' : ""}</td></tr>`).join("")}</table>` : '<div class="card muted">По этим условиям платежей нет.</div>'}
+    ${pl.total > pl.items.length ? `<button class="act gray" id="payMore">Показать ещё</button>` : ""}`;
   $("#pAdd").onclick = async () => {
     const num = (id) => ($(id).value ? Number($(id).value) : null);
     try { await post("/api/admin/promos", {code: $("#pCode").value.trim(), percent: num("#pPercent"), fixed_stars: num("#pFixed"), max_uses: num("#pMax"), days: num("#pDays")}); reload(); }
     catch (err) { say(err.message); }
   };
 }
+$("#main").addEventListener("submit", (e) => {
+  if (e.target.id !== "payFilter") return;
+  e.preventDefault();
+  payFilter = Object.fromEntries(new FormData(e.target).entries());
+  reload();
+});
 $("#main").addEventListener("click", async (e) => {
   try {
     const t = e.target.closest("[data-ptoggle]");
@@ -830,7 +913,9 @@ $("#main").addEventListener("click", async (e) => {
     if (!btn) return;
     const id = btn.closest("[data-pay]").dataset.pay;
     if (!confirm("Вернуть оплату " + id + "? Звёзды вернутся пользователю, услуга отключится.")) return;
-    await post(`/api/admin/payments/${id}/refund`); reload();
+    const why = askOpt("Причина возврата (её увидит человек)");
+    if (why === null) return;
+    await post(`/api/admin/payments/${id}/refund${why ? "?reason=" + encodeURIComponent(why) : ""}`); reload();
   } catch (err) { say(err.message); }
 });
 

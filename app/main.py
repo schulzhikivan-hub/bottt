@@ -32,7 +32,7 @@ from app.guard import rate_limit, check_text, duplicate_note, notify_user
 from app import admin_ops as ops
 from app import catalog
 from app import photos, applications, searches, inbox, promos, adminx, observe, site
-from app import geo, reviews, resumes, referrals, support, extras, adminplus
+from app import geo, reviews, resumes, referrals, support, extras, adminplus, adminview
 from app import fields as listing_fields
 from app.users import get_or_create_user, writer, is_blocked_pair
 from app.models import DatingProfile, TypingMark
@@ -69,6 +69,7 @@ app.include_router(referrals.router)
 app.include_router(support.router)
 app.include_router(extras.router)
 app.include_router(adminplus.router)
+app.include_router(adminview.router)
 app.include_router(listing_fields.router)
 STATIC = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
@@ -706,11 +707,22 @@ def get_article(article_id: int, db: Session = Depends(get_db)):
 # ---------- Admin ----------
 
 @app.get("/api/admin/listings")
-def pending_listings(actor: str = Depends(staff(*MOD)), db: Session = Depends(get_db)):
-    """New listings and waiting edits. For an edit, pending_changes shows what would change."""
-    rows = list(db.scalars(select(Listing).where(ops.queue_condition()).order_by(Listing.id)).all())
+def pending_listings(category: str | None = None, city: str = Query(default="", max_length=60),
+                     sort: str = Query(default="old", max_length=4), actor: str = Depends(staff(*MOD)), db: Session = Depends(get_db)):
+    """New listings and waiting edits (oldest first by default). For an edit, pending_changes shows what would change."""
+    stmt = select(Listing).where(ops.queue_condition())
+    if category:
+        stmt = stmt.where(Listing.category == category)
+    if city.strip():
+        stmt = stmt.where(Listing.city_key.like(catalog._like(city.strip().lower()), escape="\\"))
+    rows = list(db.scalars(stmt.order_by(Listing.id.desc() if sort == "new" else Listing.id)).all())
     shown = catalog.with_promo(db, rows, owner=True)
+    authors = {x.author_telegram_id for x in rows}
+    who = adminview.names(db, authors)
+    bad = dict(db.execute(select(Listing.author_telegram_id, func.count()).where(
+        Listing.author_telegram_id.in_(authors or ["-"]), Listing.status.in_(["rejected", "needs_fix"])).group_by(Listing.author_telegram_id)).all())
     return [{**o.model_dump(mode="json"), "pending_changes": x.pending_changes, "author_id": x.author_telegram_id,
+             "author_name": who.get(x.author_telegram_id, ""), "author_rejects": bad.get(x.author_telegram_id, 0),
              "flags": adminx.listing_flags(db, x)} for o, x in zip(shown, rows)]
 
 
@@ -736,14 +748,13 @@ def moderate_listing(listing_id: int, decision: str, reason: str = Query(default
 def admin_reports(status: str = "new", actor: str = Depends(staff(*SUPPORT)),
                   db: Session = Depends(get_db)):
     rows = db.scalars(select(Report).where(Report.status == status).order_by(Report.id).limit(200)).all()
-    return [{"id": r.id, "target_type": r.target_type, "target_id": r.target_id, "reason": r.reason,
-             "comment": r.comment, "status": r.status, "created_at": str(r.created_at)} for r in rows]
+    return adminview.report_rows(db, rows)
 
 
 @app.post("/api/admin/reports/{report_id}/{decision}")
-def decide_report(report_id: int, decision: str, actor: str = Depends(staff(*SUPPORT)),
-                  db: Session = Depends(get_db)):
-    report = _run(ops.decide_report, db, actor, report_id, decision)
+def decide_report(report_id: int, decision: str, reason: str = Query(default="", max_length=300),
+                  actor: str = Depends(staff(*SUPPORT)), db: Session = Depends(get_db)):
+    report = _run(ops.decide_report, db, actor, report_id, decision, reason)
     return {"id": report.id, "status": report.status}
 
 
@@ -781,13 +792,15 @@ def admin_payments(actor: str = Depends(staff(*ADM)), db: Session = Depends(get_
 
 
 @app.post("/api/admin/payments/{payment_id}/refund")
-def admin_refund(payment_id: int, actor: str = Depends(staff(*ADM)), db: Session = Depends(get_db)):
+def admin_refund(payment_id: int, reason: str = Query(default="", max_length=300), actor: str = Depends(staff(*ADM)),
+                 db: Session = Depends(get_db)):
     try:
         p = payments.refund(db, payment_id)
     except PaymentError as exc:
         raise HTTPException(400, str(exc))
-    log_action(db, actor, "payment.refund", "payment", payment_id, p.telegram_payment_charge_id or "")
+    log_action(db, actor, "payment.refund", "payment", payment_id, f"{p.telegram_payment_charge_id or ''} {reason}".strip())
     db.commit()
+    notify_user(db, p.user_tg_id, "Платёж возвращён." + (f" Причина: {reason}" if reason else ""), "payments")
     return {"id": p.id, "status": p.status}
 
 

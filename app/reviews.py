@@ -133,8 +133,12 @@ def review_state(listing_id: int, user_id: str = Depends(writer), db: Session = 
 @router.get("/api/admin/reviews")
 def admin_reviews(status: str = Query(default="published"), actor: str = Depends(staff(*MOD)), db: Session = Depends(get_db)):
     rows = db.scalars(select(Review).where(Review.status == status).order_by(Review.id.desc()).limit(100)).all()
-    return [{"id": r.id, "listing_id": r.listing_id, "target": r.target_tg_id, "reviewer": r.reviewer_tg_id, "rating": r.rating,
-             "text": r.text, "status": r.status, "created_at": r.created_at.isoformat()} for r in rows]
+    from app import adminview
+    who = adminview.names(db, [r.target_tg_id for r in rows] + [r.reviewer_tg_id for r in rows])
+    titles = {x.id: x.title for x in db.scalars(select(Listing).where(Listing.id.in_([r.listing_id for r in rows] or [0]))).all()}
+    return [{"id": r.id, "listing_id": r.listing_id, "listing_title": titles.get(r.listing_id, ""), "target": r.target_tg_id,
+             "target_name": who.get(r.target_tg_id, ""), "reviewer": r.reviewer_tg_id, "reviewer_name": who.get(r.reviewer_tg_id, ""),
+             "rating": r.rating, "tags": r.tags, "reply": r.reply, "text": r.text, "status": r.status, "created_at": r.created_at.isoformat()} for r in rows]
 
 
 @router.post("/api/admin/reviews/{review_id}/{decision}")

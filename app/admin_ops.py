@@ -78,7 +78,7 @@ def moderate_listing(db: Session, actor: str, listing_id: int, decision: str, re
     return item
 
 
-def decide_report(db: Session, actor: str, report_id: int, decision: str) -> Report:
+def decide_report(db: Session, actor: str, report_id: int, decision: str, reason: str = "") -> Report:
     if decision not in {"resolve", "reject"}:
         raise OpError(400, "Решение: resolve или reject")
     report = db.get(Report, report_id)
@@ -110,12 +110,13 @@ def decide_report(db: Session, actor: str, report_id: int, decision: str) -> Rep
                 user.blocked = True
                 user.block_reason = "По жалобам пользователей"
     report.status = "resolved" if decision == "resolve" else "rejected"
-    log_action(db, actor, f"report.{decision}", "report", report_id, report.target_type + ":" + report.target_id)
+    log_action(db, actor, f"report.{decision}", "report", report_id, (report.target_type + ":" + report.target_id + (" · " + reason if reason else "")))
     db.commit()
     # the person who complained learns the result; the author learns why the listing is gone
     guard.notify_user(db, report.reporter_tg_id,
-                      "Спасибо за жалобу. Мы проверили и приняли меры." if decision == "resolve"
-                      else "Мы проверили вашу жалобу: нарушений не нашли. Спасибо, что помогаете делать KOREA HUB лучше.",
+                      ("Спасибо за жалобу. Мы проверили и приняли меры." if decision == "resolve"
+                       else "Мы проверили вашу жалобу: нарушений не нашли. Спасибо, что помогаете делать KOREA HUB лучше.")
+                      + (f" Комментарий: {reason}" if reason else ""),
                       "moderation")
     if hidden_listing is not None:
         guard.notify_user(db, hidden_listing.author_telegram_id,
@@ -181,15 +182,19 @@ def unblock_user(db: Session, actor: str, tg_id: str, reason: str) -> User:
     return user
 
 
-def decide_employer(db: Session, actor: str, tg_id: str, decision: str) -> User:
+def decide_employer(db: Session, actor: str, tg_id: str, decision: str, reason: str = "") -> User:
     if decision not in {"approve", "reject"}:
         raise OpError(400, "Решение: approve или reject")
+    if decision == "reject" and len(reason.strip()) < 3:
+        raise OpError(400, "Укажите причину отказа: человек её увидит")
     user = db.get(User, tg_id)
     if user is None or user.employer_status != "pending":
         raise OpError(404, "Заявка не найдена")
     user.employer_status = "approved" if decision == "approve" else "rejected"
-    log_action(db, actor, f"employer.{decision}", "user", tg_id, user.company_name)
+    log_action(db, actor, f"employer.{decision}", "user", tg_id, f"{user.company_name} {reason}".strip())
     db.commit()
+    guard.notify_user(db, tg_id, "Статус работодателя подтверждён: на ваших вакансиях появится значок." if decision == "approve"
+                      else f"Заявку работодателя не подтвердили: {reason.strip()}. Исправьте данные и подайте заново.", "moderation")
     return user
 
 

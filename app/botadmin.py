@@ -451,7 +451,7 @@ def _handle(db: Session, admin_id: int, role: str, parts: list[str]) -> Reply:
             return report_queue(db)
         if section == "E":
             if action in ("ok", "no"):
-                user = ops.decide_employer(db, actor, arg, "approve" if action == "ok" else "reject")
+                user = ops.decide_employer(db, actor, arg, "approve" if action == "ok" else "reject", "данные компании не удалось подтвердить")
                 reply = employer_queue(db, f"{'✅ Подтверждён' if action == 'ok' else '❌ Отклонён'}: {user.company_name}\n\n")
                 reply.notify.append((arg, "Статус работодателя подтверждён." if action == "ok"
                                      else "Заявка работодателя отклонена."))

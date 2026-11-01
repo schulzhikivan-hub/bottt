@@ -90,6 +90,11 @@ def public_listing(listing_id: int, db: Session = Depends(get_db)):
     live = x is not None and x.status == "approved" and (x.expires_at is None or aware(x.expires_at) > now())
     if not live:
         return _not_found(listing_id)
+    return listing_page(db, x)
+
+
+def listing_page(db: Session, x: Listing, banner: str = "", gallery: bool = False):
+    """The public page of a listing. With gallery=True every picture is shown (used by the staff preview)."""
     cover = db.scalar(select(ListingPhoto.key).where(ListingPhoto.listing_id == x.id, ListingPhoto.status == "live")
                       .order_by(ListingPhoto.position, ListingPhoto.id).limit(1))
     image = f"{base_url()}/api/photos/{cover}.jpg" if cover else None
@@ -116,7 +121,11 @@ def public_listing(listing_id: int, db: Session = Depends(get_db)):
             rows.append((label, value))
     facts = "".join(f"<tr><td class='meta'>{html.escape(a)}</td><td><b>{html.escape(str(b))}</b></td></tr>" for a, b in rows if b)
     picture = f'<img class="pic" src="{html.escape(image)}" alt="">' if image else ""
-    body = (f'<div class="card">{picture}'
+    if gallery:
+        keys = db.scalars(select(ListingPhoto.key).where(ListingPhoto.listing_id == x.id, ListingPhoto.status != "removal")
+                          .order_by(ListingPhoto.position, ListingPhoto.id)).all()
+        picture = "".join(f'<img class="pic" src="{html.escape(base_url())}/api/photos/{k}.jpg" alt="">' for k in keys) or picture
+    body = (f'{banner}<div class="card">{picture}'
             f'<div class="meta">{html.escape(CAT.get(x.category, ""))} · 📍 {html.escape(x.city)}</div>'
             f'<h1>{html.escape(x.title)}</h1><div class="price">{html.escape(_price(x))}</div>'
             f'{f"<table>{facts}</table>" if facts else ""}'

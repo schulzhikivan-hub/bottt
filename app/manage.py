@@ -293,9 +293,9 @@ def admin_employers(status: str = "pending", actor: str = Depends(staff(*MOD)), 
 
 
 @router.post("/api/admin/employers/{tg_id}/{decision}")
-def admin_employer_decision(tg_id: str, decision: str, actor: str = Depends(staff(*MOD)),
-                            db: Session = Depends(get_db)):
-    user = _run(ops.decide_employer, db, actor, tg_id, decision)
+def admin_employer_decision(tg_id: str, decision: str, reason: str = Query(default="", max_length=300),
+                            actor: str = Depends(staff(*MOD)), db: Session = Depends(get_db)):
+    user = _run(ops.decide_employer, db, actor, tg_id, decision, reason)
     return {"tg_id": tg_id, "employer_status": user.employer_status}
 
 

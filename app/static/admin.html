@@ -1,6 +1,9 @@
 <!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>KOREA HUB — админ-панель</title>
+<div id="previewModal" class="pmodal" hidden><div class="pbox"><div class="pbar"><b id="previewTitle">Предпросмотр</b>
+  <span><label><input type="checkbox" id="previewChanges" checked> с правкой</label> <button class="act gray" id="previewClose">Закрыть</button></span></div>
+  <iframe id="previewFrame" sandbox title="Предпросмотр объявления"></iframe></div></div>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
 *{box-sizing:border-box}
@@ -60,6 +63,12 @@ th{background:#f6f8fc;color:var(--hint);font-weight:600}
   main table{display:block;overflow-x:auto;max-width:100%}
   main{min-width:0}
 }
+.pmodal{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:50;display:flex;align-items:center;justify-content:center;padding:10px}
+.pmodal[hidden]{display:none}.pbox{background:#fff;border-radius:14px;width:min(520px,100%);height:min(88vh,860px);display:flex;flex-direction:column;overflow:hidden}
+.pbar{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;border-bottom:1px solid #e3e7ef;gap:8px;flex-wrap:wrap}
+#previewFrame{flex:1;border:0;width:100%}
+.gridform{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px;margin:8px 0}
+.gridform label{display:flex;flex-direction:column;font-size:12px;color:#6b7385;gap:3px}.gridform input,.gridform select{width:100%}
 .gsearch{display:flex;gap:6px;margin-left:auto;margin-right:12px}.gsearch input{min-width:200px}
 nav#tabs em[data-badge]{background:#d93025}nav#tabs em.warn{background:#b45309}
 .wait{font-size:12px;color:#6b7385}.wait.late{color:#d93025;font-weight:700}
