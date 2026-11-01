@@ -713,3 +713,8 @@ img.co-ava{object-fit:cover}
 .fw-head{cursor:pointer}
 .fw-more{margin:2px 0 0;font-size:13px;cursor:pointer}
 .dgrid .hint-empty,.dgrid .empty{grid-column:1/-1}
+
+.bulkbar{display:flex;gap:8px;margin:8px 0;flex-wrap:wrap}
+.bulkbar[hidden]{display:none}
+.bulkck{display:flex;gap:6px;align-items:center;font-size:13px;color:var(--hint);margin-bottom:6px}
+.steps div{cursor:pointer}

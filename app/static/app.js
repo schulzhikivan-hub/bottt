@@ -1209,13 +1209,15 @@ function ownCard(x) {
   }
   if (["closed", "sold"].includes(x.status)) acts.push('<button data-own="reopen">Вернуть</button>');
   if (["rejected", "needs_fix", "hidden"].includes(x.status)) acts.push('<button data-own="appeal" class="secondary">Оспорить решение</button>');
+  if (x.status !== "archived") acts.push('<button data-own="dup" class="secondary">⧉ Копия</button>');
+  if (["draft", "pending", "approved", "rejected", "needs_fix"].includes(x.status)) acts.push('<button data-own="move" class="secondary">🔀 Перенести</button>');
   if (x.status !== "archived") acts.push('<button data-own="archive" class="secondary">Удалить</button>');
   const note = x.note ? `<p class="note">Комментарий модератора: ${esc(x.note)}</p>` : "";
   const edit = x.has_edit ? '<p class="muted">Правка на проверке — пока видна прежняя версия</p>' : "";
   const until = x.status === "approved" && x.expires_at ? ` · до ${esc(fmtDate(x.expires_at).split(",")[0])}` : "";
   const runs = (x.placements || []).map((p) => `${(PROMO[p.kind] || p.kind)} до ${fmtDate(p.ends_at).split(",")[0]}`).join(" · ");
   const meta = x.status === "approved" ? `<p class="meta-line">👁 ${x.views || 0}${until}</p>${runs ? `<p class="meta-line">🚀 ${esc(runs)}</p>` : ""}` : "";
-  return `<article class="listing" data-id="${x.id}" data-cat="${x.category}">
+  return `<article class="listing" data-id="${x.id}" data-cat="${x.category}">${bulkMode ? `<label class="bulkck"><input type="checkbox" data-bulk="${x.id}"> выбрать</label>` : ""}
     ${x.cover ? `<img class="cover" src="${esc(x.cover)}" alt="" loading="lazy">` : ""}
     <div class="listing-top"><div><h3>${esc(x.title)}</h3><div class="meta">📍 ${esc(x.city)}</div></div>${STATUS_BADGE(x)}</div>
     <div class="price">${esc(priceText(x))}</div>${meta}${edit}${note}
@@ -1662,6 +1664,7 @@ function showStep(n) {
   document.querySelectorAll("#listingForm .step").forEach((el) => { el.hidden = Number(el.dataset.step) !== n; });
   $("#stepsBar").innerHTML = STEP_NAMES.map((t, i) => `<div class="${i + 1 === n ? "on" : i + 1 < n ? "done" : ""}"><i></i>${i + 1}. ${t}</div>`).join("");
   $("#prevBtn").hidden = n === 1;
+  $("#editSave").hidden = !currentEditId;
   $("#nextBtn").hidden = n === 4;
   if (n === 4) renderPreview();
   $("#scroll").scrollTop = 0;
@@ -2446,6 +2449,8 @@ async function showCompany(id) {
     : ov.status === "rejected" ? `<div class="dalert bad"><b>Компанию не подтвердили</b><span>${esc(ov.note || "Проверьте данные во вкладке «Профиль» и сохраните: заявка уйдёт на проверку снова.")}</span></div>`
     : ov.status === "suspended" ? `<div class="dalert bad"><b>Компания приостановлена</b><span>${esc(ov.note || "Объявления скрыты.")} Напишите в поддержку.</span></div>` : "";
   const tabs = [["overview", "Обзор"], ["listings", "Объявления"], ["apps", `Отклики${ov.applications.new ? " (" + ov.applications.new + ")" : ""}`], ["team", "Команда"], ["profile", "Профиль"]];
+  tabs.splice(4, 0, ["stats", "Аналитика"]);
+  if (ov.role === "owner" || ov.role === "admin") tabs.push(["log", "История"]);
   if (ov.balance !== undefined) tabs.push(["money", "Баланс"]);
   body.innerHTML = `<div class="dcab">
     ${mine.length > 1 ? `<div class="chips">${mine.map((c) => `<button class="chip ${c.id === coState.id ? "active" : ""}" data-cosw="${c.id}">${esc(c.name)}</button>`).join("")}</div>` : ""}
@@ -2548,9 +2553,12 @@ async function renderCoPane(ov) {
         <p class="muted">📍 ${esc(x.city)} · 👁 ${x.views || 0}${x.applications ? ` · ✉ ${x.applications.total}${x.applications.new ? " (новых " + x.applications.new + ")" : ""}` : ""} · ${esc(x.posted_by)}</p>
         <div class="actions"><button class="secondary" data-open="${x.id}">Открыть</button>${x.category === "job" ? `<button class="secondary" data-coapps="${x.id}" data-title="${esc(x.title)}">Отклики</button>` : ""}
         ${canWrite && x.status === "approved" && ov.role !== "recruiter" ? `<button data-coboost="${x.id}">Продвинуть</button>` : ""}
-        ${canWrite && ["approved", "expired"].includes(x.status) ? `<button class="secondary" data-corenew="${x.id}">Продлить</button>` : ""}</div></article>`).join("")
+        ${canWrite && ["approved", "expired"].includes(x.status) ? `<button class="secondary" data-corenew="${x.id}">Продлить</button>` : ""}
+        ${canWrite ? `<button class="secondary" data-codup="${x.id}">⧉ Копия</button><button class="secondary" data-comove="${x.id}">🔀 В личные</button>` : ""}</div></article>`).join("")
         : '<div class="empty">Объявлений от компании пока нет.</div>';
     }
+    if (coState.tab === "stats") pane.innerHTML = await coAnalyticsHtml(ov);
+    if (coState.tab === "log") pane.innerHTML = await coActivityHtml(ov);
     if (coState.tab === "apps") {
       const rows = await api(`/api/company/${ov.id}/applications`);
       pane.innerHTML = rows.length ? rows.map((a) => `<article class="dcard2" data-coapp="${a.id}"><div class="dcard2-head"><h3 style="margin:0">${esc(a.name || "Соискатель")}</h3><span class="muted">${esc(CO_APP[a.status] || a.status)}</span></div>
@@ -2627,7 +2635,7 @@ document.addEventListener("click", async (e) => {
     if (boost) openServices(boost.dataset.coboost);
     if (renew) { await api(`/api/listings/${renew.dataset.corenew}/renew`, {method: "POST"}); toast("Продлено"); renderCoPane(await api(`/api/company/${coState.id}`)); }
     if (st) {
-      const reply = st.dataset.costatus === "rejected" ? "" : "";
+      const reply = (await askText(st.dataset.costatus === "invited" ? "Сообщение соискателю (когда и куда прийти)" : "Причина отказа (необязательно, человек её увидит)", "Можно оставить пустым")) ?? "";
       await api(`/api/applications/${st.dataset.id}`, {method: "PUT", body: JSON.stringify({status: st.dataset.costatus, reply})});
       toast(st.dataset.costatus === "invited" ? "Соискатель приглашён" : "Отказ отправлен"); renderCoPane(await api(`/api/company/${coState.id}`));
     }
@@ -2829,6 +2837,11 @@ document.addEventListener("click", async (e) => {
       const act = own.dataset.own;
       if (act === "employer-apply") { $("#employerModal").classList.remove("hidden"); return; }
       if (act === "edit") { openEdit(item); return; }
+      if (act === "dup") {
+        await api(`/api/listings/${id}/duplicate`, {method: "POST"});
+        toast("Копия создана в черновиках: измените, добавьте фото и отправьте на проверку"); homeLoaded = false; loadProfile(); return;
+      }
+      if (act === "move") { await moveListing(id, item); return; }
       if (act === "reserve") { await api(`/api/listings/${id}/reserve`, {method: "POST", body: JSON.stringify({on: !item.reserved})}); toast(item.reserved ? "Резерв снят" : "Отмечено: зарезервировано"); homeLoaded = false; loadProfile(); return; }
       if (act === "stats") {
         const st = await api(`/api/listings/${id}/stats`);
@@ -3091,4 +3104,101 @@ document.addEventListener("click", (e) => {
   e.preventDefault();
   const url = location.origin + a.getAttribute("href");
   if (tg?.openLink) tg.openLink(url); else window.open(url, "_blank", "noopener");
+});
+
+// ---------- выбор из списка (окно) ----------
+function chooseDialog(title, options) {
+  return new Promise((resolve) => {
+    const m = document.createElement("div");
+    m.className = "modal";
+    m.innerHTML = `<div class="sheet"><div class="sheet-top"><b>${esc(title)}</b><button type="button" data-x aria-label="Закрыть">✕</button></div>
+      <div class="menu-list">${options.map((o) => `<button class="wide" data-k="${esc(String(o.key))}">${esc(o.label)}</button>`).join("")}</div></div>`;
+    document.body.appendChild(m);
+    const done = (v) => { m.remove(); resolve(v); };
+    m.onclick = (e) => {
+      if (e.target === m || e.target.closest("[data-x]")) return done(null);
+      const b = e.target.closest("[data-k]");
+      if (b) done(b.dataset.k);
+    };
+  });
+}
+// «Перенести»: из личных в компанию и обратно (платное продвижение должно закончиться)
+async function moveListing(id, item, after) {
+  let cos = [];
+  try { cos = (await api("/api/company/mine", {quiet: true})).filter((c) => c.verified && c.role !== "viewer" && c.id !== item?.company_id); } catch (e) { cos = []; }
+  const opts = cos.map((c) => ({key: c.id, label: "🏢 " + c.name}));
+  if (item?.company_id) opts.unshift({key: "me", label: "👤 В мои личные объявления"});
+  if (!opts.length) { toast("Нет проверенной компании, куда можно перенести. Создайте её в «Кабинет компании»."); return; }
+  const k = await chooseDialog("Куда перенести объявление?", opts);
+  if (!k) return;
+  await api(`/api/listings/${id}/move`, {method: "POST", body: JSON.stringify({company_id: k === "me" ? null : Number(k)})});
+  toast(k === "me" ? "Теперь объявление личное" : "Объявление перенесено в компанию");
+  homeLoaded = false;
+  if (after) after(); else loadProfile();
+}
+// ---------- «Мои объявления»: выбрать несколько и сделать одно действие ----------
+let bulkMode = false;
+$("#mineBulk").onclick = () => {
+  bulkMode = !bulkMode;
+  $("#mineBulk").textContent = bulkMode ? "Готово" : "Выбрать";
+  $("#bulkBar").hidden = !bulkMode;
+  renderOwn();
+};
+$("#bulkBar").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-bulkdo]");
+  if (!b) return;
+  const ids = [...document.querySelectorAll("[data-bulk]:checked")].map((c) => c.dataset.bulk);
+  if (!ids.length) { toast("Отметьте объявления галочками"); return; }
+  const act = b.dataset.bulkdo;
+  if (act === "archive" && !(await confirmDialog(`Удалить выбранные объявления (${ids.length})?`))) return;
+  let ok = 0, fail = [];
+  for (const id of ids) {
+    try { await api(`/api/listings/${id}/${act}`, {method: "POST", quiet: true}); ok += 1; }
+    catch (err) { fail.push(`#${id}: ${err.message}`); }
+  }
+  toast(`Готово: ${ok} из ${ids.length}` + (fail.length ? `. Не получилось: ${fail[0]}` : ""));
+  homeLoaded = false;
+  loadProfile();
+});
+// ---------- редактирование: шаги кликабельны, «Сохранить» доступно на любом шаге ----------
+$("#stepsBar").addEventListener("click", (e) => {
+  const d = e.target.closest("#stepsBar > div");
+  if (!d) return;
+  const n = [...$("#stepsBar").children].indexOf(d) + 1;
+  if (n === wizStep) return;
+  if (n < wizStep || currentEditId) { showStep(n); return; }
+  for (let k = wizStep; k < n; k++) if (!validateStep(k)) return;
+  showStep(n);
+});
+$("#editSave").onclick = () => { $("#rulesOk").checked = true; saveListing(true); };
+// ---------- компания: аналитика, журнал, выгрузка, копия и перенос ----------
+async function downloadWithAuth(url, name) {
+  const headers = inTelegram ? {"X-Telegram-Init-Data": tg.initData} : {"X-Web-Session": localStorage.getItem("webSession") || ""};
+  const r = await fetch(url, {headers});
+  if (!r.ok) { toast("Не удалось скачать"); return; }
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(await r.blob()); a.download = name; document.body.appendChild(a); a.click(); a.remove();
+}
+async function coAnalyticsHtml(ov) {
+  const a = await api(`/api/company/${ov.id}/analytics`);
+  const t = a.total;
+  return `<article class="dcard2"><h3>Итоги по всем объявлениям</h3><p>👁 ${t.views} · ♥ ${t.favorites} · 💬 чатов ${t.chats} · 📨 откликов ${t.applications}</p>
+    ${a.best ? `<p class="muted">Больше всего смотрят: «${esc(a.best)}»</p>` : ""}</article>` +
+    (a.items.length ? a.items.map((x) => `<article class="dcard2"><div class="dcard2-head"><h3 style="margin:0">${esc(x.title)}</h3><span class="muted">${x.conversion}%</span></div>
+      <p class="muted">👁 ${x.views} · ♥ ${x.favorites} · 💬 ${x.chats} · 📨 ${x.applications}</p>
+      <div class="fw-bar"><i style="width:${Math.min(100, x.conversion * 4)}%"></i></div></article>`).join("") : '<div class="empty">Пока нет данных.</div>') +
+    '<p class="muted">Процент: сколько просмотров закончились откликом или чатом.</p>';
+}
+async function coActivityHtml(ov) {
+  const rows = await api(`/api/company/${ov.id}/activity`);
+  return rows.length ? rows.map((r) => `<article class="dcard2"><b>${esc(r.what)}</b><p class="muted">${esc(r.who)} · ${esc(fmtDate(r.at))}${r.details ? " · " + esc(r.details) : ""}</p></article>`).join("")
+    : '<div class="empty">Здесь появятся действия команды: приглашения, роли, копии и переносы.</div>';
+}
+document.addEventListener("click", async (e) => {
+  const dup = e.target.closest("[data-codup]"), mv = e.target.closest("[data-comove]"), csv = e.target.closest("[data-cocsv]");
+  try {
+    if (dup) { await api(`/api/listings/${dup.dataset.codup}/duplicate`, {method: "POST"}); toast("Копия создана в черновиках компании"); renderCoPane(await api(`/api/company/${coState.id}`)); }
+    if (mv) { await moveListing(mv.dataset.comove, {company_id: coState.id}, async () => renderCoPane(await api(`/api/company/${coState.id}`))); }
+    if (csv) await downloadWithAuth(`/api/company/${coState.id}/applications.csv`, "applications.csv");
+  } catch (err) { toast(err.message); }
 });

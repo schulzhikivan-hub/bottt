@@ -236,6 +236,7 @@ def update_company(company_id: int, payload: CompanyIn, user_id: str = Depends(w
     if reverify:                                   # the registration number changed: the company is checked again
         c.status, c.note = "pending", "Номер регистрации изменён: компания на повторной проверке"
     sync_employer_from_company(db, c)
+    log_action(db, user_id, "company.edit", "company", c.id, f"{c.name}")
     db.commit()
     return _view(db, c, role)
 
@@ -293,6 +294,7 @@ def invite(company_id: int, payload: InviteIn, user_id: str = Depends(writer), d
         raise HTTPException(409, f"В команде не больше {rules.val('company.max_members')} человек")
     code = secrets.token_urlsafe(10)
     db.add(CompanyInvite(code=code, company_id=c.id, role=payload.role, expires_at=now() + dt.timedelta(days=7)))
+    log_action(db, user_id, "company.invite", "company", c.id, f"роль {payload.role}")
     db.commit()
     return {"code": code, "role": payload.role, "link": f"{settings.webapp_url.rstrip('/')}/?join={code}", "days": 7}
 
@@ -335,6 +337,7 @@ def change_role(company_id: int, tg_id: str, payload: RoleIn, user_id: str = Dep
     if role != "owner" and (m.role == "admin" or payload.role == "admin"):
         raise HTTPException(403, "Роли админа меняет только владелец")
     m.role = payload.role
+    log_action(db, user_id, "company.role", "company", c.id, f"…{tg_id[-4:]} → {payload.role}")
     db.commit()
     return {"tg_id": tg_id, "role": m.role}
 
@@ -355,6 +358,7 @@ def remove_member(company_id: int, tg_id: str, user_id: str = Depends(writer), d
     if tg_id != user_id and role == "admin" and m.role == "admin":
         raise HTTPException(403, "Админа убирает только владелец")
     db.delete(m)
+    log_action(db, user_id, "company.leave" if tg_id == user_id else "company.remove", "company", c.id, f"…{tg_id[-4:]}")
     db.commit()
     if tg_id != user_id:
         guard.notify_user(db, tg_id, f"Ваш доступ к компании «{c.name}» закрыт.", "applications")

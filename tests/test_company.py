@@ -232,3 +232,34 @@ def test_price_sort_is_kept_with_a_search_word(client):
     items = client.get("/api/catalog?q=повар&sort=price_asc").json()["items"]
     prices = [x["price_amount"] for x in items if x["price_amount"] is not None]
     assert prices == sorted(prices)
+
+
+def test_duplicate_is_a_draft_copy_and_company_copy_stays_the_companys(client):
+    cid = verified_company(client)
+    lid = approved_company_listing(client, cid)
+    r = client.post(f"/api/listings/{lid}/duplicate", headers=as_user(1))
+    assert r.status_code == 201 and r.json()["status"] == "draft" and r.json()["company_id"] == cid and r.json()["id"] != lid
+    assert client.post(f"/api/listings/{lid}/duplicate", headers=as_user(2)).status_code == 404       # not yours
+
+
+def test_move_between_personal_and_company(client):
+    cid = verified_company(client)
+    pid = client.post("/api/listings", json=JOB | {"title": "Личная вакансия"}, headers=as_user(1)).json()["id"]
+    assert client.post(f"/api/listings/{pid}/move", json={"company_id": cid}, headers=as_user(1)).json()["company_id"] == cid
+    assert pid not in [x["id"] for x in client.get("/api/me/listings", headers=as_user(1)).json()]
+    assert client.post(f"/api/listings/{pid}/move", json={"company_id": cid}, headers=as_user(1)).status_code == 409   # already there
+    assert client.post(f"/api/listings/{pid}/move", json={"company_id": None}, headers=as_user(1)).json()["company_id"] is None
+    assert client.post(f"/api/listings/{pid}/move", json={"company_id": cid}, headers=as_user(2)).status_code == 404   # not mine
+
+
+def test_company_analytics_export_and_activity(client):
+    cid = verified_company(client)
+    lid = approved_company_listing(client, cid)
+    client.post(f"/api/listings/{lid}/duplicate", headers=as_user(1))
+    a = client.get(f"/api/company/{cid}/analytics", headers=as_user(1)).json()
+    assert a["total"]["views"] == 0 and {x["id"] for x in a["items"]} >= {lid}
+    r = client.get(f"/api/company/{cid}/applications.csv", headers=as_user(1))
+    assert r.status_code == 200 and "Вакансия" in r.text and r.headers["content-type"].startswith("text/csv")
+    log = client.get(f"/api/company/{cid}/activity", headers=as_user(1)).json()
+    assert any(x["what"] == "Создана копия объявления" for x in log)
+    assert client.get(f"/api/company/{cid}/analytics", headers=as_user(2)).status_code == 404

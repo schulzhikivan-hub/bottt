@@ -190,7 +190,8 @@
 </section>
 
 <section id="view-mine" class="view" hidden>
-  <div class="subhead"><button class="back-btn" data-back aria-label="Назад">←</button><b>Мои объявления</b></div>
+  <div class="subhead"><button class="back-btn" data-back aria-label="Назад">←</button><b>Мои объявления</b><button class="link" id="mineBulk" style="margin-left:auto">Выбрать</button></div>
+  <div id="bulkBar" class="bulkbar" hidden><button class="secondary" data-bulkdo="renew">🔄 Продлить</button><button class="secondary" data-bulkdo="close">Закрыть</button><button class="secondary" data-bulkdo="archive">Удалить</button></div>
   <div class="chips" id="ownChips">
     <button class="chip active" data-own-filter="all">Все</button>
     <button class="chip" data-own-filter="active">Активные</button>
@@ -380,7 +381,7 @@
 <button class="submit" type="submit" id="sendBtn">Опубликовать</button>
 <button class="submit ghost" type="button" id="draftBtn">Сохранить черновик</button>
 </div>
-<div class="wizbar"><button type="button" class="ghostbtn" id="prevBtn">← Назад</button><button type="button" class="submit" id="nextBtn">Далее</button></div>
+<div class="wizbar"><button type="button" class="ghostbtn" id="prevBtn">← Назад</button><button type="button" class="submit ok" id="editSave" hidden>💾 Сохранить</button><button type="button" class="submit" id="nextBtn">Далее</button></div>
 </form></div></div>
 
 <div id="doneSheet" class="modal hidden"><div class="sheet" style="text-align:center">
