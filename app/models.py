@@ -1,5 +1,5 @@
-from datetime import datetime, timezone
-from sqlalchemy import false, String, Text, DateTime, Integer, BigInteger, ForeignKey, UniqueConstraint, Boolean, JSON, event
+from datetime import date, datetime, timezone
+from sqlalchemy import false, Date, String, Text, DateTime, Integer, BigInteger, ForeignKey, UniqueConstraint, Boolean, JSON, event
 from sqlalchemy.orm import Mapped, mapped_column
 from app.database import Base
 
@@ -175,6 +175,19 @@ class DatingProfile(Base):
     selfie_status: Mapped[str] = mapped_column(String(10), default="")  # "", pending, approved, rejected
     paused: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())   # hidden by the owner, no new moderation on return
     note: Mapped[str] = mapped_column(String(300), default="", server_default="")        # why a moderator rejected it
+    birth_date: Mapped[date | None] = mapped_column(Date, nullable=True)                 # exact age; birth_year stays for old rows
+    seeking: Mapped[str] = mapped_column(String(4), default="", server_default="")        # f | m | any
+    goal: Mapped[str] = mapped_column(String(12), default="", server_default="")          # friendship | relationship | marriage | chat
+    height: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    visa: Mapped[str] = mapped_column(String(8), default="", server_default="")
+    invisible_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)   # paid service «невидимка»
+    invisible_on: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())        # the owner switched it on
+    suspect: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())             # hidden because the age or the person is doubtful
+    vip_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    vip_promo: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())           # VIP given free by a promotion
+    vip_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)   # for freezing the VIP clock
+    viewers_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)    # «кто видел анкету»
+    super_credits: Mapped[int] = mapped_column(Integer, default=0, server_default="0")                # unused «супер-симпатии»
     # pending, published, rejected
     status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
@@ -186,6 +199,9 @@ class DatingLike(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     from_tg: Mapped[str] = mapped_column(String(40), index=True)
     to_tg: Mapped[str] = mapped_column(String(40), index=True)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=_now, nullable=True)
+    notif_id: Mapped[int | None] = mapped_column(Integer, nullable=True)          # the notice to the other person (taken back on cancel)
+    super: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())   # «супер-симпатия»: shown first
 
 
 class Message(Base):
@@ -619,3 +635,22 @@ class ConvHide(Base):
     conv_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_tg_id: Mapped[str] = mapped_column(String(40), primary_key=True)
     at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class DatingView(Base):
+    """Who opened a profile (shown to the owner only with the paid service «кто видел анкету»)."""
+    __tablename__ = "dating_views"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    profile_id: Mapped[int] = mapped_column(Integer, index=True)
+    viewer_tg: Mapped[str] = mapped_column(String(40), index=True)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class DatingPrivatePhoto(Base):
+    """A private photo: seen by VIP viewers and by people who like each other; moderators see all. Never in lists."""
+    __tablename__ = "dating_private_photos"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    profile_id: Mapped[int] = mapped_column(Integer, index=True)
+    key: Mapped[str] = mapped_column(String(80))
+    status: Mapped[str] = mapped_column(String(10), default="pending", index=True)   # pending | live | rejected
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

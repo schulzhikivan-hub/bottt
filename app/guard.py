@@ -124,7 +124,7 @@ def send_telegram(tg_id: str, text: str) -> bool:
         return False
 
 
-NOTIFY_KINDS = {"messages": "Сообщения", "applications": "Отклики", "moderation": "Решения модератора", "support": "Ответы поддержки", "favorites": "Цены в избранном",
+NOTIFY_KINDS = {"messages": "Сообщения", "applications": "Отклики", "moderation": "Решения модератора", "support": "Ответы поддержки", "favorites": "Цены в избранном", "dating": "Знакомства",
                 "searches": "Новые по моим поискам", "expiry": "Срок объявлений", "payments": "Платежи и продвижение"}
 
 
@@ -138,20 +138,24 @@ def telegram_allowed(db: Session, tg_id: str, kind: str) -> bool:
     return (user.notify_prefs or {}).get(kind, True) is not False
 
 
-def record_notification(db: Session, tg_id: str, text: str, kind: str = "system") -> None:
-    """Put the notice in the in-app feed (always, even when Telegram is switched off)."""
+def record_notification(db: Session, tg_id: str, text: str, kind: str = "system") -> int:
+    """Put the notice in the in-app feed (always, even when Telegram is switched off). Returns its number."""
     from app.models import Notification
-    db.add(Notification(user_tg_id=tg_id, kind=kind if kind in NOTIFY_KINDS else "system", text=text[:600]))
+    row = Notification(user_tg_id=tg_id, kind=kind if kind in NOTIFY_KINDS else "system", text=text[:600])
+    db.add(row)
     db.commit()
+    return row.id
 
 
-def notify_user(db: Session, tg_id: str, text: str, kind: str = "system") -> None:
-    """Notify a user: the in-app feed always, Telegram when the global switch and the user's settings allow."""
-    record_notification(db, tg_id, text, kind)
+def notify_user(db: Session, tg_id: str, text: str, kind: str = "system") -> int:
+    """Notify a user: the in-app feed always, Telegram when the global switch and the user's settings allow.
+    Returns the number of the notice in the feed (so that it can be taken back)."""
+    note_id = record_notification(db, tg_id, text, kind)
     if not settings.notifications_enabled:
-        return
+        return note_id
     if telegram_allowed(db, tg_id, kind):
         send_telegram(tg_id, text)
+    return note_id
 
 
 # ---- views counter ----

@@ -1868,7 +1868,7 @@ async function buy(listingId, code) {
 $("#closeServices").onclick = () => $("#services").classList.add("hidden");
 
 // ---------- знакомства ----------
-let datingMode = "feed";
+let datingTab = "all";
 let pendingSelfie = null;
 let datingActive = false, dsCurrent = null;
 function openDatingSheet(id) {
@@ -1904,40 +1904,65 @@ document.addEventListener("click", (e) => {
   if (card && !e.target.closest("button")) openDatingSheet(card.dataset.profile);
 });
 $("#dActive").onclick = () => { datingActive = !datingActive; $("#dActive").classList.toggle("on", datingActive); loadDating(); };
+let datingFilters = {};
 async function loadDating() {
   const box = $("#datingList");
   box.innerHTML = '<div class="skeleton"></div>';
   await loadGeo();
   const reg = $("#dRegion");
   if (!reg.options.length) reg.innerHTML = '<option value="">Вся Корея</option>' + (geoData || []).map((r) => `<option value="${r.code}">${esc(r.name)}</option>`).join("");
-  const params = new URLSearchParams();
+  const params = new URLSearchParams({mode: datingTab});
   if (datingGender) params.set("gender", datingGender);
   const age = $("#dAge").value;
   if (age) { const [lo, hi] = age.split("-"); params.set("age_min", lo); params.set("age_max", hi); }
   if (reg.value) params.set("region", reg.value);
   if (datingActive) params.set("active", "true");
+  for (const [k, v] of Object.entries(datingFilters)) if (v) params.set(k, v);
+  document.querySelectorAll("#dTabs [data-dtab]").forEach((b) => b.classList.toggle("active", b.dataset.dtab === datingTab));
+  const n = Object.values(datingFilters).filter(Boolean).length;
+  $("#dMoreN").textContent = n ? `(${n})` : "";
+  api("/api/dating/counts", {quiet: true}).then((c) => { $("#dnToMe").textContent = c.to_me ? `(${c.to_me})` : ""; $("#dnFromMe").textContent = c.from_me ? `(${c.from_me})` : ""; $("#dnMutual").textContent = c.mutual ? `(${c.mutual})` : ""; }).catch(() => {});
   try {
-    const likes = await api("/api/dating/likes-me", {quiet: true}).catch(() => ({count: 0, items: []}));
-    $("#dLikesN").textContent = likes.count;
-    $("#dLikes").classList.toggle("on", datingMode === "likes");
-    const items = datingMode === "likes" ? likes.items : await api("/api/dating?" + params);
+    const items = await api("/api/dating?" + params);
     window.__dating = Object.fromEntries(items.map((p) => [p.id, p]));
+    const empty = {to_me: "Пока никто не поставил симпатию. Заполните анкету и загрузите фото: так вас найдут быстрее.",
+      from_me: "Вы пока никому не симпатизировали. Откройте «Все» и нажмите ♡.", mutual: "Взаимных симпатий пока нет. Они появятся, когда человек ответит вам тем же.",
+      all: "Анкет по этим условиям нет. Измените возраст, регион или фильтры."}[datingTab];
     box.innerHTML = items.length ? items.map((p) => `
-      <article class="dcard" data-profile="${p.id}">
+      <article class="dcard" data-profile="${p.id}"${p.conversation_id ? ` data-conv="${p.conversation_id}"` : ""}>
         <img src="${esc(p.photo_url)}" alt="" loading="lazy">
-        <button class="dh" data-act="like" aria-label="Нравится">♡</button>
-        <button class="dr" data-act="dreport" aria-label="Пожаловаться">⚑</button>
-        <div class="dinfo"><b>${p.name ? esc(p.name) + ", " : ""}${p.age}${p.name ? "" : " лет"}${p.verified ? " ✔" : ""}</b><span>📍 ${esc(p.city)}</span></div>
+        ${datingTab === "mutual" ? '<button class="dh" data-act="dchat" aria-label="Написать">💬</button>' : datingTab === "from_me" ? (p.can_cancel ? '<button class="dh" data-act="unlike" aria-label="Отменить симпатию">↩</button>' : "") : '<button class="dh" data-act="like" aria-label="Симпатизировать">♡</button>'}
+        <div class="dbadges">${p.vip ? `<span>${p.vip_free ? "🎁 VIP" : "VIP"}</span>` : ""}${p.super ? "<span>⭐</span>" : ""}${p.private_photos ? `<span>🔒${p.private_photos}</span>` : ""}</div>
+        <div class="dinfo"><b>${p.name ? esc(p.name) + ", " : ""}${p.age}${p.name ? "" : " лет"}${p.verified ? " ✔" : ""}</b><span>📍 ${esc(p.city)}${p.age_confirmed ? "" : " · возраст не подтверждён"}</span></div>
       </article>`).join("")
-      : `<div class="empty">${datingMode === "likes" ? "Пока никто не лайкнул. Загляните позже." : "Анкет по этим условиям нет. Измените возраст или регион."}</div>`;
-  } catch (e) { box.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+      : `<div class="empty">${empty}${datingTab === "all" && (datingActive || n || datingGender) ? '<br><button class="link" id="dReset">Сбросить фильтры</button>' : ""}</div>`;
+  } catch (e) { box.innerHTML = `<div class="empty">${esc(e.message)}<br><button class="link" id="dRetry">Повторить</button></div>`; }
 }
-$("#dAge").onchange = () => { datingMode = "feed"; loadDating(); };
-$("#dRegion").onchange = () => { datingMode = "feed"; loadDating(); };
-$("#dLikes").onclick = () => { datingMode = datingMode === "likes" ? "feed" : "likes"; loadDating(); };
+document.addEventListener("click", (e) => {
+  if (e.target.id === "dRetry") loadDating();
+  if (e.target.id === "dReset") { datingFilters = {}; datingActive = false; datingGender = ""; $("#dActive").classList.remove("on"); loadDating(); }
+  const tab = e.target.closest("#dTabs [data-dtab]");
+  if (tab) { datingTab = tab.dataset.dtab; loadDating(); }
+});
+$("#dAge").onchange = () => { datingTab = "all"; loadDating(); };
+$("#dRegion").onchange = () => { datingTab = "all"; loadDating(); };
+$("#dMore").onclick = () => {
+  const f = $("#dfForm");
+  for (const el of f.elements) if (el.name) { if (el.type === "checkbox") el.checked = Boolean(datingFilters[el.name]); else el.value = datingFilters[el.name] || ""; }
+  if (fieldDefs?.visas && $("#dfVisa").options.length < 2) $("#dfVisa").insertAdjacentHTML("beforeend", fieldDefs.visas.map((v) => `<option value="${v.value}">${v.label}</option>`).join(""));
+  $("#dfSheet").classList.remove("hidden");
+};
+$("#dfClose").onclick = () => $("#dfSheet").classList.add("hidden");
+$("#dfReset").onclick = () => { datingFilters = {}; $("#dfSheet").classList.add("hidden"); loadDating(); };
+$("#dfForm").onsubmit = (e) => {
+  e.preventDefault();
+  datingFilters = {};
+  for (const el of e.target.elements) if (el.name) { const v = el.type === "checkbox" ? (el.checked ? "true" : "") : el.value; if (v) datingFilters[el.name] = v; }
+  $("#dfSheet").classList.add("hidden"); datingTab = "all"; loadDating();
+};
 document.querySelectorAll("#datingChips .chip").forEach((chip) => chip.addEventListener("click", () => {
   datingGender = chip.dataset.gender;
-  datingMode = "feed";
+  datingTab = "all";
   document.querySelectorAll("#datingChips .chip").forEach((c) => c.classList.toggle("active", c === chip));
   loadDating();
 }));
@@ -1945,11 +1970,14 @@ async function openMyDating() {
   if (!(await requireConsent())) return;
   const f = $("#datingForm");
   await setGeo("#datingGeo", me?.region_code || "", me?.district_id || "");
+  await loadFields();
+  if (fieldDefs?.visas && $("#dpVisa").options.length < 2) $("#dpVisa").insertAdjacentHTML("beforeend", fieldDefs.visas.map((v) => `<option value="${v.value}">${v.label}</option>`).join(""));
   try {
     const mine = await api("/api/dating/me");
     if (mine) {
-      f.birth_year.value = mine.age ? new Date().getFullYear() - mine.age : "";
-      f.gender.value = mine.gender;
+      f.birth_date.value = mine.birth_date || "";
+      $("#ageNote").textContent = mine.age_confirmed ? "Возраст подтверждён селфи." : "Возраст не подтверждён: в анкете будет пометка. Пройдите подтверждение селфи.";
+      f.gender.value = mine.gender; f.seeking.value = mine.seeking || ""; f.goal.value = mine.goal || ""; f.height.value = mine.height || ""; f.visa.value = mine.visa || "";
       f.first_name.value = mine.name || "";
       await setGeo("#datingGeo", mine.region_code || "", mine.district_id || "");
       toast("Статус анкеты: " + ({pending: "на проверке", published: "опубликована", rejected: "отклонена"}[mine.status] || mine.status) + (mine.status === "rejected" && mine.note ? ". Причина: " + mine.note : "") + (mine.paused ? ". Анкета на паузе" : ""));
@@ -1972,7 +2000,8 @@ $("#datingForm").onsubmit = async (e) => {
   const f = e.target;
   try {
     await api("/api/dating/profile", {method: "PUT", body: JSON.stringify({
-      birth_year: Number(f.birth_year.value), gender: f.gender.value, region_code: f.region_code.value,
+      birth_date: f.birth_date.value, gender: f.gender.value, seeking: f.seeking.value, goal: f.goal.value,
+      height: f.height.value ? Number(f.height.value) : null, visa: f.visa.value, region_code: f.region_code.value,
       district_id: f.district_id.value ? Number(f.district_id.value) : null, bio: f.bio.value.trim(),
       first_name: f.first_name.value.trim()})});
     if (f.selfie.files[0]) pendingSelfie = f.selfie.files[0];
@@ -2038,7 +2067,15 @@ document.addEventListener("click", async (e) => {
         if (!(await requireConsent())) return;
         const r = await api(`/api/dating/${owner.dataset.profile}/like`, {method: "POST"});
         if (r.mutual) { toast("Взаимная симпатия! Можно писать"); openChat(r.conversation_id, "Знакомство"); }
-        else { owner.remove(); toast("Отправлено"); }
+        else { owner.remove(); toast("Симпатия отправлена. Отменить можно 5 минут: вкладка «Я симпатирую»"); loadDating(); }
+      }
+      if (btn.dataset.act === "unlike") {
+        if (!(await confirmDialog("Отменить симпатию? Человеку уйдёт отзыв уведомления."))) return;
+        await api(`/api/dating/${owner.dataset.profile}/like`, {method: "DELETE"});
+        toast("Симпатия отменена"); loadDating();
+      }
+      if (btn.dataset.act === "dchat") {
+        openChat(+owner.dataset.conv, "Знакомство");
       }
       if (btn.dataset.act === "dreport") {
         if (!(await requireConsent())) return;

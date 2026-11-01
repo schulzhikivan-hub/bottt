@@ -102,6 +102,25 @@ def migrate() -> None:
         conn.execute(text("ALTER TABLE applications ADD COLUMN IF NOT EXISTS name VARCHAR(40) DEFAULT ''"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS consent_version VARCHAR(40) DEFAULT ''"))
         conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS blocked_until TIMESTAMPTZ"))
+        for ddl in (
+            "ALTER TABLE dating_profiles ADD COLUMN IF NOT EXISTS birth_date DATE",
+            "ALTER TABLE dating_profiles ADD COLUMN IF NOT EXISTS seeking VARCHAR(4) NOT NULL DEFAULT ''",
+            "ALTER TABLE dating_profiles ADD COLUMN IF NOT EXISTS goal VARCHAR(12) NOT NULL DEFAULT ''",
+            "ALTER TABLE dating_profiles ADD COLUMN IF NOT EXISTS height INTEGER",
+            "ALTER TABLE dating_profiles ADD COLUMN IF NOT EXISTS visa VARCHAR(8) NOT NULL DEFAULT ''",
+            "ALTER TABLE dating_profiles ADD COLUMN IF NOT EXISTS invisible_until TIMESTAMPTZ",
+            "ALTER TABLE dating_profiles ADD COLUMN IF NOT EXISTS invisible_on BOOLEAN NOT NULL DEFAULT FALSE",
+            "ALTER TABLE dating_profiles ADD COLUMN IF NOT EXISTS suspect BOOLEAN NOT NULL DEFAULT FALSE",
+            "ALTER TABLE dating_profiles ADD COLUMN IF NOT EXISTS vip_until TIMESTAMPTZ",
+            "ALTER TABLE dating_profiles ADD COLUMN IF NOT EXISTS vip_promo BOOLEAN NOT NULL DEFAULT FALSE",
+            "ALTER TABLE dating_profiles ADD COLUMN IF NOT EXISTS vip_checked_at TIMESTAMPTZ",
+            "ALTER TABLE dating_profiles ADD COLUMN IF NOT EXISTS viewers_until TIMESTAMPTZ",
+            "ALTER TABLE dating_profiles ADD COLUMN IF NOT EXISTS super_credits INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE dating_likes ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ",
+            "ALTER TABLE dating_likes ADD COLUMN IF NOT EXISTS notif_id INTEGER",
+            "ALTER TABLE dating_likes ADD COLUMN IF NOT EXISTS super BOOLEAN NOT NULL DEFAULT FALSE",
+        ):
+            conn.execute(text(ddl))
         conn.execute(text("ALTER TABLE placements ADD COLUMN IF NOT EXISTS promo BOOLEAN NOT NULL DEFAULT FALSE"))
         conn.execute(text("ALTER TABLE placements ADD COLUMN IF NOT EXISTS frozen_at TIMESTAMPTZ"))
         conn.execute(text("ALTER TABLE broadcasts ADD COLUMN IF NOT EXISTS audience_kind VARCHAR(12) NOT NULL DEFAULT 'all'"))

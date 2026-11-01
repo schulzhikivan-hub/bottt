@@ -205,8 +205,14 @@
     <select id="dAge" aria-label="Возраст"><option value="">Любой возраст</option><option value="18-25">18–25</option><option value="26-35">26–35</option><option value="36-99">36 и старше</option></select>
     <select id="dRegion" aria-label="Регион"></select>
   </div>
+  <div class="chips" id="dTabs">
+    <button class="chip active" data-dtab="all" type="button">Все</button>
+    <button class="chip" data-dtab="to_me" type="button">Мне симпатизируют <b id="dnToMe"></b></button>
+    <button class="chip" data-dtab="from_me" type="button">Я симпатирую <b id="dnFromMe"></b></button>
+    <button class="chip" data-dtab="mutual" type="button">Взаимные <b id="dnMutual"></b></button>
+  </div>
   <div class="chips"><button class="chip" id="dActive" type="button">🟢 Недавно онлайн</button>
-    <button class="chip" id="dLikes" type="button">💌 Меня лайкнули (<span id="dLikesN">0</span>)</button></div>
+    <button class="chip" id="dMore" type="button">⚙ Ещё фильтры <b id="dMoreN"></b></button></div>
   <div id="datingList" class="dgrid"></div>
 </section>
 
@@ -435,6 +441,18 @@
 <img id="dsPhoto" alt=""><p class="dsmeta" id="dsMeta"></p><p id="dsBio" class="dsbio"></p>
 <div class="actions"><button type="button" id="dsLike">♡ Нравится</button><button type="button" id="dsReport" class="secondary">⚑ Пожаловаться</button></div></div></div>
 
+<div id="dfSheet" class="modal hidden" role="dialog" aria-label="Фильтры знакомств"><div class="sheet">
+<div class="sheet-top"><b>Фильтры знакомств</b><button id="dfClose" type="button">✕</button></div>
+<form id="dfForm" class="form">
+<label>Кого ищет анкета<select name="seeking"><option value="">Не важно</option><option value="f">Женщину</option><option value="m">Мужчину</option></select></label>
+<label>Цель<select name="goal"><option value="">Любая</option><option value="friendship">Дружба</option><option value="relationship">Отношения</option><option value="marriage">Брак</option><option value="chat">Общение</option></select></label>
+<label>Виза<select name="visa" id="dfVisa"><option value="">Любая</option></select></label>
+<div class="geo"><label>Рост от, см<input name="height_min" type="number" min="120" max="230"></label><label>до, см<input name="height_max" type="number" min="120" max="230"></label></div>
+<label class="check"><input type="checkbox" name="verified"> Только подтверждённые (селфи)</label>
+<label class="check"><input type="checkbox" name="vip"> Только VIP</label>
+<label class="check"><input type="checkbox" name="private"> С приватными фото</label>
+<div class="actions"><button class="submit" type="submit">Показать</button><button class="secondary" type="button" id="dfReset">Сбросить</button></div></form></div></div>
+
 <div id="lightbox" class="lightbox hidden" role="dialog" aria-label="Просмотр фото"><button id="lbClose" aria-label="Закрыть">✕</button>
 <button id="lbPrev" aria-label="Назад">‹</button><img id="lbImg" alt=""><button id="lbNext" aria-label="Дальше">›</button><div id="lbCount"></div></div>
 
@@ -451,8 +469,13 @@
 <div id="datingModal" class="modal hidden"><div class="sheet"><div class="sheet-top"><b>Моя анкета</b><button id="closeDating">✕</button></div>
 <button type="button" class="link" id="datingPause" hidden></button>
 <form id="datingForm"><label>Имя (видно в анкете, без ссылок и телефона)<input name="first_name" maxlength="40" placeholder="Например: Аня"></label>
-<label>Год рождения<input name="birth_year" type="number" min="1930" max="2100" required></label>
+<label>Дата рождения<input name="birth_date" type="date" required></label>
+<p class="muted" id="ageNote"></p>
 <label>Пол<select name="gender"><option value="f">Женщина</option><option value="m">Мужчина</option></select></label>
+<label>Кого ищу<select name="seeking"><option value="">Не указано</option><option value="f">Женщину</option><option value="m">Мужчину</option><option value="any">Не важно</option></select></label>
+<label>Цель знакомства<select name="goal"><option value="">Не указано</option><option value="friendship">Дружба</option><option value="relationship">Отношения</option><option value="marriage">Брак</option><option value="chat">Общение</option></select></label>
+<label>Рост, см<input name="height" type="number" min="120" max="230"></label>
+<label>Виза<select name="visa" id="dpVisa"><option value="">Не указана</option></select></label>
 <div class="geo" id="datingGeo">
 <label>Регион<select name="region_code" required data-geo-region></select></label>
 <label>Город / район<select name="district_id" required data-geo-district></select></label>

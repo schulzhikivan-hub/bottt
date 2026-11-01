@@ -197,6 +197,8 @@ def delete_me(user_id: str = Depends(current_user_id), db: Session = Depends(get
         db.delete(fav)
     for msg in db.scalars(select(Message).where(Message.sender_tg_id == user_id)).all():
         msg.text = "[удалено]"
+    from app import dating as _dating
+    _dating.erase_profile(db, user_id)        # the profile, its sympathies, views and private photos go with the account
     from app.models import WizardDraft
     draft = db.get(WizardDraft, user_id)
     if draft is not None:
@@ -289,6 +291,15 @@ def create_report(payload: ReportIn, user_id: str = Depends(writer), db: Session
                       target_id=payload.target_id, reason=payload.reason, comment=payload.comment))
         db.commit()
         adminplus.notify_staff(db, "Новая жалоба ждёт рассмотрения (админка → Жалобы).", "report", ("support", "moderator", "admin", "super_admin"))
+        if payload.target_type == "dating" and payload.target_id.isdigit():
+            # doubt about age or person: «minor» hides the profile at once, «fake/fraud» from the second person
+            target = db.get(DatingProfile, int(payload.target_id))
+            if target is not None and not target.suspect:
+                who_n = db.scalar(select(func.count(func.distinct(Report.reporter_tg_id))).where(
+                    Report.target_type == "dating", Report.target_id == payload.target_id, Report.reason.in_(["minor", "fake", "fraud"]))) or 0
+                if payload.reason == "minor" or (payload.reason in {"fake", "fraud"} and who_n >= 2):
+                    target.suspect = True
+                    db.commit()
     # Several different reporters hide a listing until a moderator decides
     if payload.target_type == "listing":
         count = db.scalar(select(func.count(func.distinct(Report.reporter_tg_id))).where(
