@@ -60,7 +60,10 @@ async function api(path, options = {}) {
   setOffline(false);
   let data = null;
   try { data = await r.json(); } catch (e) { data = null; }
-  if (r.status === 401 && !inTelegram && !options.quiet) showWebLogin();
+  if (r.status === 401 && !inTelegram) {
+    if (localStorage.getItem("webSession")) { localStorage.removeItem("webSession"); applyGuestMode(currentView); }   // сессия истекла
+    if (!options.quiet && !GUEST_VIEWS[currentView]) showWebLogin();
+  }
   if (!r.ok) {
     const rid = r.headers.get("x-request-id") || "";
     let msg = typeof data?.detail === "string" ? data.detail : "";
@@ -127,6 +130,29 @@ function askReason() {
 // ---------- вход на сайте через Telegram (в Mini App не нужен) ----------
 let loginPoll = null;
 function showWebLogin() { if (!inTelegram) $("#webLogin").classList.remove("hidden"); }
+// Гость (на сайте, без входа): личные разделы показывают один экран «Войти», а не пустой кабинет с меню
+const isGuest = () => !inTelegram && !localStorage.getItem("webSession");
+const GUEST_VIEWS = {
+  profile: ["👤", "Личный кабинет", "Войдите через Telegram, чтобы публиковать объявления, откликаться на вакансии, сохранять избранное и переписываться с авторами."],
+  saved: ["♡", "Избранное", "Войдите через Telegram, чтобы сохранять объявления и получать уведомления, если цена снизится."],
+  chats: ["💬", "Сообщения", "Войдите через Telegram, чтобы писать авторам объявлений и получать ответы."],
+  notifs: ["🔔", "Уведомления", "Войдите через Telegram, чтобы видеть ответы на отклики, решения модератора и новые объявления по вашим поискам."],
+};
+function applyGuestMode(name) {
+  const el = document.getElementById("view-" + name);
+  if (!el || !GUEST_VIEWS[name]) return false;
+  const guest = isGuest();
+  el.classList.toggle("guest-mode", guest);
+  let card = el.querySelector(":scope > .guestcard");
+  if (guest && !card) {
+    const [icon, title, text] = GUEST_VIEWS[name];
+    el.insertAdjacentHTML("afterbegin", `<div class="guestcard"><div class="gicon">${icon}</div><h2>${title}</h2><p>${text}</p>
+      <button class="submit" data-guest-login type="button">Войти через Telegram</button>
+      <p class="muted">Смотреть объявления, вакансии и гид можно и без входа.</p></div>`);
+  }
+  return guest;
+}
+document.addEventListener("click", (e) => { if (e.target.closest("[data-guest-login]")) { showWebLogin(); startWebLogin(); } });
 async function startWebLogin() {
   const info = $("#webLoginInfo");
   info.textContent = "Готовим вход…";
@@ -180,10 +206,11 @@ function showView(name, opts = {}) {
   if (name !== "chat") { clearInterval(chatTimer); clearInterval(chatStatusTimer); }
   if (NAV_VIEWS.includes(name) && backStack.length === 0) tg?.BackButton?.hide(); else tg?.BackButton?.show();
   if (name === "home" && !homeLoaded) loadCatalog();
-  if (name === "saved") loadFavorites();
-  if (name === "chats") loadConversations();
-  if (name === "profile" || name === "mine") loadProfile();
-  if (name === "notifs") loadNotifs();
+  const guestHere = applyGuestMode(name);
+  if (name === "saved" && !guestHere) loadFavorites();
+  if (name === "chats" && !guestHere) loadConversations();
+  if ((name === "profile" || name === "mine") && !guestHere) loadProfile();
+  if (name === "notifs" && !guestHere) loadNotifs();
   if (name === "community") loadGroups();
   if (name === "guide") loadGuide();
   if (name === "dating") loadDating();
