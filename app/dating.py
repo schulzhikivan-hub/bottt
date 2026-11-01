@@ -2,7 +2,7 @@
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Header, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select, or_
@@ -72,8 +72,23 @@ def my_profile(user_id: str = Depends(writer), db: Session = Depends(get_db)):
     if profile is None:
         return None
     return {**_public(profile), "status": profile.status, "has_photo": profile.photo_key is not None,
-            "selfie_status": profile.selfie_status,
+            "selfie_status": profile.selfie_status, "paused": profile.paused, "note": profile.note,
             "region_code": profile.region_code, "district_id": profile.district_id}
+
+
+class PauseIn(BaseModel):
+    on: bool
+
+
+@router.post("/api/dating/pause")
+def pause_profile(payload: PauseIn, user_id: str = Depends(writer), db: Session = Depends(get_db)):
+    """Hide the profile without deleting it; coming back needs no new moderation."""
+    profile = db.scalar(select(DatingProfile).where(DatingProfile.owner_tg_id == user_id))
+    if profile is None:
+        raise HTTPException(404, "Анкеты нет")
+    profile.paused = payload.on
+    db.commit()
+    return {"paused": profile.paused}
 
 
 @router.put("/api/dating/profile")
@@ -171,11 +186,17 @@ def _hidden_owners(db: Session, me: str) -> set[str]:
 @router.get("/api/dating")
 def browse(gender: str | None = None, city: str | None = None, user_id: str = Depends(writer),
            db: Session = Depends(get_db), age_min: int | None = None, age_max: int | None = None,
-           region: str | None = None):
+           region: str | None = None, active: bool = False):
     hidden = _hidden_owners(db, user_id)
     liked = set(db.scalars(select(DatingLike.to_tg).where(DatingLike.from_tg == user_id)).all())
-    stmt = select(DatingProfile).where(DatingProfile.status == "published",
+    stmt = select(DatingProfile).where(DatingProfile.status == "published", DatingProfile.paused.is_(False),
                                        DatingProfile.photo_key != None)  # noqa: E711
+    if active:      # was in the app during the last 3 days
+        from app.models import User
+        from app.payments import now
+        import datetime as _dt
+        recent = select(User.tg_id).where(User.last_seen_at >= now() - _dt.timedelta(days=3))
+        stmt = stmt.where(DatingProfile.owner_tg_id.in_(recent))
     if gender:
         stmt = stmt.where(DatingProfile.gender == gender)
     if city:
@@ -272,10 +293,16 @@ def admin_photo(profile_id: int, actor: str = Depends(staff(*MOD)),
 
 
 @router.post("/api/admin/dating/{profile_id}/{decision}")
-def decide(profile_id: int, decision: str, actor: str = Depends(staff(*MOD)),
-           db: Session = Depends(get_db)):
+def decide(profile_id: int, decision: str, reason: str = Query(default="", max_length=300),
+           actor: str = Depends(staff(*MOD)), db: Session = Depends(get_db)):
     try:
         profile = ops.decide_dating(db, actor, profile_id, decision)
     except ops.OpError as exc:
         raise HTTPException(exc.status, exc.message)
+    if decision == "reject" and reason.strip():
+        profile.note = reason.strip()
+        db.commit()
+    elif decision in {"approve", "verify"}:
+        profile.note = ""
+        db.commit()
     return {"id": profile.id, "status": profile.status}

@@ -172,6 +172,8 @@ class DatingProfile(Base):
     # a second photo ("selfie with a gesture") that only moderators see; approved = the "verified" mark
     selfie_key: Mapped[str | None] = mapped_column(String(80), nullable=True)
     selfie_status: Mapped[str] = mapped_column(String(10), default="")  # "", pending, approved, rejected
+    paused: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())   # hidden by the owner, no new moderation on return
+    note: Mapped[str] = mapped_column(String(300), default="", server_default="")        # why a moderator rejected it
     # pending, published, rejected
     status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
@@ -192,6 +194,9 @@ class Message(Base):
     sender_tg_id: Mapped[str] = mapped_column(String(40))
     text: Mapped[str] = mapped_column(Text)
     photo_key: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    file_key: Mapped[str | None] = mapped_column(String(40), nullable=True)      # PDF or voice message
+    file_name: Mapped[str] = mapped_column(String(80), default="", server_default="")
+    file_kind: Mapped[str] = mapped_column(String(8), default="", server_default="")   # pdf | audio
     read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, index=True)
 
@@ -472,6 +477,7 @@ class Review(Base):
     reviewer_tg_id: Mapped[str] = mapped_column(String(40), index=True)
     rating: Mapped[int] = mapped_column(Integer)
     text: Mapped[str] = mapped_column(String(500), default="")
+    tags: Mapped[str] = mapped_column(String(80), default="", server_default="")      # quick labels, comma separated
     reply: Mapped[str] = mapped_column(String(500), default="", server_default="")   # the author's answer, shown under the review
     status: Mapped[str] = mapped_column(String(12), default="published", index=True)  # published | hidden
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
@@ -549,3 +555,20 @@ class TicketMessage(Base):
     author: Mapped[str] = mapped_column(String(40), default="")
     text: Mapped[str] = mapped_column(String(1500))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class TypingMark(Base):
+    """«Печатает…»: the last moment a person typed in a chat (only the last few seconds matter)."""
+    __tablename__ = "typing_marks"
+    conv_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_tg_id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class WizardDraft(Base):
+    """The unfinished «new listing» form, kept on the server so it survives a new phone or cleared storage."""
+    __tablename__ = "wizard_drafts"
+    user_tg_id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    data: Mapped[dict] = mapped_column(JSON, default=dict)
+    step: Mapped[int] = mapped_column(Integer, default=0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

@@ -32,10 +32,10 @@ from app.guard import rate_limit, check_text, duplicate_note, notify_user
 from app import admin_ops as ops
 from app import catalog
 from app import photos, applications, searches, inbox, promos, adminx, observe, site
-from app import geo, reviews, resumes, referrals, support
+from app import geo, reviews, resumes, referrals, support, extras
 from app import fields as listing_fields
 from app.users import get_or_create_user, writer, is_blocked_pair
-from app.models import DatingProfile
+from app.models import DatingProfile, TypingMark
 from app.dating import router as dating_router
 from app.payments import PaymentError, aware, now
 
@@ -67,6 +67,7 @@ app.include_router(reviews.router)
 app.include_router(resumes.router)
 app.include_router(referrals.router)
 app.include_router(support.router)
+app.include_router(extras.router)
 app.include_router(listing_fields.router)
 STATIC = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
@@ -194,6 +195,13 @@ def delete_me(user_id: str = Depends(current_user_id), db: Session = Depends(get
         db.delete(fav)
     for msg in db.scalars(select(Message).where(Message.sender_tg_id == user_id)).all():
         msg.text = "[удалено]"
+    from app.models import WizardDraft
+    draft = db.get(WizardDraft, user_id)
+    if draft is not None:
+        db.delete(draft)
+    for msg in db.scalars(select(Message).where(Message.sender_tg_id == user_id, Message.file_key.is_not(None))).all():
+        (photos.photo_root() / f"{msg.file_key}.bin").unlink(missing_ok=True)     # documents and voice go with the account
+        msg.file_key, msg.file_name = None, ""
     cv = db.get(resumes.Resume, user_id)
     if cv is not None:
         db.delete(cv)
@@ -455,7 +463,9 @@ def my_conversations(user_id: str = Depends(current_user_id), db: Session = Depe
 
 def _msg_out(m: Message, user_id: str) -> MessageOut:
     return MessageOut(id=m.id, mine=m.sender_tg_id == user_id, text=m.text, created_at=m.created_at,
-                      read=m.read_at is not None, photo=photos.url(m.photo_key) if m.photo_key else None)
+                      read=m.read_at is not None, photo=photos.url(m.photo_key) if m.photo_key else None,
+                      file=({"name": m.file_name, "kind": m.file_kind, "url": f"/api/conversations/{m.conversation_id}/attachment/{m.file_key}"}
+                            if m.file_key else None))
 
 
 @app.get("/api/conversations/{conv_id}/messages", response_model=list[MessageOut])
@@ -483,7 +493,9 @@ def chat_status(conv_id: int, user_id: str = Depends(current_user_id), db: Sessi
     """Roughly whether the other person is around: online / recently / nothing. Never an exact time."""
     conv = _get_conversation_for(db, conv_id, user_id)
     other = conv.seller_tg_id if conv.buyer_tg_id == user_id else conv.buyer_tg_id
-    return {"status": inbox.coarse_status(db.get(User, other))}
+    mark = db.get(TypingMark, (conv_id, other))
+    typing = mark is not None and (now() - aware(mark.at)).total_seconds() <= 6
+    return {"status": inbox.coarse_status(db.get(User, other)), "typing": typing}
 
 
 @app.post("/api/conversations/{conv_id}/messages", response_model=MessageOut, status_code=201)

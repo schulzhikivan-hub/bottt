@@ -68,10 +68,14 @@ def publish(db: Session, item: Listing) -> None:
 
 def apply_edit(db: Session, item: Listing) -> None:
     """A moderator approved the waiting edit: the new version replaces the old one."""
+    old_price = item.price_amount
     for key, value in (item.pending_changes or {}).items():
         setattr(item, key, value)
     item.pending_changes = None
     item.note = ""
+    if old_price and item.price_amount is not None and item.price_amount < old_price:
+        from app import extras
+        extras.price_dropped(db, item, old_price)
     show_waiting_photos(db, item)
     db.flush()
     photos.refresh_edit_flag(db, item)

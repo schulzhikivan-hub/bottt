@@ -40,12 +40,24 @@ let mineAll = [];
 // ---------- запросы ----------
 // Внутри Telegram вход автоматический (подпись initData). На сайте: сессия после входа через бота.
 const inTelegram = Boolean(tg?.initData);
-async function api(path, options = {}) {
+function authHeaders() {
   const headers = {};
   if (inTelegram) headers["X-Telegram-Init-Data"] = tg.initData;
   else if (localStorage.getItem("webSession")) headers["X-Web-Session"] = localStorage.getItem("webSession");
+  return headers;
+}
+// Нет связи: понятное сообщение вместо «Failed to fetch»
+const setOffline = (off) => { const b = document.getElementById("offlineBar"); if (b) b.hidden = !off; };
+window.addEventListener("offline", () => setOffline(true));
+window.addEventListener("online", () => setOffline(false));
+if (!navigator.onLine) setTimeout(() => setOffline(true), 0);
+async function api(path, options = {}) {
+  const headers = authHeaders();
   if (options.body && typeof options.body === "string") headers["Content-Type"] = "application/json";
-  const r = await fetch(path, {...options, headers: {...headers, ...(options.headers || {})}});
+  let r;
+  try { r = await fetch(path, {...options, headers: {...headers, ...(options.headers || {})}}); }
+  catch (e) { setOffline(true); throw new Error("Нет связи с интернетом. Проверьте подключение и повторите"); }
+  setOffline(false);
   let data = null;
   try { data = await r.json(); } catch (e) { data = null; }
   if (r.status === 401 && !inTelegram && !options.quiet) showWebLogin();
@@ -53,6 +65,8 @@ async function api(path, options = {}) {
   return data;
 }
 
+const applyTextSize = () => { document.body.classList.remove("fs1", "fs2"); const n = localStorage.getItem("fs"); if (n) document.body.classList.add("fs" + n); };
+applyTextSize();
 function toast(msg) {
   const t = $("#toast"); t.textContent = msg; t.style.display = "block";
   clearTimeout(toast.timer);
@@ -133,7 +147,7 @@ function showView(name, opts = {}) {
   const parent = ["detail", "article", "mine", "sub", "notifs"].includes(name) ? backStack[backStack.length - 1] : name;
   const navName = name === "chat" ? "chats" : (NAV_VIEWS.includes(parent) ? parent : "");
   document.querySelectorAll(".bottom [data-view]").forEach((b) => b.classList.toggle("active", b.dataset.view === navName));
-  if (name !== "chat") clearInterval(chatTimer);
+  if (name !== "chat") { clearInterval(chatTimer); clearInterval(chatStatusTimer); }
   if (NAV_VIEWS.includes(name) && backStack.length === 0) tg?.BackButton?.hide(); else tg?.BackButton?.show();
   if (name === "home" && !homeLoaded) loadCatalog();
   if (name === "saved") loadFavorites();
@@ -579,6 +593,11 @@ function askText(title, placeholder = "") {
   });
 }
 let applyListingId = null;
+$("#applyResume").onclick = () => {
+  const cv = window.__cv; if (!cv) return;
+  const parts = [`Меня зовут по резюме: ${cv.position}.`, cv.experience ? `Опыт: ${cv.experience}.` : "", cv.visa ? `Виза: ${cv.visa}.` : "", cv.about || ""].filter(Boolean);
+  $("#applyForm").message.value = parts.join(" ").slice(0, 1000);
+};
 $("#closeApply").onclick = () => $("#applyModal").classList.add("hidden");
 $("#applyForm").onsubmit = async (e) => {
   e.preventDefault();
@@ -591,6 +610,34 @@ $("#applyForm").onsubmit = async (e) => {
     toast("Отклик отправлен");
   } catch (err) { toast(err.message); }
 };
+// ---------- просмотр фото на весь экран ----------
+let lbList = [], lbIndex = 0;
+function lbShow() {
+  $("#lbImg").src = lbList[lbIndex];
+  $("#lbCount").textContent = lbList.length > 1 ? `${lbIndex + 1} / ${lbList.length}` : "";
+  $("#lbPrev").hidden = $("#lbNext").hidden = lbList.length < 2;
+}
+function openLightbox(urls, i) { lbList = urls; lbIndex = i; lbShow(); $("#lightbox").classList.remove("hidden"); }
+const lbMove = (d) => { if (lbList.length > 1) { lbIndex = (lbIndex + d + lbList.length) % lbList.length; lbShow(); } };
+$("#lbClose").onclick = () => $("#lightbox").classList.add("hidden");
+$("#lbPrev").onclick = () => lbMove(-1);
+$("#lbNext").onclick = () => lbMove(1);
+{
+  let x0 = null;
+  $("#lightbox").addEventListener("touchstart", (e) => { x0 = e.touches.length === 1 ? e.touches[0].clientX : null; }, {passive: true});
+  $("#lightbox").addEventListener("touchend", (e) => { if (x0 === null) return; const dx = e.changedTouches[0].clientX - x0; if (Math.abs(dx) > 50) lbMove(dx < 0 ? 1 : -1); x0 = null; }, {passive: true});
+  document.addEventListener("keydown", (e) => { if ($("#lightbox").classList.contains("hidden")) return; if (e.key === "Escape") $("#lbClose").click(); if (e.key === "ArrowLeft") lbMove(-1); if (e.key === "ArrowRight") lbMove(1); });
+}
+document.addEventListener("click", (e) => {
+  const img = e.target.closest(".gallery img");
+  if (!img) return;
+  const all = [...img.closest(".gallery").querySelectorAll("img")];
+  openLightbox(all.map((x) => x.src), all.indexOf(img));
+});
+// ---------- недавно смотрел ----------
+function rememberViewed(id) {
+  try { const l = JSON.parse(localStorage.getItem("recent") || "[]").filter((x) => x !== id); l.unshift(id); localStorage.setItem("recent", JSON.stringify(l.slice(0, 20))); } catch (e) { /* не критично */ }
+}
 async function openDetail(id, push = true) {
   try {
     await Promise.all([loadFields(), ensureConfig()]);
@@ -622,6 +669,7 @@ async function openDetail(id, push = true) {
       <button class="linkbtn" data-act="report">⚑ Пожаловаться</button>
     </article>`;
     showView("detail", {push});
+    rememberViewed(x.id);
     loadReviewButton(x.id);
     loadSimilar(x.id);
   } catch (e) { toast(e.message); }
@@ -636,7 +684,12 @@ async function loadReviewButton(id) {
     else if (st.mine) art.querySelector(".cta")?.insertAdjacentHTML("afterend", `<p class="muted">Ваш отзыв: ${"★".repeat(st.mine.rating)} <button class="linkbtn" data-delreview="${st.mine.id}">Удалить</button></p>`);
   } catch (e) { /* гость или без права — кнопки не будет */ }
 }
-let reviewFor = null, reviewRating = 0;
+let reviewFor = null, reviewRating = 0, reviewTags = new Set();
+const REVIEW_TAGS = {polite: "Вежливый", punctual: "Пунктуальный", as_described: "Всё как в описании", fair_price: "Честная цена", fast: "Быстро отвечает", unreliable: "Не пришёл/не ответил", rude: "Грубый"};
+function drawTags() {
+  $("#reviewTags").innerHTML = Object.entries(REVIEW_TAGS).map(([k, t]) => `<button type="button" class="chip ${reviewTags.has(k) ? "on" : ""}" data-tag="${k}">${esc(t)}</button>`).join("");
+}
+$("#reviewTags").onclick = (e) => { const b = e.target.closest("[data-tag]"); if (!b) return; if (reviewTags.has(b.dataset.tag)) reviewTags.delete(b.dataset.tag); else if (reviewTags.size < 4) reviewTags.add(b.dataset.tag); drawTags(); };
 function drawStars() {
   $("#reviewStars").innerHTML = [1, 2, 3, 4, 5].map((n) => `<button type="button" role="radio" aria-checked="${n === reviewRating}" class="${n <= reviewRating ? "on" : ""}" data-star="${n}">★</button>`).join("");
 }
@@ -645,7 +698,7 @@ $("#closeReview").onclick = () => $("#reviewSheet").classList.add("hidden");
 $("#reviewOk").onclick = async () => {
   if (!reviewRating) { toast("Поставьте оценку"); return; }
   try {
-    await api("/api/reviews", {method: "POST", body: JSON.stringify({listing_id: reviewFor, rating: reviewRating, text: $("#reviewText").value.trim()})});
+    await api("/api/reviews", {method: "POST", body: JSON.stringify({listing_id: reviewFor, rating: reviewRating, text: $("#reviewText").value.trim(), tags: [...reviewTags]})});
     $("#reviewSheet").classList.add("hidden");
     toast("Спасибо за отзыв!");
     openDetail(reviewFor, false);
@@ -678,13 +731,35 @@ async function shareListing(id, title) {
 async function loadFavIds() {
   try { favIds = new Set((await api("/api/favorites", {quiet: true})).map((x) => x.id)); } catch (e) { favIds = new Set(); }
 }
+let cmpItems = {};
+document.addEventListener("change", (e) => {
+  if (!e.target.matches("[data-cmp]")) return;
+  const picked = [...document.querySelectorAll("[data-cmp]:checked")];
+  if (picked.length > 3) { e.target.checked = false; toast("Сравнить можно до трёх объявлений"); return; }
+  const go = document.getElementById("cmpGo");
+  if (go) { go.hidden = picked.length < 2; document.getElementById("cmpN").textContent = picked.length; }
+});
+document.addEventListener("click", (e) => {
+  if (!e.target.closest("#cmpGo")) return;
+  const xs = [...document.querySelectorAll("[data-cmp]:checked")].map((c) => cmpItems[c.dataset.cmp]).filter(Boolean);
+  const yes = (v) => (v ? "да" : "");
+  const rows = [["Название", (x) => x.title], ["Цена", priceText], ["Город", (x) => x.city], ["Раздел", (x) => CAT[x.category] || ""],
+    ["Занятость", (x) => labelOf("employment", x.employment) || ""], ["График", (x) => labelOf("schedule", x.schedule) || ""], ["Жильё от работодателя", (x) => yes(x.housing_provided)],
+    ["Тип жилья", (x) => labelOf("housing_type", x.housing_type) || ""], ["Залог", (x) => (x.deposit ? fmtKRW(x.deposit) : "")], ["Площадь", (x) => (x.area_m2 ? x.area_m2 + " м²" : "")],
+    ["Комнат", (x) => x.rooms || ""], ["Состояние", (x) => labelOf("condition", x.condition) || ""], ["Год", (x) => x.year || ""]]
+    .filter(([, f]) => xs.some((x) => f(x)));
+  openSub("compare");
+  $("#subBody").innerHTML = `<article class="listing"><table class="cmptable">${rows.map(([n, f]) => `<tr><th>${esc(n)}</th>${xs.map((x) => `<td>${esc(String(f(x) ?? ""))}</td>`).join("")}</tr>`).join("")}</table></article>`;
+});
 async function loadFavorites() {
   const box = $("#favorites");
   try {
     const items = await api("/api/favorites");
     favIds = new Set(items.map((x) => x.id));
-    box.innerHTML = items.length ? items.map(listingCard).join("")
+    cmpItems = Object.fromEntries(items.map((x) => [x.id, x]));
+    box.innerHTML = items.length ? items.map(listingCard).join("") + (items.length > 1 ? '<div class="cmpbar"><button id="cmpGo" hidden>⚖ Сравнить (<span id="cmpN">0</span>)</button></div>' : "")
       : '<div class="empty">Здесь будут объявления, которые вы сохранили ♡</div>';
+    if (items.length > 1) box.querySelectorAll("article.listing").forEach((a) => a.insertAdjacentHTML("beforeend", `<label class="cmp"><input type="checkbox" data-cmp="${a.dataset.id}"> сравнить</label>`));
   } catch (e) { box.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
 }
 
@@ -707,11 +782,79 @@ async function openChat(id, title) {
   showView("chat", {push: true});
   await loadMessages();
   loadChatStatus();
-  clearInterval(chatTimer);
+  clearInterval(chatTimer); clearInterval(chatStatusTimer);
   chatTimer = setInterval(loadMessages, 5000);
+  chatStatusTimer = setInterval(loadChatStatus, 3500);
+  drawQuickReplies(title);
 }
+let chatStatusTimer = null, lastTypingPing = 0;
+const QUICK = ["Здравствуйте! Ещё актуально?", "Когда можно посмотреть?", "Можно ли снизить цену?", "Спасибо, я подумаю", "Где вы находитесь?"];
+function drawQuickReplies() {
+  $("#quickReplies").innerHTML = QUICK.map((t) => `<button type="button" data-quick="${esc(t)}">${esc(t)}</button>`).join("");
+}
+$("#quickReplies").addEventListener("click", (e) => { const b = e.target.closest("[data-quick]"); if (b) { $("#chatInput").value = b.dataset.quick; $("#chatInput").focus(); } });
+$("#chatInput").addEventListener("input", () => {
+  const t = Date.now();
+  if (!currentChat || t - lastTypingPing < 3000) return;
+  lastTypingPing = t;
+  api(`/api/conversations/${currentChat}/typing`, {method: "POST", quiet: true}).catch(() => {});
+});
+async function sendAttachment(file) {
+  if (!file || !currentChat) return;
+  const form = new FormData(); form.append("file", file, file.name || "voice");
+  try {
+    await api(`/api/conversations/${currentChat}/attachment`, {method: "POST", body: form});
+    lastMessageKey = ""; olderMessages = []; hasOlder = false;
+    await loadMessages();
+  } catch (err) { toast(err.message); }
+}
+$("#chatFile").onchange = (e) => { const f = e.target.files[0]; e.target.value = ""; sendAttachment(f); };
+// Голосовое: кнопка видна, только если браузер умеет записывать звук
+if (window.MediaRecorder && navigator.mediaDevices?.getUserMedia) {
+  $("#chatMic").hidden = false;
+  let rec = null, chunks = [], stopTimer = null;
+  $("#chatMic").onclick = async () => {
+    if (rec) { rec.stop(); return; }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({audio: true});
+      rec = new MediaRecorder(stream); chunks = [];
+      rec.ondataavailable = (e) => chunks.push(e.data);
+      rec.onstop = () => {
+        clearTimeout(stopTimer); stream.getTracks().forEach((t) => t.stop());
+        const blob = new Blob(chunks, {type: rec.mimeType || "audio/webm"});
+        rec = null; $("#chatMic").textContent = "🎤";
+        if (blob.size > 800) sendAttachment(new File([blob], "Голосовое сообщение." + (blob.type.includes("mp4") ? "m4a" : "webm"), {type: blob.type}));
+      };
+      rec.start(); $("#chatMic").textContent = "⏹";
+      stopTimer = setTimeout(() => rec && rec.stop(), 60000);   // не длиннее минуты
+    } catch (err) { toast("Нет доступа к микрофону"); }
+  };
+}
+async function fetchAttachment(url) {
+  const r = await fetch(url, {headers: authHeaders()});
+  if (!r.ok) throw new Error("Не удалось открыть файл");
+  return URL.createObjectURL(await r.blob());
+}
+document.addEventListener("click", async (e) => {
+  const pv = e.target.closest("[data-playvoice]");
+  if (pv) {
+    try { const a = new Audio(await fetchAttachment(pv.dataset.playvoice)); await a.play(); pv.textContent = "🔊 Играет…"; a.onended = () => { pv.textContent = "▶ Воспроизвести ещё раз"; }; }
+    catch (err) { toast(err.message || "Не удалось воспроизвести"); }
+    return;
+  }
+  const gf = e.target.closest("[data-getfile]");
+  if (gf) {
+    try {
+      const href = await fetchAttachment(gf.dataset.getfile);
+      const a = document.createElement("a"); a.href = href; a.download = gf.dataset.fname || "document.pdf"; document.body.appendChild(a); a.click(); a.remove();
+    } catch (err) { toast(err.message); }
+  }
+});
+const fileHtml = (m) => !m.file ? "" : m.file.kind === "audio"
+  ? `<button type="button" class="chatfile" data-playvoice="${esc(m.file.url)}">▶ ${esc(m.file.name)}</button>`
+  : `<button type="button" class="chatfile" data-getfile="${esc(m.file.url)}" data-fname="${esc(m.file.name)}">📄 ${esc(m.file.name)}</button>`;
 const msgHtml = (m) => `
-      <div class="bubble ${m.mine ? "mine" : ""}">${m.photo ? `<a href="${esc(m.photo)}" target="_blank" rel="noopener"><img class="chatpic" src="${esc(m.photo)}" alt="" loading="lazy"></a>` : ""}${esc(m.text)}<small>${new Date(m.created_at).toLocaleTimeString("ru-RU", {hour: "2-digit", minute: "2-digit"})}${m.mine ? `<span class="ticks ${m.read ? "read" : ""}">${m.read ? "✓✓" : "✓"}</span>` : ""}</small></div>`;
+      <div class="bubble ${m.mine ? "mine" : ""}">${fileHtml(m)}${m.photo ? `<a href="${esc(m.photo)}" target="_blank" rel="noopener"><img class="chatpic" src="${esc(m.photo)}" alt="" loading="lazy"></a>` : ""}${esc(m.text)}<small>${new Date(m.created_at).toLocaleTimeString("ru-RU", {hour: "2-digit", minute: "2-digit"})}${m.mine ? `<span class="ticks ${m.read ? "read" : ""}">${m.read ? "✓✓" : "✓"}</span>` : ""}</small></div>`;
 function renderMessages(items, stick) {
   const all = [...olderMessages, ...items];
   const box = $("#messages");
@@ -774,7 +917,7 @@ async function loadChatStatus() {
   try {
     const r = await api(`/api/conversations/${currentChat}/status`, {quiet: true});
     const el = $("#chatSub");
-    el.textContent = r.status === "online" ? "в сети" : r.status === "recently" ? "был(а) недавно" : "";
+    el.textContent = r.typing ? "печатает…" : r.status === "online" ? "в сети" : r.status === "recently" ? "был(а) недавно" : "";
     el.className = "chat-sub " + r.status;
   } catch (e) { /* статус не обязателен */ }
 }
@@ -799,6 +942,7 @@ function ownCard(x) {
   if (["draft", "pending", "approved", "rejected", "needs_fix"].includes(x.status)) acts.push('<button data-own="edit" class="secondary">✏️ Изменить</button>');
   if (x.category === "job" && x.applications?.total) acts.push(`<button data-own="applicants">📨 Отклики (${x.applications.total}${x.applications.new ? ", новых " + x.applications.new : ""})</button>`);
   if (["approved", "expired"].includes(x.status)) acts.push('<button data-own="renew">🔄 Продлить</button>');
+  if (x.status === "approved") acts.push('<button data-own="stats" class="secondary">📊 Статистика</button>');
   if (x.status === "approved") {
     if (x.category === "marketplace") acts.push(`<button data-own="reserve" class="secondary">${x.reserved ? "Снять резерв" : "Зарезервировано"}</button>`);
     acts.push('<button data-own="close" class="secondary">Закрыть</button>');
@@ -905,7 +1049,7 @@ async function showReceipt(id) {
   };
 }
 const SUB_TITLES = {author: "Объявления автора", applications: "Мои отклики", searches: "Мои поиски", settings: "Настройки", employer: "Статус работодателя",
-                    support: "Поддержка", faq: "Вопросы и ответы", ticket: "Обращение", invite: "Пригласить друзей", resume: "Моё резюме", cvsearch: "Поиск сотрудников", payments: "История платежей", blocks: "Заблокированные", help: "Помощь и правила"};
+                    recent: "Недавно смотрел", myreviews: "Мои отзывы", compare: "Сравнение", support: "Поддержка", faq: "Вопросы и ответы", ticket: "Обращение", invite: "Пригласить друзей", resume: "Моё резюме", cvsearch: "Поиск сотрудников", payments: "История платежей", blocks: "Заблокированные", help: "Помощь и правила"};
 let currentSubKey = "";
 const TICKET_STATUS = {open: "Ждёт ответа", answered: "Есть ответ", closed: "Закрыто"};
 // ---------- поддержка внутри приложения: без ников, ответ приходит сюда ----------
@@ -1080,9 +1224,12 @@ async function openMenu(key) {
       <div class="set-row" style="padding-left:14px"><div>Новое по поискам — раз в сутки одним сообщением<small>Вместо уведомления о каждом объявлении</small></div>
         <label class="check" style="margin:0"><input type="checkbox" id="setDigest" ${prefs.digest ? "checked" : ""}></label></div>
       <p class="muted">Все уведомления всегда видны в приложении (колокольчик), даже если в Telegram они выключены.</p>
+      <div class="set-row"><div><b>Размер текста</b><small>Если мелко читать</small></div>
+        <span><button class="secondary" data-fs="">A</button> <button class="secondary" data-fs="1">A+</button> <button class="secondary" data-fs="2">A++</button></span></div>
       <div class="set-row"><div><b>Язык</b><small>Сейчас доступен только русский</small></div><span class="muted">RU</span></div></article>`;
     $("#myVisa").value = me?.visa || "";
     $("#setNotify").checked = Boolean(prefs.master);
+    body.querySelectorAll("[data-fs]").forEach((b) => { b.onclick = () => { if (b.dataset.fs) localStorage.setItem("fs", b.dataset.fs); else localStorage.removeItem("fs"); applyTextSize(); }; });
     $("#setDigest").onchange = async (e) => {
       try { await api("/api/me/notify-prefs", {method: "PUT", body: JSON.stringify({digest: e.target.checked})}); toast("Сохранено"); }
       catch (err) { toast(err.message); e.target.checked = !e.target.checked; }
@@ -1124,6 +1271,19 @@ async function openMenu(key) {
                   rejected: "Заявка отклонена. Можно подать снова с верными данными."}[st] || "";
     body.innerHTML = `<article class="listing"><p>${esc(text)}</p>
       ${(st === "none" || st === "rejected") ? '<div class="actions"><button data-own="employer-apply">Подать заявку</button></div>' : ""}</article>`;
+  }
+  if (key === "recent") {
+    let ids = []; try { ids = JSON.parse(localStorage.getItem("recent") || "[]"); } catch (e) { ids = []; }
+    const rows = ids.length ? await api("/api/listings-batch?ids=" + ids.join(","), {quiet: true}) : [];
+    body.innerHTML = rows.length ? rows.map(listingCard).join("") : '<div class="empty">Вы пока ничего не открывали, или объявления уже сняты.</div>';
+  }
+  if (key === "myreviews") {
+    const r = await api("/api/me/reviews");
+    body.innerHTML = `<article class="listing"><h3>${r.reviews ? `<span class="rating">★ ${r.rating}</span> · отзывов: ${r.reviews}` : "Отзывов пока нет"}</h3>
+      <p class="muted">Отзыв можно оставить после переписки по объявлению. Вы вправе один раз публично ответить на каждый.</p></article>` +
+      r.items.map((v) => `<article class="listing review" data-rv="${v.id}"><b class="rating">${"★".repeat(v.rating)}</b> ${esc(v.name)} · ${esc(v.at)}
+        <div class="muted">${esc(v.listing)}</div>${v.tags.map((t) => `<span class="tagchip">${esc(t)}</span>`).join("")}${v.text ? `<p>${esc(v.text)}</p>` : ""}
+        ${v.reply ? `<p class="muted"><b>Ваш ответ:</b> ${esc(v.reply)}</p>` : `<button class="linkbtn" data-replyreview="${v.id}">Ответить</button>`}</article>`).join("");
   }
   if (key === "support") await renderSupport(body);
   if (key === "faq") {
@@ -1247,7 +1407,11 @@ function saveLocalDraft() {
   draftTimer = setTimeout(() => {
     try {
       const data = listingPayload($("#listingForm"));
-      if (data.title || data.description) localStorage.setItem(draftKey(), JSON.stringify({data, step: wizStep}));
+      if (data.title || data.description) {
+        localStorage.setItem(draftKey(), JSON.stringify({data, step: wizStep}));
+        clearTimeout(saveLocalDraft.srv);   // и на сервер: черновик переживёт смену телефона
+        saveLocalDraft.srv = setTimeout(() => api("/api/me/wizard-draft", {method: "PUT", body: JSON.stringify({data, step: wizStep}), quiet: true}).catch(() => {}), 1500);
+      }
     } catch (e) { /* форма ещё не готова */ }
   }, 400);
 }
@@ -1306,6 +1470,9 @@ async function openAdd(kind) {
   // Незаконченный черновик на этом устройстве
   let saved = null;
   try { saved = JSON.parse(localStorage.getItem(draftKey()) || "null"); } catch (e) { saved = null; }
+  if (!saved) {
+    try { const sd = await api("/api/me/wizard-draft", {quiet: true}); if (sd?.data && (sd.data.title || sd.data.description)) saved = sd; } catch (e) { /* без черновика */ }
+  }
   $("#addSheet").classList.add("hidden");
   $("#modal").classList.remove("hidden");
   showStep(1);
@@ -1313,7 +1480,7 @@ async function openAdd(kind) {
     fillForm(saved.data);
     updateFormBlocks();
     toast("Фото нужно добавить заново");
-  } else if (saved) localStorage.removeItem(draftKey());
+  } else if (saved) { localStorage.removeItem(draftKey()); api("/api/me/wizard-draft", {method: "DELETE", quiet: true}).catch(() => {}); }
 }
 function fillForm(item) {
   const f = $("#listingForm");
@@ -1399,7 +1566,7 @@ async function saveListing(send) {
     await uploadPhotos(id);
     if (send && wasDraft) await api(`/api/listings/${id}/submit`, {method: "POST"});
     const wasEdit = Boolean(currentEditId);
-    if (!wasEdit) localStorage.removeItem(draftKey());
+    if (!wasEdit) { localStorage.removeItem(draftKey()); api("/api/me/wizard-draft", {method: "DELETE", quiet: true}).catch(() => {}); }
     currentEditId = null;
     $("#modal").classList.add("hidden");
     homeLoaded = false;
@@ -1555,6 +1722,8 @@ $("#closeServices").onclick = () => $("#services").classList.add("hidden");
 // ---------- знакомства ----------
 let datingMode = "feed";
 let pendingSelfie = null;
+let datingActive = false;
+$("#dActive").onclick = () => { datingActive = !datingActive; $("#dActive").classList.toggle("on", datingActive); loadDating(); };
 async function loadDating() {
   const box = $("#datingList");
   box.innerHTML = '<div class="skeleton"></div>';
@@ -1566,6 +1735,7 @@ async function loadDating() {
   const age = $("#dAge").value;
   if (age) { const [lo, hi] = age.split("-"); params.set("age_min", lo); params.set("age_max", hi); }
   if (reg.value) params.set("region", reg.value);
+  if (datingActive) params.set("active", "true");
   try {
     const likes = await api("/api/dating/likes-me", {quiet: true}).catch(() => ({count: 0, items: []}));
     $("#dLikesN").textContent = likes.count;
@@ -1601,13 +1771,20 @@ async function openMyDating() {
       f.gender.value = mine.gender;
       f.first_name.value = mine.name || "";
       await setGeo("#datingGeo", mine.region_code || "", mine.district_id || "");
-      toast("Статус анкеты: " + ({pending: "на проверке", published: "опубликована", rejected: "отклонена"}[mine.status] || mine.status));
+      toast("Статус анкеты: " + ({pending: "на проверке", published: "опубликована", rejected: "отклонена"}[mine.status] || mine.status) + (mine.status === "rejected" && mine.note ? ". Причина: " + mine.note : "") + (mine.paused ? ". Анкета на паузе" : ""));
+      $("#datingPause").hidden = false;
+      $("#datingPause").textContent = mine.paused ? "▶ Вернуть анкету в поиск" : "⏸ Поставить анкету на паузу";
+      $("#datingPause").dataset.on = mine.paused ? "" : "1";
     }
   } catch (e) { toast(e.message); }
   $("#addSheet").classList.add("hidden");
   $("#datingModal").classList.remove("hidden");
 }
 $("#myDatingBtn").onclick = openMyDating;
+$("#datingPause").onclick = async () => {
+  try { const r = await api("/api/dating/pause", {method: "POST", body: JSON.stringify({on: $("#datingPause").dataset.on === "1"})}); toast(r.paused ? "Анкета на паузе: её никто не видит" : "Анкета снова в поиске"); $("#datingModal").classList.add("hidden"); loadDating(); }
+  catch (err) { toast(err.message); }
+};
 $("#closeDating").onclick = () => $("#datingModal").classList.add("hidden");
 $("#datingForm").onsubmit = async (e) => {
   e.preventDefault();
@@ -1671,6 +1848,8 @@ document.addEventListener("click", async (e) => {
         if (!(await requireConsent())) return;
         applyListingId = id;
         $("#applyForm").contact.value = me?.last_contact || "";
+        $("#applyResume").hidden = true;
+        api("/api/me/resume", {quiet: true}).then((cv) => { if (cv && cv.status === "approved") { window.__cv = cv; $("#applyResume").hidden = false; } }).catch(() => {});
         $("#applyModal").classList.remove("hidden");
       }
       if (btn.dataset.act === "share") shareListing(id, owner.querySelector("h1,h3")?.textContent || "KOREA HUB");
@@ -1733,7 +1912,7 @@ document.addEventListener("click", async (e) => {
   const rv = e.target.closest("[data-review]");
   if (rv) {
     if (!(await requireConsent())) return;
-    reviewFor = +rv.dataset.review; reviewRating = 0; $("#reviewText").value = ""; drawStars();
+    reviewFor = +rv.dataset.review; reviewRating = 0; reviewTags = new Set(); $("#reviewText").value = ""; drawStars(); drawTags();
     $("#reviewSheet").classList.remove("hidden");
     return;
   }
@@ -1751,7 +1930,7 @@ document.addEventListener("click", async (e) => {
       openSub("author");
       const c = r.card;
       $("#subBody").innerHTML = `<p class="author">${c.verified ? `<b class="badge-ok">✔ Проверенный работодатель${c.company ? ": " + esc(c.company) : ""}</b> · ` : ""}На сайте с ${c.since || "—"} · Активных: ${c.active}${rev?.reviews ? ` · <b class="rating">★ ${rev.rating}</b> (${rev.reviews})` : ""}</p>` +
-        (rev?.items?.length ? `<h3 class="dsub">Отзывы</h3>` + rev.items.map((v) => `<div class="review"><b class="rating">${"★".repeat(v.rating)}</b> ${esc(v.name)} · ${esc(v.at)}${v.text ? `<p>${esc(v.text)}</p>` : ""}${v.reply ? `<p class="muted"><b>Ответ автора:</b> ${esc(v.reply)}</p>` : ""}${v.can_reply ? `<button class="linkbtn" data-replyreview="${v.id}">Ответить</button>` : ""}<button class="linkbtn" data-reportreview="${v.id}">⚑</button></div>`).join("") : "") +
+        (rev?.items?.length ? `<h3 class="dsub">Отзывы</h3>` + rev.items.map((v) => `<div class="review"><b class="rating">${"★".repeat(v.rating)}</b> ${esc(v.name)} · ${esc(v.at)}${(v.tags || []).map((t) => `<span class="tagchip">${esc(t)}</span>`).join("")}${v.text ? `<p>${esc(v.text)}</p>` : ""}${v.reply ? `<p class="muted"><b>Ответ автора:</b> ${esc(v.reply)}</p>` : ""}${v.can_reply ? `<button class="linkbtn" data-replyreview="${v.id}">Ответить</button>` : ""}<button class="linkbtn" data-reportreview="${v.id}">⚑</button></div>`).join("") : "") +
         r.items.map(listingCard).join("");
     } catch (err) { toast(err.message); }
     return;
@@ -1789,6 +1968,13 @@ document.addEventListener("click", async (e) => {
       if (act === "employer-apply") { $("#employerModal").classList.remove("hidden"); return; }
       if (act === "edit") { openEdit(item); return; }
       if (act === "reserve") { await api(`/api/listings/${id}/reserve`, {method: "POST", body: JSON.stringify({on: !item.reserved})}); toast(item.reserved ? "Резерв снят" : "Отмечено: зарезервировано"); homeLoaded = false; loadProfile(); return; }
+      if (act === "stats") {
+        const st = await api(`/api/listings/${id}/stats`);
+        let line = cardEl.querySelector(".statline");
+        if (!line) { line = document.createElement("p"); line.className = "meta-line statline"; cardEl.appendChild(line); }
+        line.textContent = `👁 ${st.views} · ♥ в избранном ${st.favorites} · 💬 чатов ${st.chats}` + (st.applications ? ` · 📨 откликов ${st.applications}` : "");
+        return;
+      }
       if (act === "appeal") {
         const text = await askText("Почему решение неверно?", "Объясните, что изменилось или что не учли");
         if (!text) return;
@@ -1814,7 +2000,7 @@ document.addEventListener("click", async (e) => {
   const article = e.target.closest("[data-article]");
   if (article) { openArticle(article.dataset.article); return; }
   const open = e.target.closest("[data-open]");
-  if (open) { openDetail(open.dataset.open); return; }
+  if (open && !e.target.closest(".cmp, .cmpbar")) { openDetail(open.dataset.open); return; }
 });
 
 document.querySelectorAll(".bottom [data-view], .tiles [data-view]").forEach((b) => b.onclick = () => showView(b.dataset.view));
@@ -1887,6 +2073,22 @@ function applyTelegramTheme() {
 applyTelegramTheme();
 tg?.onEvent?.("themeChanged", applyTelegramTheme);
 
+// ---------- потянуть вниз, чтобы обновить ----------
+{
+  const box = $("#scroll");
+  const ind = document.createElement("div"); ind.className = "ptr"; ind.textContent = "Отпустите, чтобы обновить";
+  box.parentNode.insertBefore(ind, box);
+  let y0 = null;
+  box.addEventListener("touchstart", (e) => { y0 = box.scrollTop === 0 && e.touches.length === 1 ? e.touches[0].clientY : null; }, {passive: true});
+  box.addEventListener("touchmove", (e) => { if (y0 !== null) ind.classList.toggle("show", e.touches[0].clientY - y0 > 80); }, {passive: true});
+  box.addEventListener("touchend", (e) => {
+    const pulled = y0 !== null && e.changedTouches[0].clientY - y0 > 80;
+    y0 = null; ind.classList.remove("show");
+    if (!pulled || currentView === "chat") return;
+    const refresh = {home: reloadCatalog, saved: loadFavorites, chats: loadConversations, profile: loadProfile, mine: loadProfile, notifs: loadNotifs, dating: loadDating, community: loadGroups, guide: loadGuide}[currentView];
+    if (refresh) { refresh(); toast("Обновлено"); }
+  }, {passive: true});
+}
 // ---------- старт ----------
 setTimeout(showWelcomeOnce, 1200);
 // Офлайн: страница-оболочка и скрипты кэшируются, чтобы приложение открывалось и при плохой связи

@@ -344,7 +344,9 @@ async function loadDating() {
 $("#main").addEventListener("click", async (e) => {
   const btn = e.target.closest("[data-dec]");
   if (!btn) return;
-  try { await post(`/api/admin/dating/${btn.closest("[data-pid]").dataset.pid}/${btn.dataset.dec}`); reload(); } catch (err) { say(err.message); }
+  let q = "";
+  if (btn.dataset.dec === "reject") { const why = ask("Причина отказа (автор анкеты её увидит)"); if (!why) return; q = "?reason=" + encodeURIComponent(why); }
+  try { await post(`/api/admin/dating/${btn.closest("[data-pid]").dataset.pid}/${btn.dataset.dec}${q}`); reload(); } catch (err) { say(err.message); }
 });
 
 // ---- работодатели ----

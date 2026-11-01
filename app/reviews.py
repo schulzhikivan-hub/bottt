@@ -23,6 +23,11 @@ class ReviewIn(BaseModel):
     listing_id: int
     rating: int = Field(ge=1, le=5)
     text: str = Field(default="", max_length=500)
+    tags: list[str] = Field(default_factory=list, max_length=4)
+
+
+TAGS = {"polite": "Вежливый", "punctual": "Пунктуальный", "as_described": "Всё как в описании",
+        "fair_price": "Честная цена", "fast": "Быстро отвечает", "unreliable": "Не пришёл/не ответил", "rude": "Грубый"}
 
 
 def summary(db: Session, tg_id: str) -> dict:
@@ -58,8 +63,9 @@ def create_review(payload: ReviewIn, user_id: str = Depends(writer), db: Session
     text = " ".join(payload.text.split())
     if text:
         guard.check_text("", text)
+    tags = [t for t in dict.fromkeys(payload.tags) if t in TAGS]
     review = Review(listing_id=listing.id, target_tg_id=listing.author_telegram_id, reviewer_tg_id=user_id,
-                    rating=payload.rating, text=text)
+                    rating=payload.rating, text=text, tags=",".join(tags))
     db.add(review)
     db.commit()
     guard.notify_user(db, listing.author_telegram_id, f"Новый отзыв ({payload.rating}★) по объявлению «{listing.title}»", "messages")
@@ -107,7 +113,7 @@ def author_reviews(listing_id: int, viewer: str | None = Depends(optional_user_i
     out = []
     for r in rows:
         u = db.get(User, r.reviewer_tg_id)
-        out.append({"id": r.id, "rating": r.rating, "text": r.text, "reply": r.reply, "can_reply": bool(viewer and viewer == r.target_tg_id and not r.reply), "name": (u.display_name if u and u.display_name else "Пользователь"),
+        out.append({"id": r.id, "rating": r.rating, "text": r.text, "tags": [TAGS[t] for t in (r.tags or "").split(",") if t in TAGS], "reply": r.reply, "can_reply": bool(viewer and viewer == r.target_tg_id and not r.reply), "name": (u.display_name if u and u.display_name else "Пользователь"),
                     "at": r.created_at.date().isoformat()})
     return {**summary(db, listing.author_telegram_id), "items": out}
 

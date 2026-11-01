@@ -101,8 +101,11 @@
     <button class="link" id="chatReport" aria-label="Пожаловаться">⚑</button>
   </div>
   <div id="messages" class="messages"></div>
+  <div id="quickReplies" class="quick" aria-label="Быстрые ответы"></div>
   <form id="chatForm" class="chat-form">
-    <label class="attach" aria-label="Прикрепить фото">📎<input type="file" id="chatPhoto" accept="image/jpeg,image/png,image/webp" hidden></label>
+    <label class="attach" aria-label="Прикрепить фото">📷<input type="file" id="chatPhoto" accept="image/jpeg,image/png,image/webp" hidden></label>
+    <label class="attach" aria-label="Прикрепить PDF или аудио">📎<input type="file" id="chatFile" accept="application/pdf,audio/*" hidden></label>
+    <button type="button" id="chatMic" class="attach" aria-label="Голосовое сообщение" hidden>🎤</button>
     <input id="chatInput" maxlength="2000" placeholder="Сообщение" autocomplete="off">
     <button type="submit" aria-label="Отправить">➤</button>
   </form>
@@ -130,6 +133,8 @@
     <button class="wide" data-menu="applications"><i>📨</i>Мои отклики</button>
     <button class="wide" data-menu="favorites"><i>♡</i>Избранное</button>
     <button class="wide" data-menu="chats"><i>💬</i>Сообщения<em id="sChats" hidden>0</em></button>
+    <button class="wide" data-menu="recent"><i>🕘</i>Недавно смотрел</button>
+    <button class="wide" data-menu="myreviews"><i>⭐</i>Мои отзывы</button>
     <button class="wide" data-menu="searches"><i>🔔</i>Мои поиски</button>
     <button class="wide" data-menu="invite"><i>🎁</i>Пригласить друзей</button>
     <button class="wide" data-menu="resume"><i>🧑‍💼</i>Моё резюме (ищу работу)</button>
@@ -188,6 +193,7 @@
     <select id="dAge" aria-label="Возраст"><option value="">Любой возраст</option><option value="18-25">18–25</option><option value="26-35">26–35</option><option value="36-99">36 и старше</option></select>
     <select id="dRegion" aria-label="Регион"></select>
   </div>
+  <div class="chips"><button class="chip" id="dActive" type="button">🟢 Был(а) недавно</button></div>
   <button class="pill-btn" id="dLikes" type="button" style="margin:8px 0">💌 Меня лайкнули (<span id="dLikesN">0</span>)</button>
   <div id="datingList" class="dgrid"></div>
 </section>
@@ -404,8 +410,12 @@
 
 <div id="reviewSheet" class="modal hidden"><div class="sheet"><div class="sheet-top"><b>Отзыв об авторе</b><button id="closeReview" type="button">✕</button></div>
 <div id="reviewStars" class="stars" role="radiogroup" aria-label="Оценка"></div>
+<div id="reviewTags" class="chips"></div>
 <textarea id="reviewText" rows="4" maxlength="500" placeholder="Что понравилось или не понравилось? Без телефонов и ссылок"></textarea>
 <button class="submit" id="reviewOk" type="button">Отправить отзыв</button></div></div>
+
+<div id="lightbox" class="lightbox hidden" role="dialog" aria-label="Просмотр фото"><button id="lbClose" aria-label="Закрыть">✕</button>
+<button id="lbPrev" aria-label="Назад">‹</button><img id="lbImg" alt=""><button id="lbNext" aria-label="Дальше">›</button><div id="lbCount"></div></div>
 
 <div id="welcomeSheet" class="modal hidden"><div class="sheet"><div class="sheet-top"><b id="welcomeTitle">KOREA HUB</b><button id="closeWelcome" type="button">✕</button></div>
 <p id="welcomeText" style="white-space:pre-wrap"></p>
@@ -418,6 +428,7 @@
 <div id="serviceList" class="listings"></div></div></div>
 
 <div id="datingModal" class="modal hidden"><div class="sheet"><div class="sheet-top"><b>Моя анкета</b><button id="closeDating">✕</button></div>
+<button type="button" class="link" id="datingPause" hidden></button>
 <form id="datingForm"><label>Имя (видно в анкете, без ссылок и телефона)<input name="first_name" maxlength="40" placeholder="Например: Аня"></label>
 <label>Год рождения<input name="birth_year" type="number" min="1930" max="2100" required></label>
 <label>Пол<select name="gender"><option value="f">Женщина</option><option value="m">Мужчина</option></select></label>
@@ -441,6 +452,7 @@
 
 <div id="applyModal" class="modal hidden"><div class="sheet"><div class="sheet-top"><b>Отклик на вакансию</b><button id="closeApply">✕</button></div>
 <form id="applyForm"><label>Как с вами связаться<input name="contact" required minlength="3" maxlength="160" placeholder="@username или телефон"></label>
+<button type="button" class="link" id="applyResume" hidden>Подставить из моего резюме</button>
 <label>Сообщение работодателю<textarea name="message" rows="3" maxlength="1000" placeholder="Опыт, когда можете начать"></textarea></label>
 <p class="muted">Работодатель увидит ваш контакт, город и визу из профиля. Telegram ID не передаётся.</p>
 <button class="submit" type="submit">Откликнуться</button></form></div></div>
@@ -458,5 +470,6 @@
 <p class="muted" id="webLoginInfo"></p>
 <p><a id="webLoginLink" href="#" hidden target="_blank" rel="noopener">Открыть Telegram вручную</a></p></div></div>
 
-<div id="toast" class="toast"></div>
+<div id="offlineBar" class="offline-bar" role="status" hidden>Нет связи с интернетом. Показано то, что уже загружено</div>
+<div id="toast" role="status" aria-live="polite" class="toast"></div>
 <script src="/static/app.js"></script></body></html>

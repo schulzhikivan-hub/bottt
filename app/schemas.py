@@ -108,6 +108,7 @@ class MessageOut(BaseModel):
     created_at: datetime
     read: bool = False          # my message that the other person has opened
     photo: str | None = None    # picture sent in the chat
+    file: dict | None = None    # {"name","kind","url"}: PDF or voice message
 
 
 class ConversationOut(BaseModel):

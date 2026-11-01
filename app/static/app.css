@@ -505,3 +505,26 @@ button.pchip{color:var(--accent);font-weight:600}
 .review{border-top:1px solid var(--line,#e6e9ef);padding:10px 0}
 .review p{margin:4px 0 0}
 .similar{margin-top:18px}
+
+.offline-bar{position:fixed;left:0;right:0;top:0;z-index:60;background:#b45309;color:#fff;text-align:center;padding:6px 10px;font-size:13px}
+.lightbox{position:fixed;inset:0;z-index:70;background:rgba(0,0,0,.94);display:flex;align-items:center;justify-content:center;touch-action:pan-y}
+.lightbox.hidden{display:none}
+.lightbox img{max-width:100%;max-height:100%;object-fit:contain;touch-action:pinch-zoom}
+.lightbox button{position:absolute;border:0;background:rgba(255,255,255,.18);color:#fff;border-radius:50%;width:44px;height:44px;font-size:22px}
+#lbClose{top:max(12px,env(safe-area-inset-top));right:12px}
+#lbPrev{left:8px;top:50%}#lbNext{right:8px;top:50%}
+#lbCount{position:absolute;bottom:18px;color:#fff;font-size:13px}
+.gallery img{cursor:zoom-in}
+.quick{display:flex;gap:6px;overflow-x:auto;padding:6px 8px}
+.quick button{flex:0 0 auto;border:1px solid var(--border);background:var(--card);border-radius:16px;padding:6px 12px;font-size:13px;color:var(--text)}
+.chatfile{display:inline-flex;gap:6px;align-items:center;border:0;background:transparent;color:inherit;text-decoration:underline;padding:0;font:inherit}
+.chatfile audio{max-width:220px}
+.cmp{display:block;margin-top:6px;font-size:13px}
+.cmpbar{position:sticky;bottom:8px;display:flex;justify-content:center}
+.cmptable{width:100%;border-collapse:collapse;font-size:13px}
+.cmptable td,.cmptable th{border-bottom:1px solid var(--border);padding:6px;text-align:left;vertical-align:top}
+.tagchip{display:inline-block;background:var(--bg);border-radius:10px;padding:2px 8px;margin:2px 4px 0 0;font-size:12px}
+.chip.on{background:var(--brand,#1b4b9b);color:#fff}
+body.fs1{zoom:1.1}body.fs2{zoom:1.22}
+.ptr{position:absolute;left:0;right:0;top:0;text-align:center;font-size:13px;color:var(--muted,#6b7385);height:0;overflow:hidden;transition:height .15s}
+.ptr.show{height:30px}
