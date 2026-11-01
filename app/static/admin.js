@@ -105,6 +105,8 @@ const TABS = [
   {sep: "Деньги", roles: ADM},
   {key: "payments", label: "💳 Платежи", roles: ADM, title: "Платежи и промокоды"},
   {key: "pricing", label: "💰 Цены", roles: ADM, title: "Цены услуг"},
+  {key: "reportsm", label: "📈 Отчёты и VIP", roles: ADM, title: "Деньги: отчёты, VIP, возвраты, подарки"},
+  {key: "stest", label: "🔎 Тест поиска", roles: MOD, title: "Тест поиска: почему объект на этом месте или не показан"},
   {key: "rules", label: "📐 Правила", roles: ADM, title: "Правила: выдача, платные места, сроки, хранение"},
   {sep: "Система", roles: ADM},
   {key: "errors", label: "🐞 Ошибки в приложении", roles: ADM, title: "Ошибки, которые видели пользователи"},
@@ -829,6 +831,7 @@ async function loadMarketing() {
   const [banners, casts, geo, ads, camps] = await Promise.all([api("/api/admin/banners"), api("/api/admin/broadcasts"), fetch("/api/geo").then((r) => r.json()).then((g) => g.regions),
     api("/api/admin/ads").catch(() => []), api("/api/admin/campaigns").catch(() => [])]);
   const price = await api("/api/admin/pricing").catch(() => []);
+  const adLists = await api("/api/admin/ads/lists").catch(() => ({banned_words: "", banned_hosts: "", allowed_hosts: ""}));
   const SERVICES = Object.fromEntries(price.map((x) => [x.code, x.title]));
   if (!price.length) Object.assign(SERVICES, {dating_vip: "VIP-анкета", dating_invisible: "Невидимка", dating_viewers: "Кто видел анкету", dating_super: "Супер-симпатия"});
   $("#main").innerHTML = `
@@ -836,9 +839,14 @@ async function loadMarketing() {
       <div class="row"><input id="adTitle" placeholder="Заголовок" maxlength="80"><input id="adText" placeholder="Текст" maxlength="200" style="flex:1;min-width:200px">
       <input id="adLink" placeholder="Ссылка https://… или номер объявления" style="min-width:220px">
       <select id="adPlace"><option value="both">Лента и главная</option><option value="list">Лента</option><option value="home">Главная</option></select>
-      <label><input type="checkbox" id="adAdult"> 18+</label><input id="adDays" type="number" min="1" max="365" placeholder="дней" style="width:80px"><button class="act" id="adAdd">Добавить</button></div>
-      <table><tr><th>№</th><th>Заголовок</th><th>Показы</th><th>Клики</th><th>CTR</th><th>Идёт</th><th></th></tr>${ads.map((a) => `<tr data-adid="${a.id}"><td>${a.id}</td><td>${esc(a.title)}${a.adult ? " 🔞" : ""}</td>
-        <td>${a.shows}</td><td>${a.clicks}</td><td>${a.ctr}%</td><td>${a.live ? "да" : "нет"}</td>
+      <label><input type="checkbox" id="adAdult"> 18+</label><input id="adDays" type="number" min="1" max="365" placeholder="дней" style="width:80px"><input id="adBudget" type="number" min="1" placeholder="бюджет, показов" style="width:130px"><button class="act" id="adAdd">Добавить</button></div>
+      <details><summary class="muted">Запрещённые темы и ссылки</summary>
+        <label>Запрещённые слова (через запятую)<textarea id="adBanW" rows="2">${esc(adLists.banned_words)}</textarea></label>
+        <label>Запрещённые сайты (через запятую)<textarea id="adBanH" rows="2">${esc(adLists.banned_hosts)}</textarea></label>
+        <label>Разрешённые сайты — если заполнено, другие нельзя<textarea id="adAllH" rows="2">${esc(adLists.allowed_hosts)}</textarea></label>
+        <button class="act" id="adListsSave">Сохранить списки</button></details>
+      <table><tr><th>№</th><th>Заголовок</th><th>Показы / бюджет</th><th>Клики</th><th>CTR</th><th>Идёт</th><th></th></tr>${ads.map((a) => `<tr data-adid="${a.id}"><td>${a.id}</td><td>${esc(a.title)}${a.adult ? " 🔞" : ""}</td>
+        <td>${a.shows}${a.max_shows ? " / " + a.max_shows : ""}</td><td>${a.clicks}</td><td>${a.ctr}%</td><td>${a.live ? "да" : "нет"}</td>
         <td><button class="act ${a.active ? "gray" : "ok"}" data-adtoggle>${a.active ? "Выключить" : "Включить"}</button><button class="act no" data-addel>Удалить</button></td></tr>`).join("")}</table></div>
     <div class="card"><h3>Акции (бесплатные услуги)</h3><p class="muted">Выдаётся с пометкой «по акции» и без подъёма в ленте. Досрочная остановка не отбирает уже выданное. У человека одновременно одна акция на услугу.</p>
       <div class="row"><input id="pcTitle" placeholder="Название акции" maxlength="80"><select id="pcService">${Object.entries(SERVICES).map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select>
@@ -868,8 +876,13 @@ async function loadMarketing() {
     try {
       const link = $("#adLink").value.trim(), isId = /^\d+$/.test(link);
       await post("/api/admin/ads", {title: $("#adTitle").value.trim(), text: $("#adText").value.trim(), link: isId ? "" : link, listing_id: isId ? Number(link) : null,
-        place: $("#adPlace").value, adult_only: $("#adAdult").checked, days: $("#adDays").value ? Number($("#adDays").value) : null}); reload();
+        place: $("#adPlace").value, adult_only: $("#adAdult").checked, days: $("#adDays").value ? Number($("#adDays").value) : null,
+        max_shows: $("#adBudget").value ? Number($("#adBudget").value) : null}); reload();
     } catch (err) { say(err.message); }
+  };
+  $("#adListsSave").onclick = async () => {
+    try { await api("/api/admin/ads/lists", {method: "PUT", body: JSON.stringify({banned_words: $("#adBanW").value, banned_hosts: $("#adBanH").value, allowed_hosts: $("#adAllH").value})}); say("Списки сохранены"); }
+    catch (err) { say(err.message); }
   };
   $("#pcAdd").onclick = async () => {
     try { await post("/api/admin/campaigns", {title: $("#pcTitle").value.trim(), service_code: $("#pcService").value, days: Number($("#pcDays").value || 3),
@@ -1091,9 +1104,44 @@ $("#main").addEventListener("click", async (e) => {
     if (e.target.closest("[data-rreset]")) { await post(`/api/admin/rules/${key}/reset`); say("Возвращено значение по умолчанию"); reload(); }
   } catch (err) { say(err.message); }
 });
+
+// ---- отчёты по деньгам и история VIP ----
+let reportDays = 30;
+async function loadMoneyReports() {
+  const [rep, vip] = await Promise.all([api(`/api/admin/reports/money?days=${reportDays}`), api("/api/admin/vip/history")]);
+  const line = (r) => `<td>${r.paid}</td><td>${r.stars} ⭐</td><td>${r.from_balance} ⭐</td><td>${r.refunded} (${r.refunded_stars} ⭐)</td><td>${r.granted}</td><td>${r.saved_stars} ⭐</td>`;
+  const head = "<tr><th></th><th>Оплат</th><th>Выручка</th><th>С баланса</th><th>Возвратов</th><th>Подарков</th><th>Сэкономлено людям</th></tr>";
+  const SEC = {job: "Работа", housing: "Жильё", marketplace: "Барахолка", dating: "Знакомства"};
+  $("#main").innerHTML = `<div class="card"><div class="row"><b>Период:</b>${[7, 30, 90, 365].map((d) => `<button class="act ${d === reportDays ? "" : "gray"}" data-rdays="${d}">${d} дн.</button>`).join("")}</div>
+    <h3>Итого</h3><table>${head}<tr><td><b>Все</b></td>${line(rep.total)}</tr></table><p class="muted">Платящих людей: ${rep.total.payers}</p>
+    <h3>По разделам</h3><table>${head}${Object.entries(rep.by_section).map(([k, r]) => `<tr><td>${esc(SEC[k] || k)}</td>${line(r)}</tr>`).join("")}</table>
+    <h3>По услугам</h3><table>${head}${Object.entries(rep.by_service).map(([k, r]) => `<tr><td>${esc(r.title)}</td>${line(r)}</tr>`).join("")}</table></div>
+    <div class="card"><h3>VIP: история</h3><p class="muted">Активаций: ${vip.summary.activations ?? 0} · разных людей: ${vip.summary.unique ?? 0} · платных: ${vip.summary.paid ?? 0} · подарков: ${vip.summary.granted ?? 0} · выручка ${vip.summary.stars ?? 0} ⭐ · сэкономлено людям ${vip.summary.saved_stars ?? 0} ⭐</p>
+      <table><tr><th>Когда</th><th>Кто</th><th>Раздел</th><th>Срок</th><th>Цена</th><th>Статус</th><th>Примечание</th></tr>${vip.items.map((r) => `<tr><td>${esc(fmt(r.at))}</td><td>${esc(r.name || r.user)}</td><td>${esc(SEC[r.module] || r.module)}</td>
+        <td>${r.days} дн.</td><td>${r.stars}${r.from_balance ? " + " + r.from_balance + " с баланса" : ""} ⭐</td><td>${esc({paid: "оплачено", granted: "подарок", refunded: "возврат"}[r.status] || r.status)}</td><td>${esc(r.note)}</td></tr>`).join("")}</table></div>`;
+}
+$("#main").addEventListener("click", (e) => { const b = e.target.closest("[data-rdays]"); if (b) { reportDays = Number(b.dataset.rdays); reload(); } });
+
+// ---- тест поиска ----
+let stestMode = "people";
+async function loadSearchTest() {
+  $("#main").innerHTML = `<div class="card"><p class="muted">Введите запрос так, как его вводит человек. «Как видят люди» показывает настоящую выдачу и причину каждого места. «Как видит админ» дополнительно покажет, что не показано и почему.</p>
+    <div class="row"><input id="stQ" placeholder="Запрос, например: повар" style="flex:1;min-width:200px">
+    <select id="stMode"><option value="people" ${stestMode === "people" ? "selected" : ""}>Как видят люди</option><option value="admin" ${stestMode === "admin" ? "selected" : ""}>Как видит админ</option></select>
+    <button class="act" id="stGo">Проверить</button></div><div id="stOut"></div></div>`;
+  const go = async () => {
+    stestMode = $("#stMode").value;
+    const r = await api(`/api/admin/search-test?q=${encodeURIComponent($("#stQ").value)}&mode=${stestMode}`);
+    $("#stOut").innerHTML = `<p class="muted">Найдено: ${r.total}${r.corrected ? ` · показано по запросу «${esc(r.corrected)}»` : ""}</p>
+      <table><tr><th>№</th><th>Объявление</th><th>Полоса</th><th>Почему здесь</th></tr>${r.items.map((i) => `<tr><td>${i.place}</td><td>#${i.id} ${esc(i.title)}<br><span class="muted">${esc(i.city)}</span></td><td>${esc(i.lane)}</td><td>${i.why.map(esc).join("<br>")}</td></tr>`).join("")}</table>
+      ${r.not_shown ? `<h3>Не показано</h3><table><tr><th>Объявление</th><th>Статус</th><th>Почему</th></tr>${r.not_shown.map((i) => `<tr><td>#${i.id} ${esc(i.title)}</td><td>${esc(i.status)}</td><td>${esc(i.why)}</td></tr>`).join("")}</table>` : ""}`;
+  };
+  $("#stGo").onclick = () => go().catch((e) => say(e.message));
+  $("#stQ").addEventListener("keydown", (e) => { if (e.key === "Enter") $("#stGo").click(); });
+}
 const LOADERS = {dash: loadDash, listings: loadListings, jobs: loadSection, housing: loadSection, market: loadSection, dating: loadDating,
                  employers: loadEmployers, reports: loadReports, reviews: loadReviews, resumes: loadResumes, support: loadSupport, texts: loadTexts, users: loadUsers, community: loadCommunity, guide: loadGuide,
-                 marketing: loadMarketing, payments: loadPayments, pricing: loadPricing, rules: loadRules, audit: loadAudit, errors: loadErrors, settings: loadSettings, admins: loadAdmins};
+                 marketing: loadMarketing, payments: loadPayments, pricing: loadPricing, rules: loadRules, reportsm: loadMoneyReports, stest: loadSearchTest, audit: loadAudit, errors: loadErrors, settings: loadSettings, admins: loadAdmins};
 
 // Старт: есть сессия — открываем; открыто из Telegram — входим сами; иначе показываем кнопку
 if (session()) startApp();

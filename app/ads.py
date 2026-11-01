@@ -38,6 +38,7 @@ class Ad(Base):
     starts_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     ends_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    max_shows: Mapped[int | None] = mapped_column(Integer, nullable=True)   # the budget: switched off when reached
     shows: Mapped[int] = mapped_column(Integer, default=0)
     clicks: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
@@ -125,11 +126,18 @@ def ads_for_list(organic: int = 0, page: int = 0, where: str = "list", viewer: s
     slots = policy.ad_slots(max(0, organic), max(0, page), where)
     chosen = visible_ads(db, viewer, where)[:len(slots)]
     out = []
+    spent = []
     for at_index, ad in zip(slots, chosen):
         ad.shows += 1
         out.append({"at": at_index, "ad": ad_view(ad)})
+        if ad.max_shows and ad.shows >= ad.max_shows:          # the budget is spent: off, and the staff is told
+            ad.is_active = False
+            spent.append(ad.title)
     if out:
         db.commit()
+    if spent:
+        from app import adminplus
+        adminplus.notify_staff(db, "💸 Бюджет рекламы исчерпан, показ остановлен: " + ", ".join(spent), "adbudget", ("admin", "super_admin"))
     return out
 
 
@@ -149,12 +157,60 @@ class AdIn(BaseModel):
     adult_only: bool = False
     place: str = Field(default="both", pattern="^(list|home|both)$")
     days: int | None = Field(default=None, ge=1, le=365)
+    max_shows: int | None = Field(default=None, ge=1, le=10_000_000)
+
+
+def _words(db: Session, key: str) -> list[str]:
+    from app.models import Setting
+    row = db.get(Setting, key)
+    return [w.strip().lower() for w in (row.value if row else "").replace("\n", ",").split(",") if w.strip()]
+
+
+def check_ad_text(db: Session, payload: "AdIn") -> None:
+    """Forbidden themes (words) and forbidden or not allowed link hosts are checked before an ad is saved."""
+    text = f"{payload.title} {payload.text}".lower()
+    for word in _words(db, "ads.banned_words"):
+        if word in text:
+            raise HTTPException(400, f"В рекламе запрещённая тема: «{word}»")
+    link = payload.link.strip().lower()
+    if link.startswith("https://"):
+        host = link[8:].split("/")[0].split("?")[0]
+        if any(host == h or host.endswith("." + h) for h in _words(db, "ads.banned_hosts")):
+            raise HTTPException(400, f"Ссылки на {host} запрещены")
+        allowed = _words(db, "ads.allowed_hosts")
+        if allowed and not any(host == h or host.endswith("." + h) for h in allowed):
+            raise HTTPException(400, f"Ссылка на {host} не из белого списка")
+
+
+@router.get("/api/admin/ads/lists")
+def ad_lists(actor: str = Depends(staff(*ADM)), db: Session = Depends(get_db)):
+    return {k: ", ".join(_words(db, f"ads.{k}")) for k in ("banned_words", "banned_hosts", "allowed_hosts")}
+
+
+class AdListsIn(BaseModel):
+    banned_words: str = Field(default="", max_length=1000)
+    banned_hosts: str = Field(default="", max_length=1000)
+    allowed_hosts: str = Field(default="", max_length=1000)
+
+
+@router.put("/api/admin/ads/lists")
+def ad_lists_save(payload: AdListsIn, actor: str = Depends(staff(*ADM)), db: Session = Depends(get_db)):
+    from app.models import Setting
+    for k, v in payload.model_dump().items():
+        row = db.get(Setting, f"ads.{k}")
+        if row is None:
+            db.add(Setting(key=f"ads.{k}", value=v))
+        else:
+            row.value = v
+    log_action(db, actor, "ads.lists", "ads", "lists", "")
+    db.commit()
+    return ad_lists(actor, db)
 
 
 def ad_admin_view(ad: Ad, db: Session) -> dict:
     at = now()
     return {**ad_view(ad), "active": ad.is_active, "live": is_live(ad, at) and target_alive(db, ad, at), "place": ad.place,
-            "shows": ad.shows, "clicks": ad.clicks, "ends_at": ad.ends_at.isoformat() if ad.ends_at else None,
+            "shows": ad.shows, "max_shows": ad.max_shows, "clicks": ad.clicks, "ends_at": ad.ends_at.isoformat() if ad.ends_at else None,
             "ctr": round(100 * ad.clicks / ad.shows, 1) if ad.shows else 0.0}
 
 
@@ -169,7 +225,8 @@ def admin_ad_create(payload: AdIn, actor: str = Depends(staff(*ADM)), db: Sessio
         raise HTTPException(400, "Укажите объявление или ссылку (https:// или /?)")
     if payload.listing_id is not None and db.get(Listing, payload.listing_id) is None:
         raise HTTPException(404, "Объявление не найдено")
-    ad = Ad(title=payload.title.strip(), text=payload.text.strip(), link=payload.link.strip(), listing_id=payload.listing_id,
+    check_ad_text(db, payload)
+    ad = Ad(max_shows=payload.max_shows, title=payload.title.strip(), text=payload.text.strip(), link=payload.link.strip(), listing_id=payload.listing_id,
             adult_only=payload.adult_only, place=payload.place, starts_at=now(),
             ends_at=now() + dt.timedelta(days=payload.days) if payload.days else None)
     db.add(ad)
