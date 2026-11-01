@@ -145,7 +145,7 @@ KST = dt.timezone(dt.timedelta(hours=9))
 
 
 def _quiet_span() -> tuple[int, int] | None:
-    raw = (settings.quiet_hours or "").strip()
+    raw = (getattr(settings, "quiet_hours", "") or "").strip()
     try:
         a, b = raw.split("-")
         return int(a), int(b)
