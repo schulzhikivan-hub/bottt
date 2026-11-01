@@ -277,6 +277,32 @@ def profile_photo(profile_id: int, viewer: str | None = Depends(optional_user_id
     return FileResponse(upload_root() / profile.photo_key)
 
 
+def _private_counts(db: Session, ids: list[int]) -> dict[int, int]:
+    """How many approved private photos each profile has (the photos themselves are never in lists)."""
+    if not ids:
+        return {}
+    rows = db.execute(select(DatingPrivatePhoto.profile_id, func.count()).where(
+        DatingPrivatePhoto.profile_id.in_(ids), DatingPrivatePhoto.status == "live").group_by(DatingPrivatePhoto.profile_id)).all()
+    return {pid: n for pid, n in rows}
+
+
+def _private_count(db: Session, profile_id: int) -> int:
+    return _private_counts(db, [profile_id]).get(profile_id, 0)
+
+
+def _openable(db: Session, p: DatingProfile, viewer: str | None) -> bool:
+    """May this person open the profile (by a link, its photo, a like)? Paused, doubtful, unpublished, blocked or deleted
+    ones are «not found». An invisible one opens by a link: it is only absent from the lists."""
+    if p.status != "published" or p.paused or p.suspect:
+        return False
+    owner = db.get(User, p.owner_tg_id)
+    if owner is None or owner.blocked or owner.deleted_at is not None:
+        return False
+    if viewer and viewer != p.owner_tg_id and is_blocked_pair(db, viewer, p.owner_tg_id):
+        return False
+    return True
+
+
 def _hidden_owners(db: Session, me: str) -> set[str]:
     """Owners I must not see: blocked by me, blocked me, or deleted/blocked accounts."""
     hidden = set(db.scalars(select(Block.blocked_tg_id).where(Block.blocker_tg_id == me)).all())
