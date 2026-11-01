@@ -1928,10 +1928,13 @@ $("#closeServices").onclick = () => $("#services").classList.add("hidden");
 let datingTab = "all";
 let pendingSelfie = null;
 let datingActive = false, dsCurrent = null;
-function openDatingSheet(id) {
+function openDatingSheet(id, opts = {}) {
   const p = window.__dating?.[id];
   if (!p) return;
   dsCurrent = p;
+  $("#dsTags").innerHTML = dTags(p);
+  $("#dsActions").hidden = Boolean(opts.preview);
+  $("#dsPreviewNote").hidden = !opts.preview;
   $("#dsName").textContent = (p.name ? p.name + ", " : "") + p.age + (p.verified ? " ✔" : "");
   $("#dsPhoto").src = p.photo_url;
   $("#dsMeta").textContent = "📍 " + p.city + (p.verified ? " · анкета подтверждена" : "");
@@ -2090,14 +2093,29 @@ $("#datingForm").onsubmit = async (e) => {
 };
 
 // ---------- кабинет знакомств ----------
-const D_STATUS = {pending: ["⏳", "На проверке", "Модератор смотрит анкету, обычно это быстро. До проверки её никто не видит."],
-  published: ["✅", "Опубликована", "Анкета видна в ленте."], rejected: ["❌", "Отклонена", "Исправьте анкету и отправьте снова."]};
+const D_GOAL = {friendship: "Дружба", relationship: "Отношения", marriage: "Брак", chat: "Общение"};
+const D_SEEK = {f: "Ищет женщину", m: "Ищет мужчину", any: "Ищет: не важно"};
+const D_ICON = {bump: "🚀", vip: "👑", super: "⭐", invisible: "👻", viewers: "👀"};
+const D_SHORT = {bump: "Поднять", vip: "VIP", super: "Супер-симпатия", invisible: "Невидимка", viewers: "Кто смотрел"};
 const untilText = (iso) => (iso ? "до " + fmtDate(iso).slice(0, 10) : "");
+let dcabTab = "overview";
+function dTags(p) {
+  const visa = (fieldDefs?.visas || []).find((v) => v.value === p.visa)?.label;
+  return [p.vip ? (p.vip_free ? "🎁 VIP" : "👑 VIP") : "", D_GOAL[p.goal] ? "🎯 " + D_GOAL[p.goal] : "", D_SEEK[p.seeking] || "",
+    p.height ? "📏 " + p.height + " см" : "", visa ? "🛂 " + visa : "", p.private_photos ? "🔒 приватных фото: " + p.private_photos : ""]
+    .filter(Boolean).map((t) => `<span class="dtag">${esc(t)}</span>`).join("");
+}
 function dCompleteness(m) {
-  const items = [["Фото", m.has_photo], ["Подтверждение селфи", m.selfie_status === "approved"], ["Рост", Boolean(m.height)],
+  const items = [["Фото в анкете", m.has_photo], ["Подтверждение селфи", m.selfie_status === "approved"], ["Рост", Boolean(m.height)],
     ["Цель знакомства", Boolean(m.goal)], ["Кого ищу", Boolean(m.seeking)], ["О себе (от 40 знаков)", (m.bio || "").length >= 40],
     ["Визовый статус", Boolean(m.visa)]];
   return {items, pct: Math.round(100 * items.filter(([, ok]) => ok).length / items.length)};
+}
+// «Как меня видят»: та же карточка, что у других людей, но без кнопок «нравится» и «пожаловаться»
+function previewMyProfile(m) {
+  window.__dating = window.__dating || {};
+  window.__dating[m.id] = m;
+  openDatingSheet(m.id, {preview: true});
 }
 async function showDatingCabinet() {
   SUB_TITLES.dcabinet = "Моя анкета";
@@ -2111,57 +2129,99 @@ async function showDatingCabinet() {
   try {
     [svc, promos, st] = await Promise.all([api("/api/dating/services"), api("/api/promos", {quiet: true}).catch(() => []), api("/api/dating/me/stats", {quiet: true}).catch(() => ({}))]);
   } catch (err) { body.innerHTML = `<div class="empty">${esc(err.message)}</div>`; return; }
-  const [icon, title, hint] = mine.paused ? ["⏸", "На паузе", "Анкету никто не видит. Симпатии сохраняются."] : (D_STATUS[mine.status] || ["", mine.status, ""]);
+  const live = mine.status === "published" && !mine.paused && !mine.suspect;
   const comp = dCompleteness(mine);
   const opt = (kind) => svc.options.find((o) => o.kind === kind);
-  const serviceCard = (o, extra = "") => !o ? "" : `<article class="listing"><h3>${esc(o.title)} — ${o.stars} ⭐</h3><p class="muted">${esc(o.what)}</p>
-    ${o.active_until ? `<p>✔ Действует ${untilText(o.active_until)}</p>` : ""}${extra}
-    ${o.available ? `<div class="actions"><button data-dbuy="${esc(o.code)}">${o.active_until ? "Продлить" : "Купить"}</button>${svc.balance >= o.stars ? `<button class="secondary" data-dbuy="${esc(o.code)}" data-bal="1">С баланса</button>` : ""}</div>` : `<p class="muted">${esc(o.reason)}</p>`}</article>`;
-  const live = mine.status === "published";
-  body.innerHTML = `
-    <article class="listing dcab-head"><div class="actions" style="align-items:center">
-        <img src="${esc(mine.photo_url)}?v=${Date.now() % 100000}" alt="" style="width:84px;height:84px;border-radius:14px;object-fit:cover" onerror="this.style.display='none'">
-        <div style="flex:1;min-width:0"><h3 style="margin:0">${esc(mine.name || "Без имени")}, ${mine.age}${mine.age_confirmed ? " ✔" : ""}</h3>
-        <p class="muted" style="margin:2px 0">📍 ${esc(mine.city || "—")}${mine.vip ? ` · ${mine.vip_free ? "🎁 VIP" : "VIP"} ${untilText(mine.vip_until)}` : ""}</p>
-        <p style="margin:2px 0">${icon} <b>${esc(title)}</b>${mine.invisible ? " · 👻 невидимка" : ""}${mine.suspect ? " · ⚠ на проверке после жалобы" : ""}</p></div></div>
-      <p class="muted">${esc(hint)}${mine.status === "rejected" && mine.note ? " Причина: " + esc(mine.note) : ""}</p>
-      <div class="actions"><button id="dEdit">✏️ Редактировать</button>
-        ${live ? `<button class="secondary" id="dOpenFeed">Как видят мою анкету</button>` : ""}</div></article>
+  const pills = [];
+  if (mine.paused) pills.push('<span class="dpill warn">⏸ На паузе</span>');
+  else if (mine.status === "pending") pills.push('<span class="dpill warn">⏳ На проверке</span>');
+  else if (mine.status === "rejected") pills.push('<span class="dpill bad">❌ Отклонена</span>');
+  else if (mine.suspect) pills.push('<span class="dpill warn">⚠ Проверка после жалобы</span>');
+  else pills.push('<span class="dpill ok">✅ В ленте</span>');
+  if (mine.invisible) pills.push('<span class="dpill">👻 Невидимка</span>');
+  if (mine.vip) pills.push(`<span class="dpill gold">${mine.vip_free ? "🎁 VIP" : "👑 VIP"}</span>`);
+  if (mine.bumped_until) pills.push('<span class="dpill gold">🚀 Наверху</span>');
+  const alert = mine.status === "rejected" ? `<div class="dalert bad"><b>Анкета отклонена</b><span>${esc(mine.note || "Исправьте анкету и отправьте снова.")}</span></div>`
+    : mine.status === "pending" ? '<div class="dalert"><b>Идёт проверка</b><span>Обычно это быстро. До проверки анкету никто не видит, но вы можете её дополнить.</span></div>'
+    : mine.suspect ? '<div class="dalert"><b>Анкета временно скрыта</b><span>На неё поступила жалоба. Модератор проверит и вернёт её в ленту.</span></div>'
+    : mine.paused ? '<div class="dalert"><b>Анкета на паузе</b><span>Её никто не видит. Симпатии и чаты сохраняются. Вернуть можно во вкладке «Приватность».</span></div>' : "";
+  const tile = (n, label, go) => `<${go ? "button" : "div"} class="dcab-tile" ${go ? `data-dgo="${go}"` : ""}><b>${n ?? 0}</b><span>${label}</span></${go ? "button" : "div"}>`;
+  const todo = comp.items.map(([n, ok]) => `<div class="dtodo ${ok ? "done" : ""}"><span>${ok ? "✔" : "○"}</span><span>${esc(n)}</span>${ok ? "" : '<button class="link" data-dedit>Добавить</button>'}</div>`).join("");
+  const running = [];
+  if (mine.vip) running.push(`👑 ${mine.vip_free ? "VIP по акции" : "VIP"} ${untilText(mine.vip_until)}`);
+  if (mine.bumped_until) running.push(`🚀 Наверху ленты ${untilText(mine.bumped_until)}`);
+  if (mine.invisible_available) running.push(`👻 Невидимка ${untilText(mine.invisible_until)}`);
+  if (mine.viewers_until) running.push(`👀 «Кто смотрел» ${untilText(mine.viewers_until)}`);
+  if (mine.super_credits) running.push(`⭐ Супер-симпатий в запасе: ${mine.super_credits}`);
+  const svcTile = (kind) => {
+    const o = opt(kind);
+    if (!o) return "";
+    return `<div class="dsvc"><div class="dsvc-head"><span class="dsvc-ic">${D_ICON[kind] || "✨"}</span><div><b>${esc(D_SHORT[kind] || o.title)}</b><small>${o.stars} ⭐${o.days > 1 ? " · " + o.days + " дн." : o.days === 1 ? " · 24 часа" : ""}</small></div></div>
+      <p>${esc(o.what)}</p>${o.active_until ? `<p class="dok">✔ Действует ${untilText(o.active_until)}</p>` : ""}
+      ${o.available ? `<div class="actions"><button data-dbuy="${esc(o.code)}">${o.active_until ? "Продлить" : "Включить"}</button>${svc.balance >= o.stars ? `<button class="secondary" data-dbuy="${esc(o.code)}" data-bal="1">С баланса</button>` : ""}</div>` : `<p class="muted">${esc(o.reason)}</p>`}</div>`;
+  };
+  const gifts = promos.filter((x) => !x.needs_listing).map((x) => `<div class="dgift"><b>🎁 ${esc(x.title)}</b><span>${esc(x.service)}, ${x.days} дн. бесплатно</span>
+    ${x.can_claim ? `<button data-dclaim="${x.id}">Получить</button>` : `<small class="muted">${esc(x.reason || "Выдаётся автоматически")}</small>`}</div>`).join("");
+  const photoStyle = mine.has_photo ? `style="background-image:url('${esc(mine.photo_url)}?v=${Date.now() % 100000}')"` : "";
+  body.innerHTML = `<div class="dcab">
+    <div class="dcab-hero ${mine.has_photo ? "" : "nophoto"}" ${photoStyle}>
+      <div class="dcab-pills">${pills.join("")}</div>
+      <div class="dcab-info"><b>${esc(mine.name || "Без имени")}, ${mine.age}${mine.age_confirmed ? " ✔" : ""}</b><span>📍 ${esc(mine.city || "—")}</span></div>
+    </div>
+    <div class="dtags">${dTags(mine)}</div>
+    <div class="dcab-actions"><button id="dEdit">✏️ Редактировать</button><button class="secondary" id="dPreview">👁 Как меня видят</button></div>
+    ${alert}
+    <div class="dcab-tiles">${tile(st.views_7d, "просмотров за 7 дней")}${tile(st.likes_to_me, "мне симпатизируют", "to_me")}${tile(st.likes_from_me, "я симпатизирую", "from_me")}${tile(st.mutual, "взаимные", "mutual")}</div>
+    <div class="dcab-tabs">${[["overview", "Обзор"], ["boost", "Продвижение"], ["privacy", "Приватность"], ["more", "Ещё"]].map(([k, n]) => `<button class="${dcabTab === k ? "active" : ""}" data-dtab2="${k}">${n}</button>`).join("")}</div>
 
-    <article class="listing"><h3>Заполненность: ${comp.pct}%</h3>
-      <div style="height:8px;border-radius:6px;background:rgba(127,127,127,.2);overflow:hidden"><div style="width:${comp.pct}%;height:100%;background:var(--accent,#2f7)"></div></div>
-      <p class="muted">${comp.items.map(([n, ok]) => (ok ? "✔ " : "○ ") + esc(n)).join(" · ")}</p>
-      ${comp.pct < 100 ? '<p class="muted">Полные анкеты получают больше симпатий. Что не заполнено — добавьте в «Редактировать».</p>' : ""}</article>
+    <section class="dpanel" data-dpanel="overview" ${dcabTab === "overview" ? "" : "hidden"}>
+      <article class="dcard2"><div class="dcard2-head"><h3>Заполненность</h3><b>${comp.pct}%</b></div>
+        <div class="dbar"><i style="width:${comp.pct}%"></i></div>${todo}
+        <p class="muted">Полные анкеты получают заметно больше симпатий.</p></article>
+      <article class="dcard2"><h3>Кто смотрел анкету</h3><div id="dViewers" class="muted">…</div></article>
+      <article class="dcard2"><h3>Как попасть выше в ленте</h3>
+        <p class="muted">Лента сортируется по новизне. Выше всех встают анкеты с VIP, затем поднятые на сутки. Платных в пяти местах подряд не больше двух, чтобы лента оставалась честной.</p>
+        <div class="actions"><button data-dtab2="boost">Продвинуть анкету</button></div></article>
+    </section>
 
-    <article class="listing"><h3>Моя активность</h3>
-      <div class="dstats"><button class="chip" data-dgo="to_me">💌 Мне симпатизируют: <b>${st.likes_to_me ?? 0}</b></button>
-        <button class="chip" data-dgo="from_me">👍 Я симпатизирую: <b>${st.likes_from_me ?? 0}</b></button>
-        <button class="chip" data-dgo="mutual">💬 Взаимные: <b>${st.mutual ?? 0}</b></button></div>
-      <p class="muted">Анкету открывали: за 7 дней — ${st.views_7d ?? 0}, за 30 дней — ${st.views_30d ?? 0}. Супер-симпатий в запасе: ${mine.super_credits}.</p></article>
+    <section class="dpanel" data-dpanel="boost" ${dcabTab === "boost" ? "" : "hidden"}>
+      <article class="dcard2"><h3>Сейчас действует</h3>${running.length ? running.map((t) => `<div class="drun">${esc(t)}</div>`).join("") : '<p class="muted">Ничего не включено: анкета в обычной ленте.</p>'}</article>
+      ${gifts}
+      <div class="dsvc-grid">${["bump", "vip", "super", "invisible", "viewers"].map(svcTile).join("")}</div>
+      <article class="dcard2"><div class="dcard2-head"><h3>Баланс</h3><b>${svc.balance} ⭐</b></div>
+        <p class="muted">Сюда возвращается неиспользованная часть услуг. Баланс можно потратить на любую услугу.</p></article>
+    </section>
 
-    <article class="listing"><h3>Видимость</h3>
-      <div class="set-row"><div><b>Пауза</b><small>Скрыть анкету из лент и поиска. Симпатии и чаты остаются, модерация заново не нужна.</small></div>
-        <label class="check" style="margin:0"><input type="checkbox" id="dPause" ${mine.paused ? "checked" : ""}></label></div>
-      <div class="set-row"><div><b>Невидимка</b><small>${mine.invisible_available ? "Анкета не в лентах, но открывается по ссылке. Время VIP стоит." : "Платная услуга: включается после покупки ниже."}</small></div>
-        <label class="check" style="margin:0"><input type="checkbox" id="dInvisible" ${mine.invisible ? "checked" : ""} ${mine.invisible_available ? "" : "disabled"}></label></div></article>
+    <section class="dpanel" data-dpanel="privacy" ${dcabTab === "privacy" ? "" : "hidden"}>
+      <article class="dcard2"><h3>Видимость</h3>
+        <div class="set-row"><div><b>Пауза</b><small>Анкета скрыта из лент и поиска. Симпатии и чаты остаются, повторная проверка не нужна.</small></div>
+          <label class="check" style="margin:0"><input type="checkbox" id="dPause" ${mine.paused ? "checked" : ""}></label></div>
+        <div class="set-row"><div><b>Невидимка</b><small>${mine.invisible_available ? "Вас нет в лентах, но анкета открывается по ссылке. Время VIP на это время стоит." : "Платная услуга: включите её во вкладке «Продвижение»."}</small></div>
+          <label class="check" style="margin:0"><input type="checkbox" id="dInvisible" ${mine.invisible ? "checked" : ""} ${mine.invisible_available ? "" : "disabled"}></label></div></article>
+      <article class="dcard2"><h3>Что видят другие</h3>
+        <p class="muted">Имя, возраст, город, фото и «о себе». Контакты (ник, телефон) в анкете не показываются никогда: писать можно только после взаимной симпатии.</p></article>
+      <article class="dcard2"><h3>Приватные фото 🔒</h3>
+        <p class="muted">Видят VIP-зрители и те, с кем у вас взаимная симпатия. Каждое фото проходит проверку. Не больше 6.</p>
+        <div id="dPrivList"></div>
+        <div class="actions"><label class="btn secondary dfile">Добавить фото<input type="file" id="dPrivFile" accept="image/jpeg,image/png,image/webp" hidden></label></div></article>
+    </section>
 
-    <h3 class="muted" style="margin:14px 4px 4px">Продвижение</h3>
-    ${promos.filter((x) => !x.needs_listing).map((x) => `<article class="listing hl"><h3>🎁 ${esc(x.title)}</h3><p>${esc(x.service)}, ${x.days} дн. бесплатно</p>
-      ${x.can_claim ? `<div class="actions"><button data-dclaim="${x.id}">Получить</button></div>` : `<p class="muted">${esc(x.reason || "Выдаётся автоматически")}</p>`}</article>`).join("")}
-    ${serviceCard(opt("bump"))}${serviceCard(opt("vip"))}${serviceCard(opt("super"), `<p class="muted">В запасе: ${mine.super_credits}</p>`)}
-    <h3 class="muted" style="margin:14px 4px 4px">Возможности</h3>
-    ${serviceCard(opt("invisible"))}${serviceCard(opt("viewers"))}
-    <article class="listing"><h3>Кто смотрел анкету</h3><div id="dViewers" class="muted">…</div></article>
-    <article class="listing"><h3>Приватные фото 🔒</h3><p class="muted">Видят VIP-зрители и те, с кем взаимная симпатия. Проходят проверку. Не больше 6.</p>
-      <div class="actions"><label class="btn secondary" style="cursor:pointer;padding:10px;border-radius:10px">Добавить фото<input type="file" id="dPrivFile" accept="image/jpeg,image/png,image/webp" hidden></label></div>
-      <div id="dPrivList" class="muted"></div></article>
-    <article class="listing"><h3>Баланс: ${svc.balance} ⭐</h3><p class="muted">Сюда возвращается неиспользованная часть услуг. Тратится на любые услуги.</p>
-      <div class="actions"><button class="secondary" id="dPayments">История платежей</button></div></article>
-    <article class="listing"><h3>Удаление</h3><p class="muted">Анкета, симпатии, просмотры и приватные фото удаляются навсегда. Купленные услуги не возвращаются: перед удалением используйте их или запросите возврат у поддержки.</p>
-      <div class="actions"><button class="secondary" id="dDelete" style="color:#e55">Удалить анкету</button></div></article>`;
+    <section class="dpanel" data-dpanel="more" ${dcabTab === "more" ? "" : "hidden"}>
+      <article class="dcard2"><h3>Платежи</h3><p class="muted">Покупки, подарки, возвраты и оплата с баланса.</p>
+        <div class="actions"><button class="secondary" id="dPayments">История платежей</button></div></article>
+      <article class="dcard2"><h3>Удаление анкеты</h3><p class="muted">Анкета, симпатии, просмотры и приватные фото удаляются навсегда. Купленные услуги не возвращаются: используйте их заранее или запросите возврат у поддержки.</p>
+        <div class="actions"><button class="secondary" id="dDelete" style="color:var(--bad)">Удалить анкету</button></div></article>
+    </section></div>`;
   $("#dEdit").onclick = openMyDating;
-  if ($("#dOpenFeed")) $("#dOpenFeed").onclick = () => { showView("dating"); loadDating(); };
+  $("#dPreview").onclick = () => previewMyProfile(mine);
   $("#dPayments").onclick = () => openMenu("payments");
+  body.querySelectorAll("[data-dedit]").forEach((b) => { b.onclick = openMyDating; });
+  body.querySelectorAll("[data-dtab2]").forEach((b) => { b.onclick = () => {
+    dcabTab = b.dataset.dtab2;
+    body.querySelectorAll("[data-dpanel]").forEach((x) => { x.hidden = x.dataset.dpanel !== dcabTab; });
+    body.querySelectorAll(".dcab-tabs button").forEach((x) => x.classList.toggle("active", x.dataset.dtab2 === dcabTab));
+    $("#scroll").scrollTo({top: body.querySelector(".dcab-tabs").offsetTop - 8, behavior: "smooth"});
+  }; });
   $("#dPause").onchange = async (e) => {
     try { const r = await api("/api/dating/pause", {method: "POST", body: JSON.stringify({on: e.target.checked})}); toast(r.paused ? "Анкета на паузе: её никто не видит" : "Анкета снова в поиске"); showDatingCabinet(); }
     catch (err) { toast(err.message); e.target.checked = !e.target.checked; }
@@ -2176,17 +2236,17 @@ async function showDatingCabinet() {
     catch (err) { toast(err.message); }
   };
   api("/api/dating/viewers", {quiet: true}).then((v) => {
-    $("#dViewers").innerHTML = v.locked ? `За 30 дней смотрели: ${v.count}. Кто именно — в услуге «Кто видел анкету».`
-      : (v.items.length ? v.items.map((x) => `${x.id ? esc(x.name || "Аноним") : "Анкета закрыта"} · ${fmtDate(x.at)}`).join("<br>") : "Пока никто");
+    $("#dViewers").innerHTML = v.locked ? `За 30 дней вас открывали: <b>${v.count}</b>. Кто именно — в услуге «Кто смотрел» (вкладка «Продвижение»).`
+      : (v.items.length ? v.items.map((x) => `<div class="drun">${x.id ? "👤 " + esc(x.name || "Аноним") : "👤 Анкета закрыта"} <small class="muted">${fmtDate(x.at)}</small></div>`).join("") : "Пока никто");
   }).catch(() => {});
   api("/api/dating/private-photos/mine", {quiet: true}).then((rows) => {
-    $("#dPrivList").innerHTML = rows.length ? rows.map((r) => `${esc(({pending: "на проверке", live: "опубликовано", rejected: "отклонено"})[r.status] || r.status)} <button class="link" data-dprivdel="${r.id}">удалить</button>`).join("<br>") : "Фото нет";
+    $("#dPrivList").innerHTML = rows.length ? rows.map((r) => `<div class="drun">🔒 ${esc(({pending: "на проверке", live: "опубликовано", rejected: "отклонено"})[r.status] || r.status)} <button class="link" data-dprivdel="${r.id}">удалить</button></div>`).join("") : '<p class="muted">Фото пока нет</p>';
   }).catch(() => {});
   $("#dPrivFile").onchange = async (e) => {
     const data = new FormData(); data.append("file", e.target.files[0]);
     const headers = inTelegram ? {"X-Telegram-Init-Data": tg.initData} : {"X-Web-Session": localStorage.getItem("webSession") || ""};
     const r = await fetch("/api/dating/private-photo", {method: "POST", body: data, headers});
-    if (!r.ok) toast((await r.json()).detail || "Не удалось загрузить"); else { toast("Фото отправлено на проверку"); showDatingCabinet(); }
+    if (!r.ok) toast((await r.json()).detail || "Не удалось загрузить"); else { toast("Фото отправлено на проверку"); dcabTab = "privacy"; showDatingCabinet(); }
   };
 }
 const showDatingServices = showDatingCabinet;

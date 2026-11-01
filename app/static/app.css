@@ -607,3 +607,45 @@ body.fs1{zoom:1.1}body.fs2{zoom:1.22}
 
 .listing.ad{border:1px dashed var(--line,#d0d5dd)}
 .adlabel{display:inline-block;font-size:11px;opacity:.7;border:1px solid currentColor;border-radius:6px;padding:0 6px;margin-bottom:4px}
+
+/* ---- кабинет знакомств ---- */
+.dcab{display:grid;gap:12px;padding-bottom:24px}
+.dcab-hero{position:relative;aspect-ratio:4/5;max-height:62vh;width:100%;border-radius:22px;overflow:hidden;background:var(--soft) center/cover no-repeat;display:flex;flex-direction:column;justify-content:space-between;box-shadow:0 6px 22px #1b254026}
+.dcab-hero.nophoto{background:linear-gradient(135deg,var(--accent),#7aa8ff)}
+.dcab-hero.nophoto::before{content:"👤";position:absolute;inset:0;display:grid;place-items:center;font-size:84px;opacity:.5}
+.dcab-pills{position:relative;display:flex;flex-wrap:wrap;gap:6px;padding:12px}
+.dpill{background:#ffffffe8;color:var(--text);border-radius:999px;padding:5px 10px;font-size:12px;font-weight:700;backdrop-filter:blur(6px)}
+.dpill.ok{color:var(--ok)}.dpill.warn{color:#b9770e}.dpill.bad{color:var(--bad)}.dpill.gold{background:linear-gradient(135deg,#ffd76a,#f5a524);color:#4a3000}
+.dcab-info{position:relative;display:grid;gap:2px;padding:30px 16px 14px;color:#fff;background:linear-gradient(transparent,#000c)}
+.dcab-info b{font-size:22px}.dcab-info span{font-size:14px;opacity:.92}
+.dtags{display:flex;flex-wrap:wrap;gap:6px}
+.dtag{background:var(--soft);color:var(--accent);border-radius:999px;padding:5px 10px;font-size:12px;font-weight:600}
+.dcab-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.dcab-actions button{padding:12px 10px;border-radius:14px;border:0;font-weight:700;background:var(--accent);color:var(--accent-text)}
+.dcab-actions button.secondary{background:var(--soft);color:var(--accent)}
+.dalert{display:grid;gap:2px;padding:12px 14px;border-radius:14px;background:#fff6e5;color:#7a4b00;font-size:13px}
+.dalert.bad{background:#fdecec;color:#9b1c1f}.dalert b{font-size:14px}
+.dcab-tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.dcab-tile{display:grid;gap:2px;justify-items:center;text-align:center;padding:12px 4px;border-radius:14px;border:1px solid var(--border);background:var(--card);font-size:11px;color:var(--hint)}
+.dcab-tile b{font-size:21px;color:var(--text)}
+button.dcab-tile:active{transform:scale(.97)}
+.dcab-tabs{display:flex;gap:4px;padding:4px;border-radius:14px;background:var(--soft);position:sticky;top:0;z-index:2}
+.dcab-tabs button{flex:1;border:0;background:transparent;border-radius:10px;padding:9px 4px;font-size:13px;font-weight:600;color:var(--hint)}
+.dcab-tabs button.active{background:var(--card);color:var(--accent);box-shadow:0 1px 4px #1b25401f}
+.dpanel{display:grid;gap:10px}
+.dcard2{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:14px;display:grid;gap:8px}
+.dcard2 h3{margin:0;font-size:15px}.dcard2 p{margin:0}
+.dcard2-head{display:flex;justify-content:space-between;align-items:center}.dcard2-head b{font-size:18px;color:var(--accent)}
+.dbar{height:8px;border-radius:6px;background:var(--soft);overflow:hidden}.dbar i{display:block;height:100%;background:linear-gradient(90deg,var(--accent),#5b9bff);border-radius:6px}
+.dtodo{display:flex;align-items:center;gap:8px;font-size:14px}.dtodo span:nth-child(2){flex:1}.dtodo.done{color:var(--hint)}.dtodo button{border:0;background:none;color:var(--accent);font-weight:700}
+.drun{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);font-size:14px}.drun:last-child{border-bottom:0}
+.dsvc-grid{display:grid;gap:10px}
+.dsvc{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:14px;display:grid;gap:8px}
+.dsvc-head{display:flex;gap:10px;align-items:center}.dsvc-head b{display:block}.dsvc-head small{color:var(--hint)}
+.dsvc-ic{width:42px;height:42px;border-radius:13px;background:var(--soft);display:grid;place-items:center;font-size:22px}
+.dsvc p{margin:0;font-size:13px;color:var(--hint)}.dsvc p.dok{color:var(--ok);font-weight:600}
+.dgift{display:grid;gap:4px;padding:14px;border-radius:16px;background:linear-gradient(135deg,#fff3d6,#ffe0e8);color:#5b3b00}
+.dgift button{justify-self:start;border:0;border-radius:10px;padding:8px 14px;background:var(--accent);color:var(--accent-text);font-weight:700}
+.dfile{cursor:pointer;padding:10px 14px;border-radius:12px;display:inline-block}
+.dsnote{background:var(--soft);color:var(--accent);border-radius:12px;padding:8px 12px;font-size:13px;margin:0 0 10px}
+.dsheet .dtags{margin-top:10px}
