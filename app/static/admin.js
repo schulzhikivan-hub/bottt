@@ -113,6 +113,7 @@ const TABS = [
   {key: "rules", label: "📐 Правила", roles: ADM, title: "Правила: выдача, платные места, сроки, хранение"},
   {sep: "Система", roles: ADM},
   {key: "errors", label: "🐞 Ошибки в приложении", roles: ADM, title: "Ошибки, которые видели пользователи"},
+  {key: "duty", label: "🗓 Дежурства", roles: SUPPORT, title: "Дежурства и эскалация: кто сегодня отвечает"},
   {key: "security", label: "🛡 Безопасность", roles: SUP, title: "Безопасность: функции, просмотры данных, входы"},
   {key: "audit", label: "📜 Журнал", roles: ADM, title: "Журнал действий"},
   {key: "settings", label: "⚙️ Выгрузки", roles: ADM, title: "Выгрузки"},
@@ -1482,9 +1483,39 @@ $("#main").addEventListener("click", async (e) => {
     }
   } catch (err) { say(err.message); }
 });
+
+// ---- дежурства ----
+async function loadDuty() {
+  const d = await api("/api/admin/duty");
+  const who = (id) => (id ? "…" + esc(String(id).slice(-4)) : "никто");
+  const canEdit = ["admin", "super_admin"].includes(role());
+  $("#main").innerHTML = `<div class="cols" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">${Object.entries(d.areas).map(([k, a]) => `<div class="card"><small class="muted">Сейчас дежурит</small><h3 style="margin:2px 0">${esc(a.title)}</h3><b>${who(a.on_duty)}</b>
+      ${a.on_duty ? "" : '<div class="muted">Никого: уведомления идут всем с нужной ролью</div>'}</div>`).join("")}</div>
+    ${d.open_alerts.length ? `<div class="card"><h3>Ждут ответа</h3>${d.open_alerts.map((a) => `<div class="row" data-aid="${a.id}"><span class="badge">${a.level === 0 ? "дежурный" : a.level === 1 ? "вся область" : "суперадмины"}</span> ${esc(a.text)} <span class="muted">${esc(fmt(a.at))}</span><button class="act gray" data-ack>Принято</button></div>`).join("")}</div>` : ""}
+    ${canEdit ? `<div class="card"><h3>Назначить смену</h3><div class="gridform"><label>Область<select id="dArea">${Object.entries(d.areas).map(([k, a]) => `<option value="${k}">${esc(a.title)}</option>`).join("")}</select></label>
+      <label>Кто<select id="dWho">${d.admins.map((a) => `<option value="${esc(a.tg_id)}">…${esc(a.tg_id.slice(-4))} · ${esc(a.role)}</option>`).join("")}</select></label>
+      <label>С<input id="dFrom" type="datetime-local"></label><label>До<input id="dTo" type="datetime-local"></label></div>
+      <button class="act" id="dAdd">Назначить</button></div>` : ""}
+    <div class="card"><h3>Ближайшие смены</h3>${d.shifts.length ? `<table><tr><th>Область</th><th>Кто</th><th>С</th><th>До</th><th></th></tr>${d.shifts.map((s) => `<tr data-sid="${s.id}"><td>${esc(d.areas[s.area]?.title || s.area)}</td><td>${who(s.tg_id)} <small class="muted">${esc(s.role)}</small></td>
+      <td>${esc(fmt(s.from))}</td><td>${esc(fmt(s.to))}</td><td>${canEdit ? '<button class="act gray" data-sdel>Убрать</button>' : ""}</td></tr>`).join("")}</table>` : '<p class="muted">Смен нет.</p>'}
+      <p class="muted">Если дежурный не открыл панель за ${"30"} минут, сообщение получает вся область, через час — суперадмины (время в «Правилах» → «Сотрудники»).</p></div>
+    <div class="card"><h3>Кто что получает</h3><table><tr><th>Событие</th><th>Область</th><th>Роли</th></tr>${d.matrix.map((m) => `<tr><td>${esc(m.what)}</td><td>${esc(m.area)}</td><td>${m.roles.map(esc).join(", ")}</td></tr>`).join("")}</table></div>`;
+}
+$("#main").addEventListener("click", async (e) => {
+  try {
+    if (e.target.id === "dAdd") {
+      await post("/api/admin/duty", {area: $("#dArea").value, tg_id: $("#dWho").value, starts_at: new Date($("#dFrom").value).toISOString(), ends_at: new Date($("#dTo").value).toISOString()});
+      say("Смена назначена"); reload();
+    }
+    const del = e.target.closest("[data-sdel]");
+    if (del && confirm("Убрать смену?")) { await api(`/api/admin/duty/${del.closest("[data-sid]").dataset.sid}`, {method: "DELETE"}); reload(); }
+    const ack = e.target.closest("[data-ack]");
+    if (ack) { await post(`/api/admin/alerts/${ack.closest("[data-aid]").dataset.aid}/ack`); reload(); }
+  } catch (err) { say(err.message); }
+});
 const LOADERS = {dash: loadDash, listings: loadListings, jobs: loadSection, housing: loadSection, market: loadSection, dating: loadDating,
                  employers: loadEmployers, reports: loadReports, reviews: loadReviews, resumes: loadResumes, support: loadSupport, texts: loadTexts, users: loadUsers, community: loadCommunity, guide: loadGuide,
-                 marketing: loadMarketing, payments: loadPayments, pricing: loadPricing, rules: loadRules, security: loadSecurity, batches: loadBatches, refunds: loadRefunds, companies: loadCompanies, reportsm: loadMoneyReports, stest: loadSearchTest, audit: loadAudit, errors: loadErrors, settings: loadSettings, admins: loadAdmins};
+                 marketing: loadMarketing, payments: loadPayments, pricing: loadPricing, rules: loadRules, duty: loadDuty, security: loadSecurity, batches: loadBatches, refunds: loadRefunds, companies: loadCompanies, reportsm: loadMoneyReports, stest: loadSearchTest, audit: loadAudit, errors: loadErrors, settings: loadSettings, admins: loadAdmins};
 
 // Старт: есть сессия — открываем; открыто из Telegram — входим сами; иначе показываем кнопку
 if (session()) startApp();

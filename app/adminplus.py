@@ -23,6 +23,9 @@ router = APIRouter()
 # ---------- staff alerts ----------
 def notify_staff(db: Session, text: str, key: str, roles: tuple[str, ...] = MOD) -> int:
     """Tell the staff members who can handle it. At most one message per kind per 10 minutes for each person."""
+    from app import duty
+    if duty.route(db, text, key):                    # somebody is on duty for this area: only they are told (and escalation watches it)
+        return 1
     sent = 0
     for adm in db.scalars(select(Admin).where(Admin.active.is_(True), Admin.role.in_(roles))).all():
         try:
@@ -43,6 +46,8 @@ def _hours(db: Session, stmt) -> int:
 @router.get("/api/admin/counters")
 def counters(actor: str = Depends(staff(*SUPPORT)), db: Session = Depends(get_db)):
     from app.models import DatingProfile
+    from app import duty
+    duty.mark_seen(db, actor)                       # opening the panel is «seen» for the duty person
     unblock_expired(db)
     c = lambda stmt: db.scalar(stmt) or 0   # noqa: E731
     pending = or_(Listing.status == "pending", (Listing.status == "approved") & (Listing.has_edit.is_(True)))
