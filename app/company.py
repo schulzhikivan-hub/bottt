@@ -509,7 +509,7 @@ def admin_companies(status: str = "pending", actor: str = Depends(staff(*MOD)), 
     for c in db.scalars(stmt).all():
         owner = db.get(User, c.owner_tg_id)
         out.append({"id": c.id, "name": c.name, "reg_no": c.reg_no, "status": c.status, "note": c.note, "owner": c.owner_tg_id,
-                    "owner_name": owner.display_name if owner else "", "balance": c.balance_stars, "created_at": c.created_at.isoformat(),
+                    "owner_name": owner.display_name if owner else "", "description": c.description, "website": c.website, "city": c.city, "balance": c.balance_stars, "created_at": c.created_at.isoformat(),
                     "listings": db.scalar(select(func.count()).select_from(Listing).where(Listing.company_id == c.id)) or 0,
                     "members": db.scalar(select(func.count()).select_from(CompanyMember).where(CompanyMember.company_id == c.id)) or 0})
     return out

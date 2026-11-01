@@ -816,12 +816,53 @@ $("#main").addEventListener("click", async (e) => {
 });
 
 // ---- резюме ----
+let resFilter = "pending", resQuery = "";
 async function loadResumes() {
-  const rows = await api("/api/admin/resumes?status=pending");
-  $("#main").innerHTML = (rows.length ? '<div class="toolbar"><button class="act ok" id="rBulkOk">Опубликовать выбранные</button></div>' : "") + (rows.length ? rows.map((r) => `<div class="card" data-owner="${esc(r.owner)}"><label style="float:right"><input type="checkbox" data-rpick> выбрать</label><b>${esc(r.position)}</b> · ${esc(r.city)} · виза ${esc(r.visa || "—")} · от ${r.salary_from ?? "—"} ₩
-    <div class="meta">пользователь ${esc(r.owner)} · ${esc(r.updated || "")}</div><p>${esc(r.experience)}</p><p>${esc(r.about)}</p>
-    <button class="act ok" data-cv="approve">Опубликовать</button><button class="act no" data-cv="reject">Отклонить</button> <button class="act gray" data-gu="${esc(r.owner)}">Управление</button></div>`).join("") : '<div class="card muted">Новых резюме нет.</div>');
+  const rows = await api(`/api/admin/resumes-all?status=${resFilter}&q=${encodeURIComponent(resQuery)}`);
+  window.__res = Object.fromEntries(rows.map((r) => [r.owner, r]));
+  const ST = {pending: "на проверке", approved: "опубликовано", rejected: "отклонено", hidden: "скрыто"};
+  $("#main").innerHTML = `<div class="card"><div class="row">${[["pending", "На проверке"], ["approved", "Опубликованные"], ["hidden", "Скрытые"], ["rejected", "Отклонённые"], ["all", "Все"]]
+    .map(([k, n]) => `<button class="act ${k === resFilter ? "" : "gray"}" data-resf="${k}">${n}</button>`).join("")}
+    <input id="resQ" placeholder="Поиск: должность, город, ID" value="${esc(resQuery)}" style="min-width:200px"><button class="act gray" id="resGo">Найти</button></div></div>` +
+    (resFilter === "pending" && rows.length ? '<div class="toolbar"><button class="act ok" id="rBulkOk">Опубликовать выбранные</button></div>' : "") +
+    (rows.length ? rows.map((r) => `<div class="card" data-owner="${esc(r.owner)}">${r.status === "pending" ? '<label style="float:right"><input type="checkbox" data-rpick> выбрать</label>' : ""}<b>${esc(r.position)}</b> · ${esc(r.city)} · виза ${esc(r.visa || "—")} · от ${r.salary_from ?? "—"} ₩ · <span class="badge">${esc(ST[r.status] || r.status)}</span>
+    <div class="meta">${esc(r.name || "")} ${esc(r.owner)} · ${esc(fmt(r.updated))}${r.note ? " · " + esc(r.note) : ""}</div><p>${esc(r.experience)}</p><p>${esc(r.about)}</p>
+    ${r.status !== "approved" ? '<button class="act ok" data-cv="approve">Опубликовать</button>' : '<button class="act gray" data-cv="hide">Скрыть</button>'}${r.status !== "rejected" ? '<button class="act no" data-cv="reject">Отклонить</button>' : ""}
+    <button class="act" data-resedit="${esc(r.owner)}">✏ Править</button> <button class="act gray" data-gu="${esc(r.owner)}">Управление человеком</button></div>`).join("") : '<div class="card muted">Резюме нет.</div>');
 }
+function openResumeDrawer(owner) {
+  const r = (window.__res || {})[owner]; if (!r) return;
+  openDrawer(`Резюме · ${esc(r.name || owner)}`, `<div class="gridform" data-resbox="${esc(owner)}">
+    <label>Должность<input data-rf="position" value="${esc(r.position)}" maxlength="80"></label><label>Город<input data-rf="city" value="${esc(r.city)}"></label>
+    <label>Виза<input data-rf="visa" value="${esc(r.visa || "")}" maxlength="8"></label><label>Зарплата от, ₩<input data-rf="salary_from" type="number" value="${r.salary_from ?? ""}"></label>
+    <label class="wide">Опыт<textarea data-rf="experience" rows="3" maxlength="300">${esc(r.experience)}</textarea></label>
+    <label class="wide">О себе<textarea data-rf="about" rows="4" maxlength="700">${esc(r.about)}</textarea></label></div>
+    <div class="row" data-resbox="${esc(owner)}"><button class="act ok" data-ressave>💾 Сохранить</button><button class="act no" data-resdel>🗑 Удалить резюме…</button></div>`);
+}
+$("#main").addEventListener("click", async (e) => {
+  try {
+    const f = e.target.closest("[data-resf]");
+    if (f) { resFilter = f.dataset.resf; reload(); return; }
+    if (e.target.id === "resGo") { resQuery = $("#resQ").value.trim(); reload(); return; }
+    const ed = e.target.closest("[data-resedit]");
+    if (ed) { openResumeDrawer(ed.dataset.resedit); return; }
+    const box = e.target.closest("[data-resbox]");
+    if (!box) return;
+    const owner = box.dataset.resbox;
+    if (e.target.closest("[data-ressave]")) {
+      const body = {};
+      document.querySelectorAll("#drawer [data-rf]").forEach((el) => { const v = el.type === "number" ? (el.value === "" ? null : Number(el.value)) : el.value; if (v !== null) body[el.dataset.rf] = v; });
+      body.reason = askOpt("Что поправили (человек увидит)") || "";
+      const r = await api(`/api/admin/resumes/${owner}/edit`, {method: "PUT", body: JSON.stringify(body)});
+      say("Сохранено: " + (r.changed.join(", ") || "без изменений")); closeDrawer(); reload();
+    }
+    if (e.target.closest("[data-resdel]")) {
+      const why = ask("Причина удаления (человек её увидит)"); if (!why) return;
+      if (!confirm("Удалить резюме?")) return;
+      await api(`/api/admin/resumes/${owner}?reason=${encodeURIComponent(why)}`, {method: "DELETE"}); say("Удалено"); closeDrawer(); reload();
+    }
+  } catch (err) { say(err.message); }
+});
 $("#main").addEventListener("click", async (e) => {
   const b = e.target.closest("[data-cv]");
   if (!b) return;
@@ -838,11 +879,33 @@ $("#main").addEventListener("click", async (e) => {
 async function loadReviews() {
   const [shown, hidden] = await Promise.all([api("/api/admin/reviews?status=published"), api("/api/admin/reviews?status=hidden")]);
   const row = (r, act, label) => `<div class="card" data-revid="${r.id}"><b class="rating">${"★".repeat(r.rating)}</b> · «${esc(r.listing_title || "#" + r.listing_id)}» · о ${who(r.target_name, r.target)} · от ${who(r.reviewer_name, r.reviewer)}
-    <div class="meta">${esc(fmt(r.created_at))}${r.tags ? " · " + esc(r.tags) : ""}</div><p>${esc(r.text || "(без текста)")}</p>${r.reply ? `<p class="muted"><b>Ответ автора:</b> ${esc(r.reply)}</p>` : ""}<button class="act gray" data-gu="${esc(r.reviewer)}">Автор отзыва</button> <button class="act gray" data-preview="${r.listing_id}">👁 Объявление</button> <button class="act ${act === "hide" ? "no" : "ok"}" data-rev="${act}">${label}</button></div>`;
+    <div class="meta">${esc(fmt(r.created_at))}${r.tags ? " · " + esc(r.tags) : ""}</div><p>${esc(r.text || "(без текста)")}</p>${r.reply ? `<p class="muted"><b>Ответ автора:</b> ${esc(r.reply)}</p>` : ""}<button class="act gray" data-gu="${esc(r.reviewer)}">Автор отзыва</button> <button class="act gray" data-preview="${r.listing_id}">👁 Объявление</button> <button class="act" data-revedit>✏ Править текст</button> <button class="act ${act === "hide" ? "no" : "ok"}" data-rev="${act}">${label}</button></div>`;
+  window.__revs = Object.fromEntries([...shown, ...hidden].map((r) => [r.id, r]));
   $("#main").innerHTML = `<h3>Опубликованы</h3>` + (shown.length ? shown.map((r) => row(r, "hide", "Скрыть")).join("") : '<div class="card muted">Пока нет.</div>') +
     `<h3>Скрытые</h3>` + (hidden.length ? hidden.map((r) => row(r, "show", "Вернуть")).join("") : '<div class="card muted">Нет.</div>');
 }
 $("#main").addEventListener("click", async (e) => {
+  try {
+    const ed = e.target.closest("[data-revedit]");
+    if (ed) {
+      const id = ed.closest("[data-revid]").dataset.revid, r = (window.__revs || {})[id]; if (!r) return;
+      openDrawer(`Отзыв #${id}`, `<p class="muted">Меняются только слова (убрать грубость, телефон). Оценку ставит покупатель, она остаётся: ${"★".repeat(r.rating)}</p>
+        <div class="gridform" data-revbox="${id}"><label class="wide">Текст отзыва<textarea data-rvf="text" rows="4" maxlength="500">${esc(r.text)}</textarea></label>
+        <label class="wide">Ответ автора объявления<textarea data-rvf="reply" rows="3" maxlength="500">${esc(r.reply || "")}</textarea></label></div>
+        <div class="row" data-revbox="${id}"><button class="act ok" data-revsave>💾 Сохранить</button><button class="act no" data-revdel>🗑 Удалить отзыв</button></div>`);
+      return;
+    }
+    const bx = e.target.closest("[data-revbox]");
+    if (bx) {
+      const id = bx.dataset.revbox;
+      if (e.target.closest("[data-revsave]")) {
+        const body = {}; document.querySelectorAll("#drawer [data-rvf]").forEach((el) => { body[el.dataset.rvf] = el.value; });
+        const r = await api(`/api/admin/reviews/${id}/edit`, {method: "PUT", body: JSON.stringify(body)}); say("Сохранено: " + (r.changed.join(", ") || "без изменений")); closeDrawer(); reload();
+      }
+      if (e.target.closest("[data-revdel]") && confirm("Удалить отзыв насовсем? Скрыть можно без удаления.")) { await api(`/api/admin/reviews/${id}`, {method: "DELETE"}); say("Удалено"); closeDrawer(); reload(); }
+      return;
+    }
+  } catch (err) { say(err.message); return; }
   const b = e.target.closest("[data-rev]");
   if (!b) return;
   try { await post(`/api/admin/reviews/${b.closest("[data-revid]").dataset.revid}/${b.dataset.rev}`); reload(); } catch (err) { say(err.message); }
@@ -1486,6 +1549,7 @@ async function loadSearchTest() {
 let coFilter = "pending";
 async function loadCompanies() {
   const rows = await api(`/api/admin/companies?status=${coFilter}`);
+  window.__cos = Object.fromEntries(rows.map((c) => [c.id, c]));
   const ST = {pending: "на проверке", verified: "проверена", rejected: "отклонена", suspended: "приостановлена"};
   $("#main").innerHTML = `<div class="card"><div class="row">${[["pending", "На проверке"], ["verified", "Проверенные"], ["suspended", "Приостановленные"], ["rejected", "Отклонённые"], ["all", "Все"]]
     .map(([k, n]) => `<button class="act ${k === coFilter ? "" : "gray"}" data-cof="${k}">${n}</button>`).join("")}</div>
@@ -1493,15 +1557,38 @@ async function loadCompanies() {
       <td>${esc(c.owner_name || c.owner)}</td><td>${c.listings}</td><td>${c.members}</td><td>${c.balance} ⭐</td><td>${esc(ST[c.status] || c.status)}${c.note ? `<br><small>${esc(c.note)}</small>` : ""}</td>
       <td>${["pending", "suspended", "rejected"].includes(c.status) ? '<button class="act ok" data-codec="approve">Подтвердить</button>' : ""}
       ${["pending"].includes(c.status) ? '<button class="act no" data-codec="reject">Отказать</button>' : ""}${c.status === "verified" ? '<button class="act no" data-codec="suspend">Приостановить</button>' : ""}
-      <button class="act gray" data-cocredit>+ баланс</button></td></tr>`).join("") || '<tr><td colspan="9" class="muted">Пусто</td></tr>'}</table></div>`;
+      <button class="act gray" data-cocredit>+ баланс</button> <button class="act" data-coedit>✏ Править</button></td></tr>`).join("") || '<tr><td colspan="9" class="muted">Пусто</td></tr>'}</table></div>`;
 }
 $("#main").addEventListener("click", async (e) => {
   const f = e.target.closest("[data-cof]");
   if (f) { coFilter = f.dataset.cof; reload(); return; }
   const row = e.target.closest("[data-coid]");
-  if (!row) return;
+  if (!row) {
+    const bx = e.target.closest("[data-cobox]");
+    if (!bx) return;
+    try {
+      const id = bx.dataset.cobox;
+      if (e.target.closest("[data-cosave]")) {
+        const body = {}; document.querySelectorAll("#drawer [data-cof2]").forEach((el) => { body[el.dataset.cof2] = el.value; });
+        body.reason = askOpt("Что поправили (владелец увидит)") || "";
+        const r = await api(`/api/admin/companies/${id}/edit`, {method: "PUT", body: JSON.stringify(body)}); say("Сохранено: " + (r.changed.join(", ") || "без изменений")); closeDrawer(); reload();
+      }
+      if (e.target.closest("[data-cologo]") && confirm("Убрать логотип компании?")) { await api(`/api/admin/companies/${id}/logo`, {method: "DELETE"}); say("Логотип убран"); }
+    } catch (err) { say(err.message); }
+    return;
+  }
   try {
     const id = row.dataset.coid, d = e.target.closest("[data-codec]");
+    if (e.target.closest("[data-coedit]")) {
+      const c = (window.__cos || {})[id]; if (!c) return;
+      openDrawer(`Компания #${c.id} · ${esc(c.name)}`, `<div class="gridform" data-cobox="${c.id}"><label>Название<input data-cof2="name" value="${esc(c.name)}" maxlength="120"></label>
+        <label>Рег. номер<input data-cof2="reg_no" value="${esc(c.reg_no)}"></label><label>Город<input data-cof2="city" value="${esc(c.city || "")}"></label><label>Сайт<input data-cof2="website" value="${esc(c.website || "")}"></label>
+        <label class="wide">Описание<textarea data-cof2="description" rows="4" maxlength="2000">${esc(c.description || "")}</textarea></label>
+        <label class="wide">Комментарий владельцу<input data-cof2="note" value="${esc(c.note || "")}" maxlength="300"></label></div>
+        <div class="row" data-cobox="${c.id}"><button class="act ok" data-cosave>💾 Сохранить</button><button class="act gray" data-cologo>Убрать логотип</button></div>
+        <p class="muted">Владелец: <a href="#" data-gu="${esc(c.owner)}">${esc(c.owner_name || c.owner)}</a> · объявлений ${c.listings} · команда ${c.members} · баланс ${c.balance} ⭐</p>`);
+      return;
+    }
     if (d) {
       let reason = "";
       if (["reject", "suspend"].includes(d.dataset.codec)) { reason = prompt("Причина (её увидит владелец)"); if (!reason) return; }
