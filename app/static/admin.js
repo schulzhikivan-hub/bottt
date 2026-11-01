@@ -86,6 +86,7 @@ const ADM = ["admin", "super_admin"];
 const SUP = ["super_admin"];
 const TABS = [
   {key: "dash", label: "📊 Главная", roles: ADM, title: "Главная"},
+  {key: "batches", label: "🧰 Пакеты", roles: MOD, title: "Массовые действия: посчитать, подтвердить, следить, отменить"},
   {key: "listings", label: "📋 Модерация", roles: MOD, title: "Очередь модерации"},
   {key: "jobs", label: "💼 Вакансии", roles: MOD, title: "Вакансии", cat: "job"},
   {key: "housing", label: "🏠 Жильё", roles: MOD, title: "Жильё", cat: "housing"},
@@ -112,6 +113,7 @@ const TABS = [
   {key: "rules", label: "📐 Правила", roles: ADM, title: "Правила: выдача, платные места, сроки, хранение"},
   {sep: "Система", roles: ADM},
   {key: "errors", label: "🐞 Ошибки в приложении", roles: ADM, title: "Ошибки, которые видели пользователи"},
+  {key: "security", label: "🛡 Безопасность", roles: SUP, title: "Безопасность: функции, просмотры данных, входы"},
   {key: "audit", label: "📜 Журнал", roles: ADM, title: "Журнал действий"},
   {key: "settings", label: "⚙️ Выгрузки", roles: ADM, title: "Выгрузки"},
   {key: "admins", label: "🧑‍💼 Сотрудники", roles: SUP, title: "Сотрудники"},
@@ -1418,9 +1420,71 @@ $("#main").addEventListener("click", async (e) => {
     say("Готово"); reload();
   } catch (err) { say(err.message); }
 });
+
+// ---- безопасность ----
+async function loadSecurity() {
+  const [flags, pii, logins] = await Promise.all([api("/api/admin/flags"), api("/api/admin/security/pii-views?limit=60"), api("/api/admin/security/logins?limit=40")]);
+  $("#main").innerHTML = `<div class="card"><h3>Функции: включить без релиза</h3><p class="muted">«Только сотрудникам» — чтобы проверить на себе до запуска для всех. Каждое переключение записывается в журнал.</p>
+    ${flags.map((f) => `<div class="row" style="justify-content:space-between;border-bottom:1px solid var(--line);padding:8px 0"><div><b>${esc(f.title)}</b><div class="muted">${esc(f.hint)}</div></div>
+      <select data-flag="${esc(f.key)}">${Object.entries(f.states).map(([k, v]) => `<option value="${k}" ${k === f.state ? "selected" : ""}>${esc(v)}</option>`).join("")}</select></div>`).join("")}</div>
+    <div class="card"><h3>Кто смотрел личные данные</h3>${pii.by_staff.length ? `<p class="muted">Всего в списке: ${pii.items.length}. Больше всех: ${pii.by_staff.slice(0, 3).map((x) => "…" + esc(x.staff.slice(-4)) + " — " + x.views).join(", ")}</p>` : '<p class="muted">Пока никто.</p>'}
+      <table><tr><th>Когда</th><th>Сотрудник</th><th>Что открыл</th></tr>${pii.items.map((i) => `<tr><td>${esc(fmt(i.at))}</td><td>…${esc(i.staff.slice(-4))}</td><td>${esc(i.kind === "listing" ? "объявление №" : i.kind === "user" ? "человек " : i.kind)}${esc(i.id)}</td></tr>`).join("")}</table></div>
+    <div class="card"><h3>Входы сотрудников</h3><table><tr><th>Когда</th><th>Кто</th><th>Как</th><th>Адрес</th><th>Устройство</th></tr>${logins.map((l) => `<tr><td>${esc(fmt(l.at))}</td><td>…${esc(l.staff.slice(-4))}</td><td>${esc(l.how)}</td><td>${esc(l.ip)}</td><td>${esc(l.device)}</td></tr>`).join("")}</table></div>`;
+}
+$("#main").addEventListener("change", async (e) => {
+  const f = e.target.closest("[data-flag]");
+  if (!f) return;
+  try { await api(`/api/admin/flags/${f.dataset.flag}`, {method: "PUT", body: JSON.stringify({state: f.value})}); say("Сохранено"); }
+  catch (err) { say(err.message); reload(); }
+});
+
+// ---- пакеты: массовые действия ----
+let batchPrev = null;
+async function loadBatches() {
+  const recent = await api("/api/admin/batches");
+  $("#main").innerHTML = `<div class="card"><h3>Новый пакет</h3><p class="muted">Действие применяется ко ВСЕМУ результату фильтра (до 500 объявлений), а не к одной странице. Сначала «Посчитать», потом подтвердите числом.</p>
+    <div class="gridform"><label>Раздел<select id="bCat"><option value="">все</option><option value="job">Работа</option><option value="housing">Жильё</option><option value="marketplace">Барахолка</option></select></label>
+    <label>Статус<select id="bStatus"><option value="pending">на проверке</option><option value="approved">опубликовано</option><option value="hidden">скрыто</option><option value="rejected">отклонено</option></select></label>
+    <label>Слова в тексте<input id="bQ" maxlength="60"></label>
+    <label>Действие<select id="bDec"><option value="approve">Одобрить</option><option value="reject">Отклонить</option><option value="hide">Скрыть</option><option value="show">Вернуть в показ</option></select></label>
+    <label>Причина (для отказа и скрытия)<input id="bReason" maxlength="300"></label></div>
+    <div class="row"><button class="act" id="bCount">Посчитать</button></div><div id="bOut"></div></div>
+    <div class="card"><h3>Последние пакеты</h3>${recent.length ? `<table><tr><th>№</th><th>Действие</th><th>Готово</th><th>Статус</th><th></th></tr>${recent.map((b) => `<tr data-bid="${b.id}"><td>${esc(b.id)}</td><td>${esc(b.decision)}</td><td>${b.done}/${b.total}${b.failed.length ? ` · ошибок ${b.failed.length}` : ""}</td><td>${esc(b.status)}</td>
+      <td>${b.can_undo ? '<button class="act gray" data-bundo>Отменить пакет</button>' : ""}</td></tr>`).join("")}</table>` : '<p class="muted">Пакетов ещё не было.</p>'}</div>`;
+}
+const batchTarget = () => ({category: $("#bCat").value || null, status: $("#bStatus").value, q: $("#bQ").value});
+$("#main").addEventListener("click", async (e) => {
+  try {
+    if (e.target.id === "bCount") {
+      batchPrev = await post("/api/admin/batches/preview", batchTarget());
+      $("#bOut").innerHTML = `<p><b>Затронется: ${batchPrev.count}</b>${batchPrev.skipped.length ? ` · пропущено ${batchPrev.skipped.length} (${[...new Set(batchPrev.skipped.map((s) => s.why))].join("; ")})` : ""}</p>
+        ${batchPrev.count ? `<div class="row"><input id="bConfirm" type="number" placeholder="Введите число ${batchPrev.count}" style="width:200px"><button class="act no" id="bStart">Запустить</button></div>` : ""}<div id="bProg"></div>`;
+    }
+    if (e.target.id === "bStart") {
+      const b = await post("/api/admin/batches", {target: batchTarget(), decision: $("#bDec").value, reason: $("#bReason").value, confirm_count: Number($("#bConfirm").value)});
+      let cur = b;
+      $("#bProg").innerHTML = `<div class="card"><div style="height:10px;background:var(--surface2);border-radius:6px;overflow:hidden"><i id="bBar" style="display:block;height:100%;width:0;background:var(--grad)"></i></div><p id="bTxt" class="muted"></p><button class="act gray" id="bStop">Остановить</button></div>`;
+      window.__bStop = false;
+      while (cur.status === "running" && !window.__bStop) {
+        cur = await post(`/api/admin/batches/${b.id}/step`);
+        $("#bBar").style.width = Math.round(cur.done / cur.total * 100) + "%";
+        $("#bTxt").textContent = `Готово ${cur.done} из ${cur.total}`;
+      }
+      if (window.__bStop) await post(`/api/admin/batches/${b.id}/stop`);
+      say("Пакет завершён"); loadBatches();
+    }
+    if (e.target.id === "bStop") window.__bStop = true;
+    const u = e.target.closest("[data-bundo]");
+    if (u) {
+      if (!confirm("Вернуть всё, что изменил этот пакет (кроме того, что потом поменяли отдельно)?")) return;
+      const r = await post(`/api/admin/batches/${u.closest("[data-bid]").dataset.bid}/undo`);
+      say(`Возвращено ${r.returned}, не тронуто ${r.left_as_is}`); loadBatches();
+    }
+  } catch (err) { say(err.message); }
+});
 const LOADERS = {dash: loadDash, listings: loadListings, jobs: loadSection, housing: loadSection, market: loadSection, dating: loadDating,
                  employers: loadEmployers, reports: loadReports, reviews: loadReviews, resumes: loadResumes, support: loadSupport, texts: loadTexts, users: loadUsers, community: loadCommunity, guide: loadGuide,
-                 marketing: loadMarketing, payments: loadPayments, pricing: loadPricing, rules: loadRules, refunds: loadRefunds, companies: loadCompanies, reportsm: loadMoneyReports, stest: loadSearchTest, audit: loadAudit, errors: loadErrors, settings: loadSettings, admins: loadAdmins};
+                 marketing: loadMarketing, payments: loadPayments, pricing: loadPricing, rules: loadRules, security: loadSecurity, batches: loadBatches, refunds: loadRefunds, companies: loadCompanies, reportsm: loadMoneyReports, stest: loadSearchTest, audit: loadAudit, errors: loadErrors, settings: loadSettings, admins: loadAdmins};
 
 // Старт: есть сессия — открываем; открыто из Telegram — входим сами; иначе показываем кнопку
 if (session()) startApp();

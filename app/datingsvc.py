@@ -149,6 +149,8 @@ class ProfileInvoiceIn(BaseModel):
 
 @router.post("/api/dating/invoice")
 def profile_invoice(payload: ProfileInvoiceIn, user_id: str = Depends(writer), db: Session = Depends(get_db)):
+    from app import security
+    security.require_flag(db, "dating_services", user_id)
     p = profile_of(db, user_id)
     if p is None:
         raise HTTPException(404, "Сначала заполните анкету")
