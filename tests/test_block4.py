@@ -157,7 +157,7 @@ def test_config_endpoint_never_crashes_without_telegram(client, monkeypatch):
     from app import webauth
     main._config_cache.clear()
     monkeypatch.setattr(webauth, "bot_username", lambda: (_ for _ in ()).throw(RuntimeError("no network")))
-    assert client.get("/api/config").json() == {"bot": "", "rates": {}}
+    assert {k: v for k, v in client.get("/api/config").json().items() if k != "build"} == {"bot": "", "rates": {}}
     monkeypatch.setattr(webauth, "bot_username", lambda: "korea_hub_bot")
     main._config_cache.clear()
-    assert client.get("/api/config").json() == {"bot": "korea_hub_bot", "rates": {}}
+    assert {k: v for k, v in client.get("/api/config").json().items() if k != "build"} == {"bot": "korea_hub_bot", "rates": {}}

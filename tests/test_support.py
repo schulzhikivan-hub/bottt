@@ -110,3 +110,24 @@ def test_service_worker_and_pages_are_served():
     assert r.status_code == 200 and r.headers["service-worker-allowed"] == "/" and "javascript" in r.headers["content-type"]
     html = c.get("/").text
     assert 'data-menu="support"' in html and 'id="welcomeSheet"' in html
+
+
+def test_pages_ask_for_versioned_files_and_never_cache_stale_ones():
+    from app import buildinfo
+    c = TestClient(app)
+    page = c.get("/")
+    v = buildinfo.build_id()
+    assert f'/static/app.js?v={v}' in page.text and f'/static/app.css?v={v}' in page.text and f'name="build" content="{v}"' in page.text
+    assert page.headers["cache-control"] == "no-cache"
+    assert c.get("/static/app.js").headers["cache-control"] == "no-cache"
+    assert c.get("/static/app.css").headers["cache-control"] == "no-cache"
+    assert c.get("/health").json()["build"] == v and c.get("/api/config").json()["build"] == v
+    assert f"/static/admin.js?v={v}" in c.get("/admin").text
+
+
+def test_telegram_buttons_carry_the_version():
+    from app import buildinfo
+    from app.config import settings
+    url = buildinfo.app_url()
+    assert url.startswith(settings.webapp_url.rstrip("/")) and url.endswith("?b=" + buildinfo.build_id())
+    assert buildinfo.app_url("?section=jobs").endswith("?section=jobs&b=" + buildinfo.build_id())

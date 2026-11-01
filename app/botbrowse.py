@@ -381,7 +381,7 @@ def apply_query(db: Session, user_id: int, text: str) -> View | None:
 
 def _markup(rows):
     from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
-    base = settings.webapp_url.rstrip("/")
+    from app import buildinfo
     out = []
     for row in rows:
         line = []
@@ -391,7 +391,7 @@ def _markup(rows):
             elif "url" in b:
                 line.append(InlineKeyboardButton(text=b["t"], url=b["url"]))
             else:
-                line.append(InlineKeyboardButton(text=b["t"], web_app=WebAppInfo(url=base + "/" + b["app"])))
+                line.append(InlineKeyboardButton(text=b["t"], web_app=WebAppInfo(url=buildinfo.app_url(b["app"]))))
         out.append(line)
     return InlineKeyboardMarkup(inline_keyboard=out)
 

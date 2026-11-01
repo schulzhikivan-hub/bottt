@@ -4,13 +4,13 @@ from pathlib import Path
 import uuid
 
 from fastapi import FastAPI, Depends, File, HTTPException, Header, Query, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import select, func, desc, or_
 from sqlalchemy.orm import Session
 
-from app import payments
+from app import payments, buildinfo
 from app.auth import optional_user_id, current_user_id
 from app.config import settings
 from app.database import Base, engine, get_db, SessionLocal, migrate, upgrade_schema, startup_lock
@@ -89,12 +89,12 @@ REPORT_TARGETS = {"listing", "user", "message", "dating", "review"}
 
 @app.get("/")
 def home():
-    return FileResponse(STATIC / "index.html")
+    return HTMLResponse(buildinfo.page("index.html"), headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/admin")
 def admin_page():
-    return FileResponse(STATIC / "admin.html")
+    return HTMLResponse(buildinfo.page("admin.html"), headers={"Cache-Control": "no-store"})
 
 
 observe.install(app)  # /health, /health/extended, request IDs, JSON logs, security headers
@@ -117,13 +117,13 @@ def public_config(db: Session = Depends(get_db)):
     import time
     cached = _config_cache.get("bot")
     if cached and (cached[0] or time.monotonic() - cached[1] < 300):  # a failed lookup is not repeated for 5 minutes
-        return {"bot": cached[0], "rates": support.rates(db)}
+        return {"bot": cached[0], "rates": support.rates(db), "build": buildinfo.build_id()}
     try:
         name = webauth.bot_username()
     except Exception:
         name = ""
     _config_cache["bot"] = (name, time.monotonic())
-    return {"bot": name, "rates": support.rates(db)}
+    return {"bot": name, "rates": support.rates(db), "build": buildinfo.build_id()}
 
 
 _config_cache: dict = {}

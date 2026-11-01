@@ -111,6 +111,8 @@ class ObserveMiddleware(BaseHTTPMiddleware):
             response.headers.setdefault("Strict-Transport-Security", "max-age=15552000")
         if request.url.path.startswith("/admin") or request.url.path.startswith("/api/admin"):
             response.headers["Cache-Control"] = "no-store"
+        elif request.url.path.startswith("/static/") and request.url.path.rsplit(".", 1)[-1] in {"js", "css", "html"}:
+            response.headers["Cache-Control"] = "no-cache"      # ask the server every time; an unchanged file costs only a short «304»
         return response
 
 
@@ -137,7 +139,8 @@ def health_report() -> tuple[dict, bool]:
     """(report, database_ok). The bot being silent is reported, but only a broken database makes the check fail."""
     from app.models import Heartbeat
     from app.payments import now, aware
-    report: dict = {"status": "ok", "service": "korea-hub"}
+    from app import buildinfo
+    report: dict = {"status": "ok", "service": "korea-hub", "build": buildinfo.build_id()}
     db_ok = True
     try:
         with SessionLocal() as db:

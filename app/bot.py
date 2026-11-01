@@ -8,7 +8,7 @@ from aiogram.types import (
 )
 from sqlalchemy import select
 
-from app import guard, lifecycle, observe, payments, searches, webauth
+from app import buildinfo, guard, lifecycle, observe, payments, searches, webauth
 from app.botadmin import register_admin
 from app.botbrowse import register_browse
 from app.config import settings
@@ -47,7 +47,7 @@ def is_admin(user_id: int | None) -> bool:
 
 def open_app_markup() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="Открыть KOREA HUB", web_app=WebAppInfo(url=settings.webapp_url))
+        InlineKeyboardButton(text="Открыть KOREA HUB", web_app=WebAppInfo(url=buildinfo.app_url()))
     ]])
 
 
@@ -387,7 +387,7 @@ async def main():
     await bot.delete_webhook(drop_pending_updates=True)
     # Кнопка меню рядом с полем ввода открывает приложение внутри Telegram, а не в браузере
     await bot.set_chat_menu_button(menu_button=MenuButtonWebApp(
-        text="KOREA HUB", web_app=WebAppInfo(url=settings.webapp_url)))
+        text="KOREA HUB", web_app=WebAppInfo(url=buildinfo.app_url())))
     dp = Dispatcher()
     register(dp, bot)
     asyncio.create_task(expiry_loop(bot))

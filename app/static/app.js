@@ -783,9 +783,15 @@ async function loadSimilar(id) {
   } catch (e) { /* не критично */ }
 }
 let botName = null;
+// Номер версии: видно, что открыта свежая; если на экране один номер, а у сервера другой, надо обновить страницу
+function showBuild(serverBuild) {
+  const mine = document.querySelector('meta[name="build"]')?.content || "";
+  document.querySelectorAll(".buildinfo").forEach((el) => { el.textContent = "Версия " + (serverBuild || mine) + (serverBuild && mine && serverBuild !== mine ? " (обновите страницу)" : ""); });
+  if (serverBuild && mine && serverBuild !== mine && !sessionStorage.getItem("reloaded")) { sessionStorage.setItem("reloaded", "1"); location.reload(); }
+}
 async function ensureConfig() {
   if (botName !== null) return;
-  try { const cfg = await api("/api/config", {quiet: true}); botName = cfg.bot || ""; ratesCfg = cfg.rates || {}; } catch (e) { botName = ""; }
+  try { const cfg = await api("/api/config", {quiet: true}); botName = cfg.bot || ""; ratesCfg = cfg.rates || {}; showBuild(cfg.build); } catch (e) { botName = ""; }
 }
 async function shareListing(id, title) {
   await ensureConfig();
@@ -2282,6 +2288,7 @@ tg?.onEvent?.("themeChanged", applyTelegramTheme);
 }
 // ---------- старт ----------
 setTimeout(showWelcomeOnce, 1200);
+setTimeout(() => ensureConfig(), 800);      // сверяет номер версии страницы с сервером
 // Офлайн: страница-оболочка и скрипты кэшируются, чтобы приложение открывалось и при плохой связи
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
 function openFromLink() {
