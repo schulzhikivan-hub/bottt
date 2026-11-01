@@ -2070,6 +2070,65 @@ $("#datingForm").onsubmit = async (e) => {
   } catch (err) { toast(err.message); }
 };
 
+// ---------- услуги анкеты знакомств ----------
+async function showDatingServices() {
+  SUB_TITLES.dservices = "Услуги анкеты";
+  openSub("dservices");
+  $("#datingModal")?.classList.add("hidden");
+  const body = $("#subBody");
+  body.innerHTML = '<div class="skeleton"></div>';
+  let svc, promos = [], inv = null;
+  try {
+    [svc, promos] = await Promise.all([api("/api/dating/services"), api("/api/promos", {quiet: true}).catch(() => [])]);
+  } catch (err) { body.innerHTML = `<div class="empty">${esc(err.message)}</div>`; return; }
+  const mine = await api("/api/dating/me").catch(() => null);
+  const opts = svc.options.map((o) => `<article class="listing"><h3>${esc(o.title)} — ${o.stars} ⭐</h3>
+    <p class="muted">${esc(o.what)}</p>
+    ${o.active_until ? `<p>Действует до ${fmtDate(o.active_until)}</p>` : ""}
+    ${o.available ? `<div class="actions"><button data-dbuy="${esc(o.code)}">Купить</button>${svc.balance >= o.stars ? `<button class="secondary" data-dbuy="${esc(o.code)}" data-bal="1">С баланса</button>` : ""}</div>` : `<p class="muted">${esc(o.reason)}</p>`}</article>`).join("");
+  const invBtn = mine && mine.status === "published" ? `<div class="set-row"><div><b>Режим «невидимка»</b><small>Анкета не в лентах, открывается только по ссылке. Время VIP при этом стоит.</small></div>
+    <label class="check" style="margin:0"><input type="checkbox" id="dInvisible" ${mine.invisible ? "checked" : ""}></label></div>` : "";
+  body.innerHTML = `<article class="listing"><h3>Баланс: ${svc.balance} ⭐</h3><p class="muted">Сюда возвращается неиспользованная часть услуг. Тратится на любые услуги.</p></article>
+    ${promos.length ? promos.map((x) => `<article class="listing hl"><h3>🎁 ${esc(x.title)}</h3><p>${esc(x.service)}, ${x.days} дн. бесплатно</p>
+      ${x.can_claim ? `<div class="actions"><button data-dclaim="${x.id}">Получить</button></div>` : `<p class="muted">${esc(x.reason || "Выдаётся автоматически")}</p>`}</article>`).join("") : ""}
+    ${invBtn}${opts}
+    <article class="listing"><h3>Кто смотрел анкету</h3><div id="dViewers" class="muted">…</div></article>
+    <article class="listing"><h3>Приватные фото 🔒</h3><p class="muted">Видят VIP-зрители и те, с кем у вас взаимная симпатия. Проходят проверку.</p>
+      <div class="actions"><label class="btn secondary" style="cursor:pointer;padding:10px;border-radius:10px">Добавить фото<input type="file" id="dPrivFile" accept="image/jpeg,image/png,image/webp" hidden></label></div>
+      <div id="dPrivList" class="muted"></div></article>`;
+  api("/api/dating/viewers", {quiet: true}).then((v) => {
+    $("#dViewers").innerHTML = v.locked ? `За 30 дней смотрели: ${v.count}. Кто именно — в услуге «Кто видел анкету».`
+      : (v.items.length ? v.items.map((x) => `${x.id ? esc(x.name || "Аноним") : "Анкета закрыта"} · ${fmtDate(x.at)}`).join("<br>") : "Пока никто");
+  }).catch(() => {});
+  api("/api/dating/private-photos/mine", {quiet: true}).then((rows) => {
+    $("#dPrivList").innerHTML = rows.length ? rows.map((r) => `${esc(({pending: "на проверке", live: "опубликовано", rejected: "отклонено"})[r.status] || r.status)} <button class="link" data-dprivdel="${r.id}">удалить</button>`).join("<br>") : "Фото нет";
+  }).catch(() => {});
+  if ($("#dInvisible")) $("#dInvisible").onchange = async (e) => {
+    try { await api("/api/dating/invisible", {method: "POST", body: JSON.stringify({on: e.target.checked})}); toast(e.target.checked ? "Вы невидимка" : "Анкета снова в лентах"); }
+    catch (err) { toast(err.message); e.target.checked = !e.target.checked; }
+  };
+  $("#dPrivFile").onchange = async (e) => {
+    const data = new FormData(); data.append("file", e.target.files[0]);
+    const headers = inTelegram ? {"X-Telegram-Init-Data": tg.initData} : {"X-Web-Session": localStorage.getItem("webSession") || ""};
+    const r = await fetch("/api/dating/private-photo", {method: "POST", body: data, headers});
+    if (!r.ok) toast((await r.json()).detail || "Не удалось загрузить"); else { toast("Фото отправлено на проверку"); showDatingServices(); }
+  };
+}
+document.addEventListener("click", async (e) => {
+  const buy = e.target.closest("[data-dbuy]"), claim = e.target.closest("[data-dclaim]"), del = e.target.closest("[data-dprivdel]");
+  try {
+    if (buy) {
+      const r = await api("/api/dating/invoice", {method: "POST", body: JSON.stringify({service_code: buy.dataset.dbuy, use_balance: Boolean(buy.dataset.bal)})});
+      if (r.paid) { toast("Готово: услуга включена"); return showDatingServices(); }
+      if (!tg?.openInvoice) { toast("Оплата открывается только внутри Telegram"); return; }
+      tg.openInvoice(r.invoice_url, (st) => { toast(st === "paid" ? "Оплата прошла" : st === "failed" ? "Оплата не прошла" : "Оплата отменена"); showDatingServices(); });
+    }
+    if (claim) { await api(`/api/promos/${claim.dataset.dclaim}/claim`, {method: "POST", body: "{}"}); toast("Подарок включён"); showDatingServices(); }
+    if (del) { await api(`/api/dating/private-photo/${del.dataset.dprivdel}`, {method: "DELETE"}); showDatingServices(); }
+  } catch (err) { toast(err.message); }
+});
+$("#datingServices").onclick = showDatingServices;
+
 // ---------- общий обработчик нажатий ----------
 document.addEventListener("click", async (e) => {
   const tgLink = e.target.closest("[data-tglink]");
