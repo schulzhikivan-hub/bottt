@@ -307,8 +307,12 @@ def register(dp: Dispatcher, bot: Bot) -> None:
                 placement = payments.process_successful_payment(
                     db, user_id, sp.invoice_payload, sp.telegram_payment_charge_id,
                     sp.currency, sp.total_amount)
+                topup = getattr(placement, "kind", "") == "topup"
                 ends = payments.aware(placement.ends_at).strftime("%d.%m.%Y %H:%M")
-            await message.answer(f"Оплата получена. Услуга активна до {ends} UTC.")
+            if topup:
+                await message.answer(f"Баланс{' компании' if placement.company_id else ''} пополнен на {placement.credited} ⭐.")
+            else:
+                await message.answer(f"Оплата получена. Услуга активна до {ends} UTC.")
         except payments.PaymentError as exc:
             # Money was taken but the service cannot be given: return the stars automatically (ТЗ § 10.5)
             try:

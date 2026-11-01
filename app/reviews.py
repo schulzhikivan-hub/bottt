@@ -56,6 +56,8 @@ def create_review(payload: ReviewIn, user_id: str = Depends(writer), db: Session
         raise HTTPException(404, "Объявление не найдено")
     if listing.author_telegram_id == user_id:
         raise HTTPException(400, "Нельзя оставить отзыв о себе")
+    if listing.company_id:
+        raise HTTPException(403, "Отзывы о компаниях пока не принимаются: отзыв был бы о конкретном сотруднике")
     if not may_review(db, user_id, listing):
         raise HTTPException(403, "Отзыв можно оставить после переписки с автором по этому объявлению")
     if db.scalar(select(Review).where(Review.reviewer_tg_id == user_id, Review.listing_id == listing.id)):
@@ -122,7 +124,7 @@ def author_reviews(listing_id: int, viewer: str | None = Depends(optional_user_i
 def review_state(listing_id: int, user_id: str = Depends(writer), db: Session = Depends(get_db)):
     """Tells the app whether to show «Оставить отзыв» and which review is already mine."""
     listing = db.get(Listing, listing_id)
-    if listing is None or listing.author_telegram_id == user_id:
+    if listing is None or listing.author_telegram_id == user_id or listing.company_id:
         return {"can": False, "mine": None}
     mine = db.scalar(select(Review).where(Review.reviewer_tg_id == user_id, Review.listing_id == listing_id))
     return {"can": mine is None and may_review(db, user_id, listing),

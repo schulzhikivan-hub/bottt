@@ -25,7 +25,7 @@ def money_report(days: int = Query(default=30, ge=1, le=366), actor: str = Depen
     payers: set[str] = set()
     for p in rows:
         pr = names.get(p.service_code)
-        sec = pr.category if pr else "?"
+        sec = pr.category if pr else ("balance" if p.service_code == "topup" else "?")
         for bucket, key in ((by_service, p.service_code), (by_section, sec)):
             row = bucket.setdefault(key, {"title": (pr.title if pr and bucket is by_service else key), "paid": 0, "stars": 0, "from_balance": 0,
                                            "refunded": 0, "refunded_stars": 0, "granted": 0, "saved_stars": 0})

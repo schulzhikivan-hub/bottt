@@ -56,7 +56,9 @@ def apply(listing_id: int, payload: ApplyIn, user_id: str = Depends(writer), db:
     row.visa, row.city, row.status, row.reply = user.visa or "", user.city or "", "new", ""
     row.name = user.display_name or ""
     db.commit()
-    guard.notify_user(db, item.author_telegram_id, f"📩 Новый отклик на вакансию «{item.title}». Откройте «Профиль» → «Мои объявления».", "applications")
+    from app import company
+    company.notify_team(db, item, f"📩 Новый отклик на вакансию «{item.title}». "
+                        + ("Откройте «Компания» → «Отклики»." if item.company_id else "Откройте «Профиль» → «Мои объявления»."), "applications")
     return {"id": row.id, "status": row.status}
 
 
@@ -138,20 +140,25 @@ def counts(db: Session, listing_ids: list[int]) -> dict[int, dict]:
 
 
 def author_card(db: Session, item: Listing) -> dict:
-    """What a visitor learns about the author: no Telegram ID, only trust signals."""
-    user = db.get(User, item.author_telegram_id)
-    active = db.scalar(select(func.count()).select_from(Listing).where(
-        Listing.author_telegram_id == item.author_telegram_id, Listing.status == "approved")) or 0
-    verified = bool(user and user.employer_status == "approved")
-    company_name, company_id = (user.company_name if verified else ""), None
-    if item.company_id:                                   # a company listing shows the company, not the person
+    """What a visitor learns about the seller: no Telegram ID, only trust signals.
+    A company listing shows ONLY the company (its name, badge, its own number of listings): nothing about the person who
+    posted it, and nothing of that person's other, personal listings. A personal listing shows nothing of the person's companies."""
+    if item.company_id:
         from app.company import Company
         co = db.get(Company, item.company_id)
         if co is not None:
-            verified, company_name, company_id = co.status == "verified", co.name, co.id
+            active = db.scalar(select(func.count()).select_from(Listing).where(
+                Listing.company_id == co.id, Listing.status == "approved")) or 0
+            return {"is_company": True, "verified": co.status == "verified", "company_id": co.id, "company": co.name, "trusted": False,
+                    "active": active, "since": co.created_at.year if co.created_at else None, "rating": None, "reviews": 0}
+    user = db.get(User, item.author_telegram_id)
+    active = db.scalar(select(func.count()).select_from(Listing).where(
+        Listing.author_telegram_id == item.author_telegram_id, Listing.company_id.is_(None), Listing.status == "approved")) or 0
+    verified = bool(user and user.employer_status == "approved")
     from app import reviews
-    return {"verified": verified, "company_id": company_id, "trusted": bool(user and user.trusted), "company": company_name,
-            "active": active, "since": user.created_at.year if user and user.created_at else None,
+    return {"is_company": False, "verified": verified, "company_id": None, "trusted": bool(user and user.trusted),
+            "company": user.company_name if verified else "", "active": active,
+            "since": user.created_at.year if user and user.created_at else None,
             **reviews.summary(db, item.author_telegram_id)}
 
 

@@ -168,6 +168,37 @@ def _purse(db: Session, user_id: str, company_id: int | None):
     return db.get(User, user_id)
 
 
+TOPUP_CODE = "topup"
+TOPUP_MIN, TOPUP_MAX = 10, 10000
+
+
+def create_topup(db: Session, user_id: str, stars: int, company_id: int | None = None) -> tuple[Payment, str]:
+    """An invoice that puts Stars on a balance: the person's own (company_id None) or a company's own. Paid in Telegram Stars."""
+    if not TOPUP_MIN <= stars <= TOPUP_MAX:
+        raise PaymentError(f"Сумма пополнения: от {TOPUP_MIN} до {TOPUP_MAX} ⭐")
+    payment = Payment(user_tg_id=user_id, listing_id=None, service_code=TOPUP_CODE, stars=stars, list_stars=stars,
+                      payload=secrets.token_urlsafe(24), status="pending", created_at=now(), company_id=company_id,
+                      note="Пополнение баланса компании" if company_id else "Пополнение личного баланса")
+    db.add(payment)
+    db.commit()
+    db.refresh(payment)
+    url = telegram_call("createInvoiceLink", {
+        "title": "Пополнение баланса", "description": f"{stars} ⭐ на баланс" + (" компании" if company_id else ""),
+        "payload": payment.payload, "provider_token": "", "currency": CURRENCY, "prices": [{"label": "Пополнение", "amount": stars}]})
+    return payment, url
+
+
+def _finish_topup(db: Session, payment: Payment, charge_id: str):
+    import types
+    purse = _purse(db, payment.user_tg_id, payment.company_id)
+    if purse is None:
+        raise PaymentError("Баланс не найден")
+    purse.balance_stars = (purse.balance_stars or 0) + payment.stars
+    payment.status, payment.telegram_payment_charge_id, payment.paid_at = "paid", charge_id, now()
+    db.commit()
+    return types.SimpleNamespace(kind="topup", ends_at=now(), listing_id=None, credited=payment.stars, company_id=payment.company_id)
+
+
 def take_from_balance(db: Session, user_id: str, stars: int, use_balance: bool, company_id: int | None = None) -> tuple[int, int]:
     """(taken from the balance, left to pay in Stars). The balance is reserved at once and returned if the invoice is not paid."""
     if not use_balance or stars <= 0:
@@ -295,6 +326,9 @@ def process_successful_payment(db: Session, user_id: str, payload: str,
     if existing is not None:
         return existing  # already processed: do not activate twice
     done = db.scalar(select(Payment).where(Payment.telegram_payment_charge_id == charge_id))
+    if done is not None and done.service_code == TOPUP_CODE:        # a repeated notice of the same charge: nothing is added twice
+        import types
+        return types.SimpleNamespace(kind="topup", ends_at=now(), listing_id=None, credited=done.stars, company_id=done.company_id)
     if done is not None and done.profile_id:
         from app import datingsvc
         return datingsvc.result_of(db, done)
@@ -309,6 +343,8 @@ def process_successful_payment(db: Session, user_id: str, payload: str,
     if payment.status != "pending":
         raise PaymentError("Счёт неактивен")
 
+    if payment.service_code == TOPUP_CODE:
+        return _finish_topup(db, payment, charge_id)
     pricing = db.get(Pricing, payment.service_code)
     if pricing is None:
         raise PaymentError("Услуга не найдена")
@@ -371,6 +407,8 @@ def refund(db: Session, payment_id: int) -> Payment:
     payment = db.get(Payment, payment_id)
     if payment is None:
         raise PaymentError("Платёж не найден")
+    if payment.service_code == TOPUP_CODE:
+        raise PaymentError("Пополнение баланса не возвращается кнопкой: это деньги на счёте, решает суперадмин вручную")
     if payment.status != "paid" or not payment.telegram_payment_charge_id:
         raise PaymentError("Вернуть можно только оплаченный платёж")
     if (payment.stars or 0) > 0:      # the cash part goes back through Telegram, the balance part back to the balance
@@ -417,6 +455,8 @@ def refund_to_balance(db: Session, payment_id: int, reason: str = "") -> tuple[P
     payment = db.get(Payment, payment_id)
     if payment is None:
         raise PaymentError("Платёж не найден")
+    if payment.service_code == TOPUP_CODE:
+        raise PaymentError("Пополнение баланса не возвращается кнопкой: это деньги на счёте, решает суперадмин вручную")
     if payment.status != "paid":
         raise PaymentError("Вернуть можно только оплаченную услугу")
     paid_real = (payment.stars or 0) + (payment.balance_used or 0)      # what the person really spent (cash + balance)

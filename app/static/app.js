@@ -675,6 +675,12 @@ function contactLinks(contact) {
 }
 function authorBlock(x) {
   const a = x.author || {};
+  if (a.is_company) {          // объявление компании: только компания, ничего о сотруднике
+    const c = [`<b class="badge-ok">🏢 ${esc(a.company)}${a.verified ? " ✔ Проверенная компания" : ""}</b>`];
+    c.push(`<button class="alink" data-company="${a.company_id}">Страница компании${a.active ? ": объявлений " + a.active : ""}</button>`);
+    if (a.since) c.push(`На сайте с ${a.since}`);
+    return `<p class="author">${c.join(" · ")}</p>`;
+  }
   const parts = [];
   if (a.verified) parts.push(`<b class="badge-ok">✔ Проверенный работодатель${a.company ? ": " + esc(a.company) : ""}</b>`);
   else if (a.trusted) parts.push('<b class="badge-ok">✔ Проверенный автор</b>');
@@ -2226,7 +2232,8 @@ async function showDatingCabinet() {
       ${gifts}
       <div class="dsvc-grid">${["bump", "vip", "super", "invisible", "viewers"].map(svcTile).join("")}</div>
       <article class="dcard2"><div class="dcard2-head"><h3>Баланс</h3><b>${svc.balance} ⭐</b></div>
-        <p class="muted">Сюда возвращается неиспользованная часть услуг. Баланс можно потратить на любую услугу.</p></article>
+        <p class="muted">Сюда возвращается неиспользованная часть услуг. Баланс можно потратить на любую услугу.</p>
+        <p class="muted">Это ваш личный баланс: один на знакомства и ваши личные объявления. У компании баланс отдельный.</p>${topupHtml("me")}</article>
     </section>
 
     <section class="dpanel" data-dpanel="privacy" ${dcabTab === "privacy" ? "" : "hidden"}>
@@ -2312,6 +2319,9 @@ $("#datingServices").onclick = showDatingCabinet;
 const CO_STATUS = {pending: ["⏳", "На проверке", "warn"], verified: ["✔", "Проверена", "ok"], rejected: ["❌", "Отклонена", "bad"], suspended: ["⏸", "Приостановлена", "bad"]};
 const CO_APP = {new: "Новый", viewed: "Просмотрен", invited: "Приглашён", rejected: "Отказ"};
 const coState = {id: null, tab: "overview"};
+function coAvatar(c) {
+  return c.logo ? `<img class="co-ava" src="${esc(c.logo)}" alt="">` : `<div class="co-ava">${coInitial(c.name)}</div>`;
+}
 function coInitial(name) { return esc((name || "?").trim().slice(0, 1).toUpperCase()); }
 async function showCompany(id) {
   openSub("company");
@@ -2332,9 +2342,10 @@ async function showCompany(id) {
   if (ov.balance !== undefined) tabs.push(["money", "Баланс"]);
   body.innerHTML = `<div class="dcab">
     ${mine.length > 1 ? `<div class="chips">${mine.map((c) => `<button class="chip ${c.id === coState.id ? "active" : ""}" data-cosw="${c.id}">${esc(c.name)}</button>`).join("")}</div>` : ""}
-    <article class="dcard2 co-head"><div class="co-ava">${coInitial(ov.name)}</div>
+    <article class="dcard2 co-head">${coAvatar(ov)}
       <div style="flex:1;min-width:0"><h3 style="margin:0">${esc(ov.name)}</h3><p class="muted">${esc(ov.city || "")} · ваша роль: ${esc(ov.role_title)}</p>
-      <span class="dpill ${cls}">${icon} ${stTitle}</span></div></article>
+      <span class="dpill ${cls}">${icon} ${stTitle}</span></div>
+      ${ov.role === "owner" || ov.role === "admin" ? '<button class="secondary co-edit" data-cotab-go="profile" aria-label="Изменить">✏️</button>' : ""}</article>
     ${alert}
     <div class="dcab-tiles"><div class="dcab-tile"><b>${ov.listings.active}</b><span>активных</span></div>
       <div class="dcab-tile"><b>${ov.applications.new}</b><span>новых откликов</span></div>
@@ -2346,9 +2357,11 @@ async function showCompany(id) {
   body.querySelectorAll("[data-cotab]").forEach((b) => { b.onclick = () => {
     coState.tab = b.dataset.cotab;
     body.querySelectorAll(".dcab-tabs button").forEach((x) => x.classList.toggle("active", x === b));
+    b.scrollIntoView({inline: "center", block: "nearest", behavior: "smooth"});
     renderCoPane(ov);
   }; });
   renderCoPane(ov);
+  body.querySelector(".dcab-tabs button.active")?.scrollIntoView({inline: "center", block: "nearest"});
 }
 function renderCompanyIntro(body) {
   body.innerHTML = `<div class="dcab"><article class="dcard2"><h3>🏢 Кабинет компании</h3>
@@ -2384,6 +2397,32 @@ function renderCompanyForm(body, ov) {
     } catch (err) { toast(err.message); }
   };
 }
+// пополнение баланса звёздами Telegram: пресеты и своя сумма; для компании или для личного баланса
+function topupHtml(prefix) {
+  return `<div class="chips">${[50, 100, 300, 500, 1000].map((n) => `<button class="chip" data-topup-pick="${n}" data-for="${prefix}">${n} ⭐</button>`).join("")}</div>
+    <div class="actions"><input id="${prefix}TopupN" type="number" min="10" max="10000" placeholder="Своя сумма, ⭐" style="flex:1"><button data-topup-go="${prefix}">Пополнить</button></div>
+    <p class="muted">Оплата Telegram Stars. От 10 до 10 000 ⭐ за раз.</p>`;
+}
+async function payInvoice(url, done) {
+  if (tg?.openInvoice) tg.openInvoice(url, (st) => { toast(st === "paid" ? "Оплата прошла, баланс обновится через несколько секунд" : st === "failed" ? "Оплата не прошла" : "Оплата отменена"); setTimeout(done, 1500); });
+  else { window.open(url, "_blank"); toast("Оплатите в Telegram и вернитесь сюда"); }
+}
+document.addEventListener("click", async (e) => {
+  const pick = e.target.closest("[data-topup-pick]"), go = e.target.closest("[data-topup-go]");
+  if (pick) { $(`#${pick.dataset.for}TopupN`).value = pick.dataset.topupPick; return; }
+  if (!go) return;
+  const stars = Number($(`#${go.dataset.topupGo}TopupN`).value);
+  if (!stars) { toast("Выберите сумму"); return; }
+  try {
+    if (go.dataset.topupGo === "co") {
+      const r = await api(`/api/company/${coState.id}/topup`, {method: "POST", body: JSON.stringify({stars})});
+      payInvoice(r.invoice_url, () => { coState.tab = "money"; showCompany(coState.id); });
+    } else {
+      const r = await api("/api/me/balance/topup", {method: "POST", body: JSON.stringify({stars})});
+      payInvoice(r.invoice_url, () => showDatingCabinet());
+    }
+  } catch (err) { toast(err.message); }
+});
 async function renderCoPane(ov) {
   const pane = $("#coPane");
   const canWrite = ov.role !== "viewer", team = ov.role === "owner" || ov.role === "admin";
@@ -2436,11 +2475,29 @@ async function renderCoPane(ov) {
     if (coState.tab === "profile") {
       if (!team) { pane.innerHTML = `<article class="dcard2"><h3>${esc(ov.name)}</h3><p>${esc(ov.description || "Описания нет")}</p><p class="muted">${esc(ov.city || "")} ${esc(ov.website || "")}</p><p class="muted">Менять профиль могут владелец и админы.</p></article>`; return; }
       renderCompanyForm($("#coPane"), ov);
+      $("#coPane").insertAdjacentHTML("afterbegin", `<article class="dcard2"><h3>Логотип</h3><div class="co-head">${coAvatar(ov)}<div class="actions">
+        <label class="btn secondary dfile">Загрузить<input type="file" id="coLogo" accept="image/jpeg,image/png,image/webp" hidden></label>${ov.logo ? '<button class="secondary" id="coLogoDel">Убрать</button>' : ""}</div></div></article>`);
+      $("#coLogo").onchange = async (e) => {
+        const data = new FormData(); data.append("file", e.target.files[0]);
+        const headers = inTelegram ? {"X-Telegram-Init-Data": tg.initData} : {"X-Web-Session": localStorage.getItem("webSession") || ""};
+        const r = await fetch(`/api/company/${ov.id}/logo`, {method: "POST", body: data, headers});
+        if (!r.ok) toast((await r.json()).detail || "Не удалось загрузить"); else { toast("Логотип обновлён"); showCompany(ov.id); }
+      };
+      if ($("#coLogoDel")) $("#coLogoDel").onclick = async () => { await api(`/api/company/${ov.id}/logo`, {method: "DELETE"}); showCompany(ov.id); };
+      if (ov.role === "owner") {
+        $("#coPane").insertAdjacentHTML("beforeend", `<article class="dcard2"><h3>Закрыть компанию</h3><p class="muted">Объявления компании перестанут показываться, команда потеряет доступ. Перед закрытием на балансе должно быть 0 ⭐.</p>
+          <div class="actions"><button class="secondary" id="coClose" style="color:var(--bad)">Закрыть компанию</button></div></article>`);
+        $("#coClose").onclick = async () => {
+          if (!confirm("Закрыть компанию? Это нельзя отменить.")) return;
+          try { await api(`/api/company/${ov.id}/close`, {method: "POST"}); toast("Компания закрыта"); coState.id = null; showCompany(); } catch (err) { toast(err.message); }
+        };
+      }
     }
     if (coState.tab === "money") {
       const b = await api(`/api/company/${ov.id}/balance`);
       pane.innerHTML = `<article class="dcard2"><div class="dcard2-head"><h3>Баланс компании</h3><b>${b.balance} ⭐</b></div><p class="muted">${esc(b.note)}</p>
         <p class="muted">Платить с баланса за продвижение объявлений компании могут владелец и админы. Личные балансы сотрудников сюда не попадают.</p></article>
+        <article class="dcard2"><h3>Пополнить баланс компании</h3>${topupHtml("co")}</article>
         <article class="dcard2"><h3>Движение</h3>${b.history.length ? b.history.map((h) => `<div class="drun"><span>${esc(h.service)} · ${esc(fmtDate(h.at).slice(0, 10))}</span><span>${h.stars ? h.stars + " ⭐" : ""}${h.from_balance ? " + " + h.from_balance + " с баланса" : ""} · ${esc(h.status)}</span></div>`).join("") : '<p class="muted">Платежей пока нет.</p>'}</article>`;
     }
   } catch (err) { pane.innerHTML = `<div class="empty">${esc(err.message)}</div>`; }
@@ -2615,6 +2672,8 @@ document.addEventListener("click", async (e) => {
     catch (err) { toast(err.message); }
     return;
   }
+  const coPage = e.target.closest("[data-company]");
+  if (coPage) { showPublicCompany(Number(coPage.dataset.company)); return; }
   const au = e.target.closest("[data-author]");
   if (au) {
     try {

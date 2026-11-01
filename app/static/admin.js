@@ -1120,7 +1120,7 @@ async function loadMoneyReports() {
   const [rep, vip] = await Promise.all([api(`/api/admin/reports/money?days=${reportDays}`), api("/api/admin/vip/history")]);
   const line = (r) => `<td>${r.paid}</td><td>${r.stars} ⭐</td><td>${r.from_balance} ⭐</td><td>${r.refunded} (${r.refunded_stars} ⭐)</td><td>${r.granted}</td><td>${r.saved_stars} ⭐</td>`;
   const head = "<tr><th></th><th>Оплат</th><th>Выручка</th><th>С баланса</th><th>Возвратов</th><th>Подарков</th><th>Сэкономлено людям</th></tr>";
-  const SEC = {job: "Работа", housing: "Жильё", marketplace: "Барахолка", dating: "Знакомства"};
+  const SEC = {job: "Работа", housing: "Жильё", marketplace: "Барахолка", dating: "Знакомства", balance: "Пополнения балансов"};
   $("#main").innerHTML = `<div class="card"><div class="row"><b>Период:</b>${[7, 30, 90, 365].map((d) => `<button class="act ${d === reportDays ? "" : "gray"}" data-rdays="${d}">${d} дн.</button>`).join("")}</div>
     <h3>Итого</h3><table>${head}<tr><td><b>Все</b></td>${line(rep.total)}</tr></table><p class="muted">Платящих людей: ${rep.total.payers}</p>
     <h3>По разделам</h3><table>${head}${Object.entries(rep.by_section).map(([k, r]) => `<tr><td>${esc(SEC[k] || k)}</td>${line(r)}</tr>`).join("")}</table>

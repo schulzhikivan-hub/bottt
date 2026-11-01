@@ -195,4 +195,5 @@ def migrate() -> None:
                     "signup_skipped BOOLEAN NOT NULL DEFAULT FALSE"):
             conn.execute(text(f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {ddl}"))
         conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_email ON users (email)"))
+        conn.execute(text("ALTER TABLE companies ADD COLUMN IF NOT EXISTS logo_key VARCHAR(40)"))
         conn.execute(text("ALTER TABLE notifications ADD COLUMN IF NOT EXISTS tg_pending BOOLEAN NOT NULL DEFAULT FALSE"))

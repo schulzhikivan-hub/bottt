@@ -441,9 +441,21 @@ def my_favorites(user_id: str = Depends(current_user_id), db: Session = Depends(
 
 # ---------- Chats ----------
 
+def _side_access(db: Session, conv: Conversation, user_id: str) -> bool:
+    """The buyer, or the seller side. For a company listing the seller side is the team (those who may answer), not one
+    person: somebody who left the team loses the chat, a new colleague gets it."""
+    if conv.buyer_tg_id == user_id:
+        return True
+    listing = db.get(Listing, conv.listing_id) if conv.listing_id else None
+    if listing is not None and listing.company_id:
+        from app import company
+        return company.role_of(db, listing.company_id, user_id) in company.WRITE
+    return user_id == conv.seller_tg_id
+
+
 def _get_conversation_for(db: Session, conv_id: int, user_id: str) -> Conversation:
     conv = db.get(Conversation, conv_id)
-    if conv is None or user_id not in (conv.buyer_tg_id, conv.seller_tg_id):
+    if conv is None or not _side_access(db, conv, user_id):
         # Одинаково отвечаем на «нет» и «чужое», чтобы не раскрывать существование чатов
         raise HTTPException(404, "Чат не найден")
     return conv
@@ -454,7 +466,7 @@ def start_conversation(listing_id: int, user_id: str = Depends(writer), db: Sess
     listing = db.get(Listing, listing_id)
     if listing is None or listing.status != "approved":
         raise HTTPException(404, "Объявление не найдено")
-    if listing.author_telegram_id == user_id:
+    if listing.author_telegram_id == user_id or (listing.company_id and _side_access(db, Conversation(listing_id=listing.id, buyer_tg_id="", seller_tg_id=""), user_id)):
         raise HTTPException(400, "Нельзя написать самому себе")
     if is_blocked_pair(db, user_id, listing.author_telegram_id):
         raise HTTPException(403, "Диалог недоступен")
@@ -475,6 +487,13 @@ def person_name(db: Session, tg_id: str, conv: Conversation | None = None) -> st
         prof = db.scalar(select(DatingProfile).where(DatingProfile.owner_tg_id == tg_id))
         if prof is not None and prof.first_name:
             return prof.first_name
+    if conv is not None and conv.listing_id and tg_id == conv.seller_tg_id:        # the buyer talks to the company, not to a person
+        listing = db.get(Listing, conv.listing_id)
+        if listing is not None and listing.company_id:
+            from app.company import Company
+            co = db.get(Company, listing.company_id)
+            if co is not None:
+                return co.name
     user = db.get(User, tg_id)
     return (user.display_name if user and user.display_name else "") or "Пользователь"
 
@@ -506,11 +525,14 @@ def conversation_card(db: Session, conv: Conversation, user_id: str, last: Messa
 
 @app.get("/api/conversations", response_model=list[ConversationOut])
 def my_conversations(user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
-    convs = db.scalars(
+    from app.company import CompanyMember, WRITE
+    team_listings = select(Listing.id).where(Listing.company_id.in_(
+        select(CompanyMember.company_id).where(CompanyMember.tg_id == user_id, CompanyMember.role.in_(WRITE))))
+    convs = [c for c in db.scalars(
         select(Conversation).where(
-            (Conversation.buyer_tg_id == user_id) | (Conversation.seller_tg_id == user_id)
+            (Conversation.buyer_tg_id == user_id) | (Conversation.seller_tg_id == user_id) | Conversation.listing_id.in_(team_listings)
         )
-    ).all()
+    ).all() if _side_access(db, c, user_id)]
     hides = {h.conv_id: h.at for h in db.scalars(select(ConvHide).where(ConvHide.user_tg_id == user_id)).all()}
     out = []
     for conv in convs:
@@ -612,7 +634,7 @@ def send_message(conv_id: int, payload: MessageIn, user_id: str = Depends(writer
     db.commit()
     db.refresh(msg)
     inbox.touch(db, user_id)
-    notify_user(db, other, message_notice(db, conv, user_id, text[:160]), "messages")
+    _tell_other_side(db, conv, user_id, other, message_notice(db, conv, user_id, text[:160]))
     return _msg_out(msg, user_id)
 
 
@@ -637,8 +659,18 @@ async def send_chat_photo(conv_id: int, file: UploadFile = File(...), user_id: s
     db.add(msg)
     db.commit()
     db.refresh(msg)
-    notify_user(db, other, message_notice(db, conv, user_id, "📷 фото"), "messages")
+    _tell_other_side(db, conv, user_id, other, message_notice(db, conv, user_id, "📷 фото"))
     return _msg_out(msg, user_id)
+
+
+def _tell_other_side(db: Session, conv: Conversation, sender: str, other: str, text: str) -> None:
+    """The buyer wrote to a company listing: the whole team that may answer is told. Otherwise one person is told."""
+    listing = db.get(Listing, conv.listing_id) if conv.listing_id else None
+    if sender == conv.buyer_tg_id and listing is not None and listing.company_id:
+        from app import company
+        company.notify_team(db, listing, text, "messages", skip=sender)
+    else:
+        notify_user(db, other, text, "messages")
 
 
 def _other_party(conv: Conversation, user_id: str) -> str:
@@ -696,6 +728,20 @@ def create_invoice(payload: InvoiceIn, user_id: str = Depends(writer), db: Sessi
             "from_balance": payment.balance_used}
 
 
+class TopupIn(BaseModel):
+    stars: int
+
+
+@app.post("/api/me/balance/topup")
+def topup_my_balance(payload: TopupIn, user_id: str = Depends(writer), db: Session = Depends(get_db)):
+    """Put Stars on the personal balance (one for dating, your own listings and everything personal)."""
+    try:
+        pay, url = payments.create_topup(db, user_id, payload.stars)
+    except PaymentError as exc:
+        raise HTTPException(400, str(exc))
+    return {"payment_id": pay.id, "invoice_url": url, "stars": pay.stars}
+
+
 @app.get("/api/me/balance")
 def my_balance(user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
     """Stars returned for unused service time; they can pay for any service."""
@@ -738,7 +784,7 @@ def payment_receipt(payment_id: int, user_id: str = Depends(current_user_id), db
     listing = db.get(Listing, p.listing_id) if p.listing_id else None
     return {"number": f"KH-{p.id:06d}", "date": str(p.paid_at or p.created_at), "status": p.status, "note": p.note,
             "gift": p.status == "granted", "from_balance": p.balance_used, "profile": bool(p.profile_id),
-            "service": pricing.title if pricing else p.service_code, "days": pricing.duration_days if pricing else None,
+            "service": pricing.title if pricing else ("Пополнение баланса" if p.service_code == payments.TOPUP_CODE else p.service_code), "days": pricing.duration_days if pricing else None,
             "listing_id": p.listing_id, "listing_title": listing.title if listing else "",
             "stars": p.stars, "list_stars": p.list_stars or p.stars, "promo": p.promo_code,
             "discount": max(0, (p.list_stars or p.stars) - p.stars), "charge_id": p.telegram_payment_charge_id}
@@ -748,7 +794,7 @@ def payment_receipt(payment_id: int, user_id: str = Depends(current_user_id), db
 def my_payments(user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
     rows = db.scalars(select(Payment).where(Payment.user_tg_id == user_id)
                       .order_by(desc(Payment.id)).limit(100)).all()
-    titles = {p.code: p.title for p in db.scalars(select(Pricing)).all()}
+    titles = {p.code: p.title for p in db.scalars(select(Pricing)).all()} | {payments.TOPUP_CODE: "Пополнение баланса"}
     return [{"id": p.id, "service": titles.get(p.service_code, p.service_code), "stars": p.stars,
              "status": p.status, "listing_id": p.listing_id, "charge_id": p.telegram_payment_charge_id,
              "promo": p.promo_code, "number": f"KH-{p.id:06d}", "note": p.note, "gift": p.status == "granted",

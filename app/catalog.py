@@ -303,8 +303,10 @@ def author_page(listing_id: int, db: Session = Depends(get_db)):
     item = db.get(Listing, listing_id)
     if item is None or item.status != "approved":
         raise HTTPException(404, "Объявление не найдено или снято с публикации")
+    who = (Listing.company_id == item.company_id) if item.company_id else \
+        ((Listing.author_telegram_id == item.author_telegram_id) & Listing.company_id.is_(None))
     rows = db.scalars(select(Listing).where(
-        Listing.author_telegram_id == item.author_telegram_id, Listing.status == "approved",
+        who, Listing.status == "approved",
         or_(Listing.expires_at.is_(None), Listing.expires_at > now())).order_by(Listing.id.desc()).limit(30)).all()
     return {"card": applications.author_card(db, item), "items": with_promo(db, list(rows))}
 

@@ -12,12 +12,12 @@ admin queue «Работодатели» and the bot keep working."""
 import datetime as dt
 import secrets
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import Integer, String, Text, DateTime, UniqueConstraint, func, select
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
-from app import guard, rules
+from app import guard, photos, rules
 from app.admin_auth import ADM, MOD, staff
 from app.audit import log_action
 from app.auth import optional_user_id
@@ -47,6 +47,7 @@ class Company(Base):
     note: Mapped[str] = mapped_column(String(300), default="")                        # reason shown to the owner
     owner_tg_id: Mapped[str] = mapped_column(String(40), index=True)
     balance_stars: Mapped[int] = mapped_column(Integer, default=0, server_default="0")   # the company's own money, not a person's
+    logo_key: Mapped[str | None] = mapped_column(String(40), nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
@@ -164,7 +165,7 @@ class CompanyIn(BaseModel):
 
 
 def _view(db: Session, c: Company, role: str) -> dict:
-    out = {"id": c.id, "name": c.name, "status": c.status, "role": role, "role_title": ROLES.get(role, role), "note": c.note,
+    out = {"id": c.id, "name": c.name, "logo": photos.url(c.logo_key) if c.logo_key else None, "status": c.status, "role": role, "role_title": ROLES.get(role, role), "note": c.note,
            "verified": c.status == "verified"}
     if role in MONEY:
         out["balance"] = c.balance_stars
@@ -374,13 +375,101 @@ def transfer_ownership(company_id: int, payload: TransferIn, user_id: str = Depe
     return {"owner": payload.tg_id}
 
 
+# ---------- logo ----------
+@router.post("/api/company/{company_id}/logo", status_code=201)
+async def set_logo(company_id: int, file: UploadFile = File(...), user_id: str = Depends(writer), db: Session = Depends(get_db)):
+    import io
+    import uuid
+    from PIL import Image, ImageOps
+    c, role = _company(db, company_id, user_id, TEAM)
+    data = await file.read(photos.MAX_UPLOAD_BYTES + 1)
+    if len(data) > photos.MAX_UPLOAD_BYTES:
+        raise HTTPException(413, "Фото больше 8 МБ")
+    full, _thumb = photos.process_image(data)
+    img = ImageOps.fit(Image.open(io.BytesIO(full)).convert("RGB"), (320, 320))
+    out = io.BytesIO()
+    img.save(out, "JPEG", quality=85, optimize=True)
+    key = uuid.uuid4().hex
+    (photos.photo_root() / f"{key}.jpg").write_bytes(out.getvalue())
+    if c.logo_key:
+        photos.delete_files(c.logo_key)
+    c.logo_key = key
+    db.commit()
+    return {"logo": photos.url(key)}
+
+
+@router.delete("/api/company/{company_id}/logo")
+def remove_logo(company_id: int, user_id: str = Depends(writer), db: Session = Depends(get_db)):
+    c, role = _company(db, company_id, user_id, TEAM)
+    if c.logo_key:
+        photos.delete_files(c.logo_key)
+        c.logo_key = None
+        db.commit()
+    return {"logo": None}
+
+
+# ---------- closing ----------
+@router.post("/api/company/{company_id}/close")
+def close_company(company_id: int, user_id: str = Depends(writer), db: Session = Depends(get_db)):
+    """The owner closes the company: its listings stop being shown, the team loses access. The balance must be empty first
+    (money is not made to disappear): ask support to pay it out or spend it."""
+    c, role = _company(db, company_id, user_id, {"owner"})
+    if (c.balance_stars or 0) > 0:
+        raise HTTPException(409, f"На балансе компании {c.balance_stars} ⭐. Потратьте их или попросите поддержку вернуть, потом закрывайте")
+    for item in db.scalars(select(Listing).where(Listing.company_id == c.id, Listing.status.in_(["approved", "pending", "draft", "needs_fix"]))).all():
+        item.status = "closed"
+    for m in db.scalars(select(CompanyMember).where(CompanyMember.company_id == c.id)).all():
+        db.delete(m)
+    c.status, c.note = "closed", "Закрыта владельцем"
+    sync_employer_from_company(db, c)
+    log_action(db, user_id, "company.close", "company", c.id, c.name)
+    db.commit()
+    return {"closed": True}
+
+
+def notify_team(db: Session, listing: Listing, text: str, kind: str, skip: str = "") -> None:
+    """A company listing has no single owner: everybody who may answer is told (the author of a personal listing is told alone)."""
+    if not listing.company_id:
+        if listing.author_telegram_id != skip:
+            guard.notify_user(db, listing.author_telegram_id, text, kind)
+        return
+    for m in db.scalars(select(CompanyMember).where(CompanyMember.company_id == listing.company_id, CompanyMember.role.in_(WRITE))).all():
+        if m.tg_id != skip:
+            guard.notify_user(db, m.tg_id, text, kind)
+
+
 # ---------- money of the company ----------
+class TopupIn(BaseModel):
+    stars: int
+
+
+@router.post("/api/company/{company_id}/topup")
+def company_topup(company_id: int, payload: TopupIn, user_id: str = Depends(writer), db: Session = Depends(get_db)):
+    """Put Stars on the COMPANY balance (owner and admins). The payment is made by the person in Telegram; the money goes to the company."""
+    from app import payments
+    c, role = _company(db, company_id, user_id, MONEY)
+    if c.status == "closed":
+        raise HTTPException(409, "Компания закрыта")
+    try:
+        pay, url = payments.create_topup(db, user_id, payload.stars, c.id)
+    except payments.PaymentError as exc:
+        raise HTTPException(400, str(exc))
+    return {"payment_id": pay.id, "invoice_url": url, "stars": pay.stars}
+
+
+@router.get("/api/companies/{company_id}/logo")
+def public_logo_probe(company_id: int, db: Session = Depends(get_db)):
+    c = db.get(Company, company_id)
+    return {"logo": photos.url(c.logo_key) if c and c.status == "verified" and c.logo_key else None}
+
+
+# ---------- money of the company (history) ----------
 @router.get("/api/company/{company_id}/balance")
 def company_balance(company_id: int, user_id: str = Depends(writer), db: Session = Depends(get_db)):
     c, role = _company(db, company_id, user_id, MONEY)
     rows = db.scalars(select(Payment).where(Payment.company_id == c.id).order_by(Payment.id.desc()).limit(50)).all()
     return {"balance": c.balance_stars, "note": "Баланс компании отдельный: он не смешивается с личным балансом сотрудников. Пополняется возвратами за неиспользованные услуги и начислениями поддержки.",
-            "history": [{"id": p.id, "service": p.service_code, "stars": p.stars, "from_balance": p.balance_used, "status": p.status, "by": p.user_tg_id[-4:],
+            "history": [{"id": p.id, "service": "Пополнение баланса" if p.service_code == "topup" else p.service_code, "stars": p.stars, "from_balance": p.balance_used, "status": p.status, "by": p.user_tg_id[-4:],
                          "at": str(p.paid_at or p.created_at)} for p in rows]}
 
 
@@ -393,7 +482,7 @@ def public_company(company_id: int, db: Session = Depends(get_db)):
         raise HTTPException(404, "Компания не найдена")
     rows = db.scalars(select(Listing).where(Listing.company_id == c.id, Listing.status == "approved").order_by(Listing.id.desc()).limit(50)).all()
     live = [x for x in rows if x.expires_at is None or aware(x.expires_at) > now()]
-    return {"id": c.id, "name": c.name, "description": c.description, "website": c.website, "city": c.city, "verified": True,
+    return {"id": c.id, "name": c.name, "logo": photos.url(c.logo_key) if c.logo_key else None, "description": c.description, "website": c.website, "city": c.city, "verified": True,
             "since": c.created_at.date().isoformat(), "listings": [o.model_dump(mode="json") for o in catalog.with_promo(db, live)]}
 
 
