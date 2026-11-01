@@ -107,7 +107,7 @@ def phone(browser, base):
     page.on("response", lambda r: problems["server"].append(f"{r.status} {r.url}") if r.status >= 500 else None)
     page.on("dialog", lambda d: d.accept("тест"))
     page.route("**/telegram.org/**", lambda r: r.fulfill(status=200, content_type="application/javascript", body=""))
-    page.add_init_script(f"try{{if(window===window.top){{localStorage.setItem('webSession','{TOKEN}');}}}}catch(e){{}}")
+    page.add_init_script(f"try{{if(window===window.top){{localStorage.setItem('webSession','{TOKEN}');localStorage.setItem('welcomeSeen','1');}}}}catch(e){{}}")
     page.goto(base + "/")
     page.wait_for_selector("#view-home", timeout=15000)
     page.wait_for_timeout(1200)
