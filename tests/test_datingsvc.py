@@ -76,3 +76,22 @@ def test_blocking_returns_unused_part(client):
     with SessionLocal() as db:
         block_user(db, "t", "1", "нарушение правил")
         assert db.get(User, "1").balance_stars > 30
+
+
+def test_bump_puts_the_profile_first_for_a_day_and_stats_count(client):
+    p1, p2, p3 = publish(client, 1), publish(client, 2), publish(client, 3)
+    feed = [x["id"] for x in client.get("/api/dating", headers=as_user(2)).json()]
+    assert feed.index(p3) < feed.index(p1)                                   # newer first by default
+    with SessionLocal() as db:
+        db.get(User, "1").balance_stars = 100
+        db.commit()
+    r = client.post("/api/dating/invoice", json={"service_code": "dating_bump", "use_balance": True}, headers=as_user(1))
+    assert r.status_code == 200 and r.json()["paid"] is True
+    feed = [x["id"] for x in client.get("/api/dating", headers=as_user(2)).json()]
+    assert feed[0] == p1
+    assert client.get("/api/dating/me", headers=as_user(1)).json()["bumped_until"]
+    client.get(f"/api/dating/{p1}", headers=as_user(2))                       # a view is recorded
+    st = client.get("/api/dating/me/stats", headers=as_user(1)).json()
+    assert st["views_7d"] == 1 and st["mutual"] == 0
+    client.post(f"/api/dating/{p1}/like", headers=as_user(2))
+    assert client.get("/api/dating/me/stats", headers=as_user(1)).json()["likes_to_me"] == 1

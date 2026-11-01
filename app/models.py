@@ -189,6 +189,7 @@ class DatingProfile(Base):
     vip_promo: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())           # VIP given free by a promotion
     vip_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)   # for freezing the VIP clock
     viewers_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)    # «кто видел анкету»
+    bumped_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)   # «Поднять»: on top of the feed until
     super_credits: Mapped[int] = mapped_column(Integer, default=0, server_default="0")                # unused «супер-симпатии»
     vip_notified: Mapped[str] = mapped_column(String(4), default="", server_default="")              # reminders sent: "", "3d", "end"
     # pending, published, rejected

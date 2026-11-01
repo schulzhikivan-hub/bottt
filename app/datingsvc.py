@@ -26,6 +26,7 @@ MAX_PRIVATE = 6
 DAY = dt.timedelta(days=1)
 
 SERVICE_TEXT = {
+    "bump": "Анкета встаёт в начало ленты на 24 часа (в рамках общих правил: не больше двух платных на пять мест)",
     "vip": "Метка VIP и показ выше обычных анкет (не выше закреплённых и рекламы). Срок прибавляется к оставшемуся",
     "invisible": "Анкета не показывается в ленте и поиске, но открывается по вашей ссылке. Можно включать и выключать",
     "viewers": "Список тех, кто открывал вашу анкету, за последние 30 дней",
@@ -59,6 +60,8 @@ def activate(db: Session, payment: Payment, pricing: Pricing, at: dt.datetime, p
         p.invisible_on = True
     elif kind == "viewers":
         p.viewers_until = _extend(p.viewers_until, at, pricing.duration_days)
+    elif kind == "bump":
+        p.bumped_until = _extend(p.bumped_until, at, pricing.duration_days)
     elif kind == "super":
         p.super_credits += 1
     else:
@@ -71,7 +74,7 @@ def result_of(db: Session, payment: Payment) -> types.SimpleNamespace:
     pricing = db.get(Pricing, payment.service_code)
     kind = pricing.kind if pricing else ""
     until = {"vip": vip_until_eff(p) if p else None, "invisible": p.invisible_until if p else None,
-             "viewers": p.viewers_until if p else None}.get(kind) or now()
+             "viewers": p.viewers_until if p else None, "bump": p.bumped_until if p else None}.get(kind) or now()
     return types.SimpleNamespace(ends_at=until, listing_id=None, kind=kind)
 
 
@@ -88,7 +91,7 @@ def seconds_left(db: Session, payment: Payment, at: dt.datetime) -> float:
     pricing = db.get(Pricing, payment.service_code)
     if p is None or pricing is None or not _latest(db, payment):
         return 0.0
-    until = {"vip": vip_until_eff(p, at), "invisible": p.invisible_until, "viewers": p.viewers_until}.get(pricing.kind)
+    until = {"vip": vip_until_eff(p, at), "invisible": p.invisible_until, "viewers": p.viewers_until, "bump": p.bumped_until}.get(pricing.kind)
     if until is None:
         return 0.0
     cap = dt.timedelta(days=pricing.duration_days).total_seconds()
@@ -107,6 +110,8 @@ def end_service(db: Session, payment: Payment) -> None:
         p.invisible_until, p.invisible_on = None, False
     elif pricing.kind == "viewers":
         p.viewers_until = None
+    elif pricing.kind == "bump":
+        p.bumped_until = None
 
 
 # ---------- showcase and invoice ----------
@@ -116,9 +121,11 @@ def options(db: Session, p: DatingProfile) -> list[dict]:
     out = []
     for pr in db.scalars(select(Pricing).where(Pricing.category == "dating", Pricing.is_active.is_(True)).order_by(Pricing.stars)).all():
         reason = ""
-        if p.status != "published" and pr.kind in {"vip", "invisible"}:
+        if p.status != "published" and pr.kind in {"vip", "invisible", "bump"}:
             reason = "Услуга доступна для опубликованной анкеты"
-        until = {"vip": vip_until_eff(p, at), "invisible": p.invisible_until, "viewers": p.viewers_until}.get(pr.kind)
+        elif pr.kind == "bump" and (p.paused or p.suspect):
+            reason = "Анкета на паузе или на проверке: поднимать пока нечего"
+        until = {"vip": vip_until_eff(p, at), "invisible": p.invisible_until, "viewers": p.viewers_until, "bump": p.bumped_until}.get(pr.kind)
         out.append({"code": pr.code, "kind": pr.kind, "title": pr.title, "stars": pr.stars, "days": pr.duration_days,
                     "what": SERVICE_TEXT.get(pr.kind, ""), "available": not reason, "reason": reason,
                     "active_until": until.isoformat() if until is not None and aware(until) > at else None})
@@ -148,7 +155,7 @@ def profile_invoice(payload: ProfileInvoiceIn, user_id: str = Depends(writer), d
     pricing = db.get(Pricing, payload.service_code)
     if pricing is None or not pricing.is_active or pricing.category != "dating":
         raise HTTPException(400, "Эта услуга сейчас недоступна")
-    if p.status != "published" and pricing.kind in {"vip", "invisible"}:
+    if p.status != "published" and pricing.kind in {"vip", "invisible", "bump"}:
         raise HTTPException(400, "Услуга доступна для опубликованной анкеты")
     try:
         stars, code = pricing.stars, ""
@@ -193,7 +200,7 @@ def grant(db: Session, actor: str, tg_id: str, service_code: str, listing_id: in
         pricing = types.SimpleNamespace(kind=pricing.kind, duration_days=days, code=pricing.code)
     pay = Payment(user_tg_id=tg_id, listing_id=listing_id, service_code=service_code, stars=0, payload=f"grant-{secrets.token_hex(10)}",
                   status="granted", created_at=at, paid_at=at, note=(("🎁 По акции" if promo else "🎁 Подарок") + (f": {note}" if note else "")))
-    if pricing.kind in {"vip", "invisible", "viewers", "super"}:
+    if pricing.kind in {"vip", "invisible", "viewers", "super", "bump"}:
         p = profile_of(db, tg_id)
         if p is None:
             raise PaymentError("У человека нет анкеты")
@@ -231,6 +238,24 @@ def admin_grant(payload: GrantIn, actor: str = Depends(staff(*ADM)), db: Session
     except PaymentError as exc:
         raise HTTPException(400, str(exc))
     return {"payment_id": pay.id, "status": pay.status}
+
+
+@router.get("/api/dating/me/stats")
+def my_stats(user_id: str = Depends(writer), db: Session = Depends(get_db)):
+    """Numbers for the cabinet: views, sympathies in both directions, mutual ones."""
+    from sqlalchemy import func as f
+    from app.models import DatingLike
+    p = profile_of(db, user_id)
+    if p is None:
+        raise HTTPException(404, "Анкеты нет")
+    at = now()
+
+    def views(days: int) -> int:
+        return db.scalar(select(f.count(f.distinct(DatingView.viewer_tg))).where(DatingView.profile_id == p.id, DatingView.at > at - days * DAY)) or 0
+    got = {l.from_tg for l in db.scalars(select(DatingLike).where(DatingLike.to_tg == user_id)).all()}
+    sent = {l.to_tg for l in db.scalars(select(DatingLike).where(DatingLike.from_tg == user_id)).all()}
+    return {"views_7d": views(7), "views_30d": views(30), "likes_to_me": len(got - sent), "likes_from_me": len(sent - got),
+            "mutual": len(got & sent), "super_credits": p.super_credits}
 
 
 # ---------- «кто видел анкету» ----------

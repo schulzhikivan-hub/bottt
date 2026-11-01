@@ -35,6 +35,7 @@ PRICING_SEED = [
     ("marketplace_bump", "marketplace", "bump", "Поднять товар", 15, 1),
     ("marketplace_vip", "marketplace", "vip", "VIP на 7 дней", 50, 7),
     ("marketplace_highlight", "marketplace", "highlight", "Выделение объявления", 15, 7),
+    ("dating_bump", "dating", "bump", "Поднять анкету наверх на 24 часа", 20, 1),
     ("dating_vip", "dating", "vip", "VIP-анкета на 7 дней", 70, 7),
     ("dating_invisible", "dating", "invisible", "Невидимка на 30 дней", 60, 30),
     ("dating_viewers", "dating", "viewers", "Кто видел анкету, 30 дней", 40, 30),

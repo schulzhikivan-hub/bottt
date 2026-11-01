@@ -160,7 +160,8 @@ def my_profile(user_id: str = Depends(writer), db: Session = Depends(get_db)):
             "invisible_until": profile.invisible_until.isoformat() if profile.invisible_until else None,
             "vip_until": profile.vip_until.isoformat() if profile.vip_until else None,
             "viewers_until": profile.viewers_until.isoformat() if profile.viewers_until else None,
-            "super_credits": profile.super_credits, "suspect": profile.suspect}
+            "bumped_until": profile.bumped_until.isoformat() if profile.bumped_until and aware(profile.bumped_until) > at else None,
+            "super_credits": profile.super_credits, "suspect": profile.suspect, "created_at": profile.created_at.isoformat()}
 
 
 class PauseIn(BaseModel):
@@ -379,8 +380,16 @@ def _lift(rows: list[DatingProfile], mode: str, inc: dict) -> list[DatingProfile
                                            -(aware(inc[p.owner_tg_id].created_at).timestamp() if inc[p.owner_tg_id].created_at else 0)))
     if mode != "all":
         return rows
-    rows = sorted(rows, key=lambda p: 0 if vip_kind(p, at) == "vip" else 1)        # stable: the order by date stays inside the groups
-    return policy.arrange(rows, lambda p: vip_kind(p, at))
+    def paid(p: DatingProfile) -> str:
+        kind = vip_kind(p, at)
+        if kind == "vip":
+            return "vip"
+        if p.bumped_until is not None and aware(p.bumped_until) > at:
+            return "bump"
+        return kind                                                                   # 'promo' (free VIP) or ''
+    rank = {"vip": 0, "bump": 1}
+    rows = sorted(rows, key=lambda p: rank.get(paid(p), 2))                           # stable: the order by date stays inside the groups
+    return policy.arrange(rows, paid)
 
 
 @router.get("/api/dating")
