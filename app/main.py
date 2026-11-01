@@ -32,7 +32,7 @@ from app.guard import rate_limit, check_text, duplicate_note, notify_user
 from app import admin_ops as ops
 from app import catalog
 from app import photos, applications, searches, inbox, promos, adminx, observe, site
-from app import geo, reviews, resumes, referrals, support, extras, adminplus, adminview
+from app import geo, reviews, resumes, referrals, support, extras, adminplus, adminview, datingsvc
 from app import fields as listing_fields
 from app.users import get_or_create_user, writer, is_blocked_pair
 from app.models import ConvHide, DatingProfile, TypingMark
@@ -50,6 +50,7 @@ with startup_lock():   # with several workers only one prepares the database at 
         catalog.backfill_search_fields(_db)
 
 app = FastAPI(title="KOREA HUB API", version="0.4.0")
+app.include_router(datingsvc.router)    # before the dating router: fixed words such as /viewers must win over /{profile_id}
 app.include_router(dating_router)
 app.include_router(manage_router)
 app.include_router(admin_auth_router)
@@ -658,15 +659,25 @@ class InvoiceIn(BaseModel):
     listing_id: int
     service_code: str = Field(min_length=3, max_length=40)
     promo_code: str = Field(default="", max_length=24)
+    use_balance: bool = False
 
 
 @app.post("/api/payments/invoice")
 def create_invoice(payload: InvoiceIn, user_id: str = Depends(writer), db: Session = Depends(get_db)):
     try:
-        payment, url = payments.create_invoice(db, user_id, payload.listing_id, payload.service_code, payload.promo_code)
+        payment, url = payments.create_invoice(db, user_id, payload.listing_id, payload.service_code, payload.promo_code,
+                                               payload.use_balance)
     except PaymentError as exc:
         raise HTTPException(400, str(exc))
-    return {"payment_id": payment.id, "invoice_url": url, "stars": payment.stars}
+    return {"payment_id": payment.id, "invoice_url": url, "stars": payment.stars, "paid": payment.status == "paid",
+            "from_balance": payment.balance_used}
+
+
+@app.get("/api/me/balance")
+def my_balance(user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
+    """Stars returned for unused service time; they can pay for any service."""
+    user = get_or_create_user(db, user_id)
+    return {"balance": user.balance_stars or 0}
 
 
 @app.get("/api/listings/{listing_id}/services")
@@ -697,8 +708,9 @@ def payment_receipt(payment_id: int, user_id: str = Depends(current_user_id), db
     if p is None or p.user_tg_id != user_id:
         raise HTTPException(404, "Платёж не найден")
     pricing = db.get(Pricing, p.service_code)
-    listing = db.get(Listing, p.listing_id)
-    return {"number": f"KH-{p.id:06d}", "date": str(p.paid_at or p.created_at), "status": p.status,
+    listing = db.get(Listing, p.listing_id) if p.listing_id else None
+    return {"number": f"KH-{p.id:06d}", "date": str(p.paid_at or p.created_at), "status": p.status, "note": p.note,
+            "gift": p.status == "granted", "from_balance": p.balance_used, "profile": bool(p.profile_id),
             "service": pricing.title if pricing else p.service_code, "days": pricing.duration_days if pricing else None,
             "listing_id": p.listing_id, "listing_title": listing.title if listing else "",
             "stars": p.stars, "list_stars": p.list_stars or p.stars, "promo": p.promo_code,
@@ -712,7 +724,8 @@ def my_payments(user_id: str = Depends(current_user_id), db: Session = Depends(g
     titles = {p.code: p.title for p in db.scalars(select(Pricing)).all()}
     return [{"id": p.id, "service": titles.get(p.service_code, p.service_code), "stars": p.stars,
              "status": p.status, "listing_id": p.listing_id, "charge_id": p.telegram_payment_charge_id,
-             "promo": p.promo_code, "number": f"KH-{p.id:06d}",
+             "promo": p.promo_code, "number": f"KH-{p.id:06d}", "note": p.note, "gift": p.status == "granted",
+             "from_balance": p.balance_used, "profile": bool(p.profile_id),
              "created_at": str(p.created_at), "paid_at": str(p.paid_at) if p.paid_at else None}
             for p in rows]
 
@@ -862,16 +875,23 @@ def admin_payments(actor: str = Depends(staff(*ADM)), db: Session = Depends(get_
 
 
 @app.post("/api/admin/payments/{payment_id}/refund")
-def admin_refund(payment_id: int, reason: str = Query(default="", max_length=300), actor: str = Depends(staff(*ADM)),
-                 db: Session = Depends(get_db)):
+def admin_refund(payment_id: int, reason: str = Query(default="", max_length=300), mode: str = Query(default="full", pattern="^(full|balance)$"),
+                 actor: str = Depends(staff(*ADM)), db: Session = Depends(get_db)):
+    """mode=full: the whole payment goes back to the person (Telegram). mode=balance: only the unused part of the service,
+    as Stars on the balance (Telegram can not return a part)."""
+    credit = None
     try:
-        p = payments.refund(db, payment_id)
+        if mode == "balance":
+            p, credit = payments.refund_to_balance(db, payment_id, reason)
+        else:
+            p = payments.refund(db, payment_id)
     except PaymentError as exc:
         raise HTTPException(400, str(exc))
-    log_action(db, actor, "payment.refund", "payment", payment_id, f"{p.telegram_payment_charge_id or ''} {reason}".strip())
+    log_action(db, actor, "payment.refund", "payment", payment_id, f"{mode} {p.telegram_payment_charge_id or ''} {reason}".strip())
     db.commit()
-    notify_user(db, p.user_tg_id, "Платёж возвращён." + (f" Причина: {reason}" if reason else ""), "payments")
-    return {"id": p.id, "status": p.status}
+    text = ("Платёж возвращён." if credit is None else f"Неиспользованная часть услуги вернулась на ваш баланс: {credit} ⭐.") + (f" Причина: {reason}" if reason else "")
+    notify_user(db, p.user_tg_id, text, "payments")
+    return {"id": p.id, "status": p.status, "credited": credit}
 
 
 @app.get("/api/admin/stats")

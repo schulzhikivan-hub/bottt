@@ -17,7 +17,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.models import Listing, Payment, Placement, Pricing, PromoCode
+from app.models import Listing, Payment, Placement, Pricing, PromoCode, User
 
 CURRENCY = "XTR"
 INVOICE_TTL = dt.timedelta(hours=1)
@@ -35,6 +35,10 @@ PRICING_SEED = [
     ("marketplace_bump", "marketplace", "bump", "Поднять товар", 15, 1),
     ("marketplace_vip", "marketplace", "vip", "VIP на 7 дней", 50, 7),
     ("marketplace_highlight", "marketplace", "highlight", "Выделение объявления", 15, 7),
+    ("dating_vip", "dating", "vip", "VIP-анкета на 7 дней", 70, 7),
+    ("dating_invisible", "dating", "invisible", "Невидимка на 30 дней", 60, 30),
+    ("dating_viewers", "dating", "viewers", "Кто видел анкету, 30 дней", 40, 30),
+    ("dating_super", "dating", "super", "Супер-симпатия (1 шт.)", 15, 0),
 ]
 # Higher number = shown higher in the listing feed
 KIND_PRIORITY = {"pin": 4, "vip": 3, "bump": 2, "highlight": 1}
@@ -54,12 +58,15 @@ def aware(value: dt.datetime) -> dt.datetime:
 
 
 def ensure_pricing(db: Session) -> None:
-    if db.scalar(select(func.count()).select_from(Pricing)):
-        return
+    """Fill in the services that are missing (new services appear on existing servers too); prices already set stay as they are."""
+    have = set(db.scalars(select(Pricing.code)).all())
+    added = False
     for code, category, kind, title, stars, days in PRICING_SEED:
-        db.add(Pricing(code=code, category=category, kind=kind, title=title,
-                       stars=stars, duration_days=days, is_active=True))
-    db.commit()
+        if code not in have:
+            db.add(Pricing(code=code, category=category, kind=kind, title=title, stars=stars, duration_days=days, is_active=True))
+            added = True
+    if added:
+        db.commit()
 
 
 def telegram_call(method: str, payload: dict) -> dict:
@@ -152,8 +159,35 @@ def service_options(db: Session, listing: Listing) -> list[dict]:
     return out
 
 
+def take_from_balance(db: Session, user_id: str, stars: int, use_balance: bool) -> tuple[int, int]:
+    """(taken from the balance, left to pay in Stars). The balance is reserved at once and returned if the invoice is not paid."""
+    if not use_balance or stars <= 0:
+        return 0, stars
+    user = db.get(User, user_id)
+    have = (user.balance_stars if user is not None else 0) or 0
+    taken = min(have, stars)
+    if taken > 0:
+        user.balance_stars = have - taken
+    return taken, stars - taken
+
+
+def restore_stale_balance(db: Session) -> int:
+    """Invoices that were never paid give the reserved balance back."""
+    n = 0
+    for p in db.scalars(select(Payment).where(Payment.status == "pending", Payment.balance_used > 0)).all():
+        if aware(p.created_at) < now() - INVOICE_TTL:
+            user = db.get(User, p.user_tg_id)
+            if user is not None:
+                user.balance_stars = (user.balance_stars or 0) + p.balance_used
+            p.status, p.note = "failed", (p.note + " баланс возвращён").strip()
+            n += 1
+    if n:
+        db.commit()
+    return n
+
+
 def create_invoice(db: Session, user_id: str, listing_id: int, service_code: str,
-                   promo_code: str = "") -> tuple[Payment, str]:
+                   promo_code: str = "", use_balance: bool = False) -> tuple[Payment, str]:
     """Create a pending payment and a Telegram invoice link. Returns (payment, url)."""
     pricing = db.get(Pricing, service_code)
     if pricing is None or not pricing.is_active:
@@ -184,12 +218,15 @@ def create_invoice(db: Session, user_id: str, listing_id: int, service_code: str
     if promo_code.strip():
         promo, stars = check_promo(db, user_id, promo_code, pricing.stars)
         used_code = promo.code
+    taken, cash = take_from_balance(db, user_id, stars, use_balance)
     payment = Payment(user_tg_id=user_id, listing_id=listing_id, service_code=service_code,
-                      stars=stars, payload=secrets.token_urlsafe(24), status="pending",
-                      created_at=current, promo_code=used_code, list_stars=pricing.stars)
+                      stars=cash, payload=secrets.token_urlsafe(24), status="pending",
+                      created_at=current, promo_code=used_code, list_stars=pricing.stars, balance_used=taken)
     db.add(payment)
     db.commit()
     db.refresh(payment)
+    if cash == 0:        # the balance covers everything: no invoice, the service starts at once
+        return pay_from_balance(db, payment), ""
 
     result = telegram_call("createInvoiceLink", {
         "title": pricing.title[:32],
@@ -200,6 +237,22 @@ def create_invoice(db: Session, user_id: str, listing_id: int, service_code: str
         "prices": [{"label": pricing.title[:32], "amount": stars}],
     })
     return payment, result
+
+
+def pay_from_balance(db: Session, payment: Payment) -> Payment:
+    """Finish a payment that was paid entirely from the balance (no Telegram invoice)."""
+    pricing = db.get(Pricing, payment.service_code)
+    current = now()
+    payment.status, payment.paid_at = "paid", current
+    payment.telegram_payment_charge_id = f"balance-{payment.id}"
+    if payment.profile_id:
+        from app import datingsvc
+        datingsvc.activate(db, payment, pricing, current)
+    else:
+        db.add(Placement(listing_id=payment.listing_id, kind=pricing.kind, starts_at=current,
+                         ends_at=current + dt.timedelta(days=pricing.duration_days), status="active", payment_id=payment.id))
+    db.commit()
+    return payment
 
 
 def _payment_by_payload(db: Session, payload: str) -> Payment | None:
@@ -229,6 +282,10 @@ def process_successful_payment(db: Session, user_id: str, payload: str,
                          .where(Payment.telegram_payment_charge_id == charge_id))
     if existing is not None:
         return existing  # already processed: do not activate twice
+    done = db.scalar(select(Payment).where(Payment.telegram_payment_charge_id == charge_id))
+    if done is not None and done.profile_id:
+        from app import datingsvc
+        return datingsvc.result_of(db, done)
 
     payment = _payment_by_payload(db, payload)
     if payment is None or payment.user_tg_id != user_id:
@@ -252,6 +309,11 @@ def process_successful_payment(db: Session, user_id: str, payload: str,
         used = db.scalar(select(PromoCode).where(PromoCode.code == payment.promo_code))
         if used is not None:
             used.used_count += 1
+    if payment.profile_id:           # a dating service: the profile gets it, there is no placement of a listing
+        from app import datingsvc
+        datingsvc.activate(db, payment, pricing, current)
+        db.commit()
+        return datingsvc.result_of(db, payment)
     placement = Placement(listing_id=payment.listing_id, kind=pricing.kind, starts_at=current,
                           ends_at=current + dt.timedelta(days=pricing.duration_days),
                           status="active", payment_id=payment.id)
@@ -275,7 +337,7 @@ def expire_placements(db: Session, at: dt.datetime | None = None) -> list[Placem
     moment = at or now()
     ended = []
     for placement in db.scalars(select(Placement).where(Placement.status == "active")).all():
-        if aware(placement.ends_at) <= moment:
+        if placement.frozen_at is None and aware(placement.ends_at) <= moment:    # a frozen clock does not run
             placement.status = "ended"
             ended.append(placement)
     db.commit()
@@ -299,15 +361,80 @@ def refund(db: Session, payment_id: int) -> Payment:
         raise PaymentError("Платёж не найден")
     if payment.status != "paid" or not payment.telegram_payment_charge_id:
         raise PaymentError("Вернуть можно только оплаченный платёж")
-    telegram_call("refundStarPayment", {
-        "user_id": int(payment.user_tg_id),
-        "telegram_payment_charge_id": payment.telegram_payment_charge_id,
-    })
+    if (payment.stars or 0) > 0:      # the cash part goes back through Telegram, the balance part back to the balance
+        telegram_call("refundStarPayment", {
+            "user_id": int(payment.user_tg_id),
+            "telegram_payment_charge_id": payment.telegram_payment_charge_id,
+        })
+    if payment.balance_used:
+        user = db.get(User, payment.user_tg_id)
+        if user is not None:
+            user.balance_stars = (user.balance_stars or 0) + payment.balance_used
     payment.status = "refunded"
     for placement in db.scalars(select(Placement).where(Placement.payment_id == payment.id)).all():
         placement.status = "refunded"
+    if payment.profile_id:
+        from app import datingsvc
+        datingsvc.end_service(db, payment)
     db.commit()
     return payment
+
+
+def remaining_fraction(db: Session, payment: Payment, at: dt.datetime | None = None) -> float:
+    """How much of a paid service is still unused (0..1), looking at the real clock (frozen time is not counted as used)."""
+    at = at or now()
+    pricing = db.get(Pricing, payment.service_code)
+    if pricing is None or pricing.duration_days <= 0:
+        return 0.0
+    total = dt.timedelta(days=pricing.duration_days).total_seconds()
+    if payment.profile_id:
+        from app import datingsvc
+        left = datingsvc.seconds_left(db, payment, at)
+    else:
+        pl = db.scalar(select(Placement).where(Placement.payment_id == payment.id, Placement.status == "active"))
+        if pl is None:
+            return 0.0
+        edge = aware(pl.frozen_at) if pl.frozen_at else at
+        left = max(0.0, (aware(pl.ends_at) - edge).total_seconds())
+    return max(0.0, min(1.0, left / total))
+
+
+def refund_to_balance(db: Session, payment_id: int, reason: str = "") -> tuple[Payment, int]:
+    """Proportional refund: the unused part of a paid service becomes Stars on the person's balance (Telegram can only
+    return a whole payment). Free grants return nothing. The service ends. Returns (payment, stars credited)."""
+    payment = db.get(Payment, payment_id)
+    if payment is None:
+        raise PaymentError("Платёж не найден")
+    if payment.status != "paid":
+        raise PaymentError("Вернуть можно только оплаченную услугу")
+    paid_real = (payment.stars or 0) + (payment.balance_used or 0)      # what the person really spent (cash + balance)
+    fraction = remaining_fraction(db, payment)
+    credit = int(paid_real * fraction)
+    user = db.get(User, payment.user_tg_id)
+    if user is not None and credit > 0:
+        user.balance_stars = (user.balance_stars or 0) + credit
+    payment.status = "refunded"
+    payment.note = (payment.note + f" возврат на баланс {credit} ⭐ ({int(fraction * 100)}% остатка) {reason}").strip()
+    for placement in db.scalars(select(Placement).where(Placement.payment_id == payment.id)).all():
+        placement.status = "refunded"
+    if payment.profile_id:
+        from app import datingsvc
+        datingsvc.end_service(db, payment)
+    db.commit()
+    return payment, credit
+
+
+def refund_active_services(db: Session, user_id: str, reason: str = "") -> int:
+    """The person is blocked by staff: unused parts of all running paid services go back to the balance. Returns Stars."""
+    total = 0
+    for pay in db.scalars(select(Payment).where(Payment.user_tg_id == user_id, Payment.status == "paid")).all():
+        if remaining_fraction(db, pay) <= 0:
+            continue
+        try:
+            total += refund_to_balance(db, pay.id, reason)[1]
+        except PaymentError:
+            continue
+    return total
 
 
 def mark_failed(db: Session, payload: str) -> None:

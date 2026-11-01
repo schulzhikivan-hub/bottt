@@ -121,6 +121,15 @@ def migrate() -> None:
             "ALTER TABLE dating_likes ADD COLUMN IF NOT EXISTS super BOOLEAN NOT NULL DEFAULT FALSE",
         ):
             conn.execute(text(ddl))
+        for ddl in (
+            "ALTER TABLE payments ALTER COLUMN listing_id DROP NOT NULL",
+            "ALTER TABLE payments ADD COLUMN IF NOT EXISTS profile_id INTEGER",
+            "ALTER TABLE payments ADD COLUMN IF NOT EXISTS note VARCHAR(200) NOT NULL DEFAULT ''",
+            "ALTER TABLE payments ADD COLUMN IF NOT EXISTS balance_used INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS balance_stars INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE dating_profiles ADD COLUMN IF NOT EXISTS vip_notified VARCHAR(4) NOT NULL DEFAULT ''",
+        ):
+            conn.execute(text(ddl))
         conn.execute(text("ALTER TABLE placements ADD COLUMN IF NOT EXISTS promo BOOLEAN NOT NULL DEFAULT FALSE"))
         conn.execute(text("ALTER TABLE placements ADD COLUMN IF NOT EXISTS frozen_at TIMESTAMPTZ"))
         conn.execute(text("ALTER TABLE broadcasts ADD COLUMN IF NOT EXISTS audience_kind VARCHAR(12) NOT NULL DEFAULT 'all'"))

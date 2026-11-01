@@ -161,7 +161,9 @@ def block_user(db: Session, actor: str, tg_id: str, reason: str) -> User:
     user.blocked = True
     user.block_reason = reason.strip()[:300]
     hidden = hide_user_listings(db, tg_id)
-    log_action(db, actor, "user.block", "user", tg_id, f"{reason}; скрыто объявлений: {len(hidden)}")
+    from app import payments as _pay
+    credited = _pay.refund_active_services(db, tg_id, "блокировка")
+    log_action(db, actor, "user.block", "user", tg_id, f"{reason}; скрыто объявлений: {len(hidden)}; возврат на баланс: {credited} ⭐")
     db.commit()
     for item in hidden:
         applications.notify_ended(db, item, "скрыта модератором")

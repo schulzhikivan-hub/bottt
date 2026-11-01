@@ -31,6 +31,7 @@ class User(Base):
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     consent_version: Mapped[str] = mapped_column(String(40), default="")
     ref_code: Mapped[str | None] = mapped_column(String(12), unique=True, nullable=True)   # for the invitation link
+    balance_stars: Mapped[int] = mapped_column(Integer, default=0, server_default="0")        # money back for unused service time
     blocked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)   # temporary block ends here
     trusted: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())   # «Проверенный автор»: a moderator checked this person
     visa: Mapped[str] = mapped_column(String(8), default="")  # private; used for job filters and applications
@@ -188,6 +189,7 @@ class DatingProfile(Base):
     vip_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)   # for freezing the VIP clock
     viewers_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)    # «кто видел анкету»
     super_credits: Mapped[int] = mapped_column(Integer, default=0, server_default="0")                # unused «супер-симпатии»
+    vip_notified: Mapped[str] = mapped_column(String(4), default="", server_default="")              # reminders sent: "", "3d", "end"
     # pending, published, rejected
     status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
@@ -223,7 +225,7 @@ class Pricing(Base):
     __tablename__ = "pricing"
     code: Mapped[str] = mapped_column(String(40), primary_key=True)  # e.g. job_vip
     category: Mapped[str] = mapped_column(String(30))
-    kind: Mapped[str] = mapped_column(String(16))  # bump, vip, pin, highlight
+    kind: Mapped[str] = mapped_column(String(16))  # bump, vip, pin, highlight; for dating also invisible, viewers, super
     title: Mapped[str] = mapped_column(String(80))
     stars: Mapped[int] = mapped_column(Integer)
     duration_days: Mapped[int] = mapped_column(Integer)
@@ -250,7 +252,10 @@ class Payment(Base):
     __tablename__ = "payments"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_tg_id: Mapped[str] = mapped_column(String(40), index=True)
-    listing_id: Mapped[int] = mapped_column(ForeignKey("listings.id", ondelete="CASCADE"), index=True)
+    listing_id: Mapped[int | None] = mapped_column(ForeignKey("listings.id", ondelete="CASCADE"), index=True, nullable=True)
+    profile_id: Mapped[int | None] = mapped_column(Integer, index=True, nullable=True)       # a dating profile instead of a listing
+    note: Mapped[str] = mapped_column(String(200), default="", server_default="")             # «подарок», «компенсация», comments
+    balance_used: Mapped[int] = mapped_column(Integer, default=0, server_default="0")        # stars taken from the person's balance
     service_code: Mapped[str] = mapped_column(String(40))
     stars: Mapped[int] = mapped_column(Integer)
     payload: Mapped[str] = mapped_column(String(64), unique=True)

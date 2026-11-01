@@ -296,7 +296,7 @@ def _expire_once() -> list[tuple[str, str]]:
         for item in lifecycle.expiring_soon(db):
             messages.append((item.author_telegram_id,
                              f"Объявление «{item.title}» закончится через несколько дней. "
-                             "Продлите его: Профиль → Мои объявления → Продлить."))
+                             "Продлите его: Профиль → Мои объявления → Продлить.", "expiry"))
         for item in lifecycle.expiring_tomorrow(db):
             messages.append((item.author_telegram_id,
                              f"Завтра закончится срок объявления «{item.title}». Продлить можно в один шаг: "
@@ -324,6 +324,9 @@ def _expire_once() -> list[tuple[str, str]]:
                                  f"Завтра закончится «{placement.kind}» для «{listing.title}». Продлить можно после окончания: "
                                  "Профиль → Мои объявления → Продвинуть.", "payments"))
         messages.extend((tg, text, "searches") for tg, text in searches.new_matches(db))
+        from app import datingsvc
+        messages.extend(datingsvc.housekeeping(db))   # VIP/invisible of dating profiles: end, reminders, frozen spans
+        payments.restore_stale_balance(db)            # reserved balance of unpaid invoices goes back
         # every notice goes to the in-app feed; Telegram only gets what the user allows
         out = []
         for tg, text, kind in messages:

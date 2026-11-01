@@ -7,7 +7,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select, or_
+from sqlalchemy import event, func, select, or_
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -77,10 +77,42 @@ def is_invisible(p: DatingProfile, at: dt.datetime | None = None) -> bool:
     return bool(p.invisible_on and p.invisible_until and aware(p.invisible_until) > at)
 
 
+def frozen_span(p: DatingProfile, start: dt.datetime, end: dt.datetime) -> dt.timedelta:
+    """How much of [start, end] the VIP clock did not run, judging by the state the profile is in now.
+    It stops while the profile is paused, doubtful, not published (moderation) or invisible."""
+    if end <= start:
+        return dt.timedelta(0)
+    if p.status != "published" or p.paused or p.suspect:
+        return end - start
+    if p.invisible_on and p.invisible_until:
+        return max(dt.timedelta(0), min(end, aware(p.invisible_until)) - start)
+    return dt.timedelta(0)
+
+
+def vip_until_eff(p: DatingProfile, at: dt.datetime | None = None) -> dt.datetime | None:
+    """The real end of VIP: the stored date moved by the time during which the clock was stopped."""
+    at = at or now()
+    if not p.vip_until:
+        return None
+    until = aware(p.vip_until)
+    if p.vip_checked_at:
+        until += frozen_span(p, aware(p.vip_checked_at), at)
+    return until
+
+
+def settle(p: DatingProfile, at: dt.datetime | None = None) -> None:
+    """Write the frozen time into the date and start a new interval. Called before every change of the state."""
+    at = at or now()
+    if p.vip_until:
+        p.vip_until = vip_until_eff(p, at)
+    p.vip_checked_at = at
+
+
 def vip_kind(p: DatingProfile, at: dt.datetime | None = None) -> str:
     """'' (no VIP), 'vip' (paid, gets a lift) or 'promo' (given free by a promotion: a mark, no lift)."""
     at = at or now()
-    if p.vip_until and aware(p.vip_until) > at:
+    until = vip_until_eff(p, at)
+    if until is not None and until > at:
         return "promo" if p.vip_promo else "vip"
     return ""
 
@@ -583,3 +615,13 @@ def decide(profile_id: int, decision: str, reason: str = Query(default="", max_l
             profile.suspect = False             # the doubt is cleared by a moderator
         db.commit()
     return {"id": profile.id, "status": profile.status}
+
+
+def _settle_before_change(target, value, oldvalue, initiator):
+    """The VIP clock must be closed with the old state before paused / doubtful / status / invisible change."""
+    if target.vip_until is not None and value != oldvalue:
+        settle(target)
+
+
+for _attr in (DatingProfile.paused, DatingProfile.suspect, DatingProfile.status, DatingProfile.invisible_on, DatingProfile.invisible_until):
+    event.listen(_attr, "set", _settle_before_change, active_history=True)
