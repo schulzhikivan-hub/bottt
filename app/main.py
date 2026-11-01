@@ -35,7 +35,7 @@ from app import photos, applications, searches, inbox, promos, adminx, observe, 
 from app import geo, reviews, resumes, referrals, support, extras, adminplus, adminview
 from app import fields as listing_fields
 from app.users import get_or_create_user, writer, is_blocked_pair
-from app.models import DatingProfile, TypingMark
+from app.models import ConvHide, DatingProfile, TypingMark
 from app.dating import router as dating_router
 from app.payments import PaymentError, aware, now
 
@@ -434,6 +434,41 @@ def start_conversation(listing_id: int, user_id: str = Depends(writer), db: Sess
     return {"id": conv.id}
 
 
+def person_name(db: Session, tg_id: str, conv: Conversation | None = None) -> str:
+    """How a person is shown to the other side: the chosen name, or the dating name in a match, never the Telegram ID."""
+    if conv is not None and conv.match_key:
+        prof = db.scalar(select(DatingProfile).where(DatingProfile.owner_tg_id == tg_id))
+        if prof is not None and prof.first_name:
+            return prof.first_name
+    user = db.get(User, tg_id)
+    return (user.display_name if user and user.display_name else "") or "Пользователь"
+
+
+def conversation_card(db: Session, conv: Conversation, user_id: str, last: Message | None = None, unread: int = 0) -> ConversationOut:
+    from app import site
+    other = conv.seller_tg_id if conv.buyer_tg_id == user_id else conv.buyer_tg_id
+    listing = db.get(Listing, conv.listing_id) if conv.listing_id else None
+    name = person_name(db, other, conv)
+    cover, price = None, ""
+    if listing is not None:
+        key = db.scalar(select(ListingPhoto.key).where(ListingPhoto.listing_id == listing.id, ListingPhoto.status == "live")
+                        .order_by(ListingPhoto.position, ListingPhoto.id).limit(1))
+        cover = photos.url(key, True) if key else None
+        price = site._price(listing)
+    if last is not None:
+        preview = last.text or ("🎤 Голосовое" if last.file_kind == "audio" else "📎 Документ" if last.file_key else "📷 Фото")
+    else:
+        preview = ""
+    return ConversationOut(
+        id=conv.id, listing_id=conv.listing_id,
+        listing_title=("Знакомство" if conv.match_key else (listing.title if listing else "Объявление удалено")),
+        last_text=preview, last_at=last.created_at if last else None, unread=unread,
+        kind="match" if conv.match_key else "listing", role="buyer" if conv.buyer_tg_id == user_id else "seller",
+        other_name=name, other_initial=(name[:1] or "?").upper(), listing_cover=cover, listing_price=price,
+        listing_category=listing.category if listing else "", listing_status=listing.status if listing else "",
+        last_mine=bool(last and last.sender_tg_id == user_id))
+
+
 @app.get("/api/conversations", response_model=list[ConversationOut])
 def my_conversations(user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
     convs = db.scalars(
@@ -441,27 +476,51 @@ def my_conversations(user_id: str = Depends(current_user_id), db: Session = Depe
             (Conversation.buyer_tg_id == user_id) | (Conversation.seller_tg_id == user_id)
         )
     ).all()
+    hides = {h.conv_id: h.at for h in db.scalars(select(ConvHide).where(ConvHide.user_tg_id == user_id)).all()}
     out = []
     for conv in convs:
         other = conv.seller_tg_id if conv.buyer_tg_id == user_id else conv.buyer_tg_id
         if is_blocked_pair(db, user_id, other):
             continue
-        listing = db.get(Listing, conv.listing_id) if conv.listing_id else None
         last = db.scalar(select(Message).where(Message.conversation_id == conv.id)
                          .order_by(desc(Message.id)).limit(1))
-        out.append(ConversationOut(
-            id=conv.id,
-            listing_id=conv.listing_id,
-            listing_title=("Знакомство" if conv.match_key else
-                           (listing.title if listing else "Объявление удалено")),
-            last_text=(last.text or "📷 Фото") if last else "",
-            last_at=last.created_at if last else None,
-            unread=db.scalar(select(func.count()).select_from(Message).where(
-                Message.conversation_id == conv.id, Message.sender_tg_id != user_id, Message.read_at.is_(None))) or 0,
-        ))
+        if conv.id in hides and (last is None or aware(last.created_at) <= aware(hides[conv.id])):
+            continue                                   # hidden by me, nothing new since then
+        unread = db.scalar(select(func.count()).select_from(Message).where(
+            Message.conversation_id == conv.id, Message.sender_tg_id != user_id, Message.read_at.is_(None))) or 0
+        out.append(conversation_card(db, conv, user_id, last, unread))
     epoch = datetime.min.replace(tzinfo=timezone.utc)
     out.sort(key=lambda c: aware(c.last_at) if c.last_at else epoch, reverse=True)
     return out
+
+
+@app.get("/api/conversations/{conv_id}/info", response_model=ConversationOut)
+def conversation_info(conv_id: int, user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
+    """The header of a chat: who it is, which listing, its photo and price."""
+    conv = _get_conversation_for(db, conv_id, user_id)
+    return conversation_card(db, conv, user_id)
+
+
+@app.post("/api/conversations/{conv_id}/hide")
+def hide_conversation(conv_id: int, user_id: str = Depends(writer), db: Session = Depends(get_db)):
+    _get_conversation_for(db, conv_id, user_id)
+    row = db.get(ConvHide, (conv_id, user_id))
+    if row is None:
+        db.add(ConvHide(conv_id=conv_id, user_tg_id=user_id, at=now()))
+    else:
+        row.at = now()
+    db.commit()
+    return {"hidden": True}
+
+
+def message_notice(db: Session, conv: Conversation, sender: str, what: str) -> str:
+    """Who wrote and about what, so the notification is clear without opening the app."""
+    name = person_name(db, sender, conv)
+    if conv.match_key:
+        return f"{name} (знакомства): {what}"[:300]
+    listing = db.get(Listing, conv.listing_id) if conv.listing_id else None
+    about = f" по объявлению «{listing.title}»" if listing is not None else ""
+    return f"{name} пишет{about}:\n{what}"[:300]
 
 
 def _msg_out(m: Message, user_id: str) -> MessageOut:
@@ -518,7 +577,7 @@ def send_message(conv_id: int, payload: MessageIn, user_id: str = Depends(writer
     db.commit()
     db.refresh(msg)
     inbox.touch(db, user_id)
-    notify_user(db, other, f"Новое сообщение в KOREA HUB:\n{text[:200]}", "messages")
+    notify_user(db, other, message_notice(db, conv, user_id, text[:160]), "messages")
     return _msg_out(msg, user_id)
 
 
@@ -543,7 +602,7 @@ async def send_chat_photo(conv_id: int, file: UploadFile = File(...), user_id: s
     db.add(msg)
     db.commit()
     db.refresh(msg)
-    notify_user(db, other, "Новое сообщение в KOREA HUB: 📷 фото", "messages")
+    notify_user(db, other, message_notice(db, conv, user_id, "📷 фото"), "messages")
     return _msg_out(msg, user_id)
 
 

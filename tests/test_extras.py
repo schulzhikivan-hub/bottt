@@ -115,3 +115,27 @@ def test_wizard_draft_roundtrip_and_dating_pause_filters():
     pid = c.get("/api/dating/me", headers=as_user(1)).json()["id"]
     c.post(f"/api/admin/dating/{pid}/reject?reason=Лицо+не+видно", headers=ADMIN)
     assert c.get("/api/dating/me", headers=as_user(1)).json()["note"] == "Лицо не видно"
+
+
+def test_conversation_list_shows_who_and_which_listing_and_hide_comes_back():
+    c, lid, conv = world()
+    with SessionLocal() as db:
+        db.get(User, "2").display_name = "Борис"; db.get(User, "1").display_name = "Анна"; db.commit()
+    c.post(f"/api/conversations/{conv}/messages", json={"text": "Диван ещё продаётся?"}, headers=as_user(2))
+    mine = c.get("/api/conversations", headers=as_user(2)).json()[0]
+    assert mine["role"] == "buyer" and mine["other_name"] == "Анна" and mine["listing_title"] == "Диван"
+    assert mine["last_mine"] is True and mine["listing_price"] and mine["other_initial"] == "А"
+    theirs = c.get("/api/conversations", headers=as_user(1)).json()[0]
+    assert theirs["role"] == "seller" and theirs["other_name"] == "Борис" and theirs["unread"] == 1 and theirs["last_mine"] is False
+    info = c.get(f"/api/conversations/{conv}/info", headers=as_user(1)).json()
+    assert info["other_name"] == "Борис" and info["listing_id"] == lid
+    assert c.get(f"/api/conversations/{conv}/info", headers=as_user(3 if False else 2)).status_code == 200
+    # the notice says who wrote and about what
+    feed = c.get("/api/me/notifications", headers=as_user(1)).json()["items"]
+    assert any(n["text"].startswith("Борис пишет по объявлению «Диван»") for n in feed)
+    # hide: gone from my list, still in the other's; a new message brings it back
+    assert c.post(f"/api/conversations/{conv}/hide", headers=as_user(1)).json() == {"hidden": True}
+    assert c.get("/api/conversations", headers=as_user(1)).json() == []
+    assert len(c.get("/api/conversations", headers=as_user(2)).json()) == 1
+    c.post(f"/api/conversations/{conv}/messages", json={"text": "Алло, вы здесь?"}, headers=as_user(2))
+    assert len(c.get("/api/conversations", headers=as_user(1)).json()) == 1

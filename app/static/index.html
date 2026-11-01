@@ -90,24 +90,35 @@
 
 <section id="view-chats" class="view" hidden>
   <div class="section-head"><div><span class="eyebrow">ПЕРЕПИСКА</span><h2>Сообщения</h2></div></div>
-  <div id="conversations" class="listings"></div>
+  <div class="chips" id="chatTabs">
+    <button class="chip active" data-ctab="all">Все</button><button class="chip" data-ctab="seller">Мне написали</button>
+    <button class="chip" data-ctab="buyer">Я написал(а)</button><button class="chip" data-ctab="match">Знакомства</button><button class="chip" data-ctab="unread">Непрочитанные</button>
+  </div>
+  <div id="conversations" class="convlist"></div>
 </section>
 
 <section id="view-chat" class="chat-view" hidden>
   <div class="chat-head">
     <button class="link" id="chatBack" aria-label="Назад">←</button>
+    <div class="avatar sm" id="chatAvatar">?</div>
     <b class="chat-name"><span id="chatTitle">Чат</span><span class="chat-sub" id="chatSub"></span></b>
-    <button class="link" id="chatBlock">Заблокировать</button>
-    <button class="link" id="chatReport" aria-label="Пожаловаться">⚑</button>
+    <button class="link" id="chatMenuBtn" aria-label="Действия" aria-haspopup="true">⋯</button>
+    <div class="chat-menu" id="chatMenu" hidden>
+      <button id="chatHide">🗂 Скрыть чат</button><button id="chatBlock">🚫 Заблокировать</button><button id="chatReport">⚑ Пожаловаться</button>
+    </div>
   </div>
+  <a class="chat-ad" id="chatAd" href="#" hidden>
+    <img id="chatAdImg" alt=""><span class="ad-ph" id="chatAdPh">📄</span>
+    <span class="ad-body"><b id="chatAdTitle"></b><small id="chatAdPrice"></small></span><span class="ad-go">Открыть ›</span>
+  </a>
   <div id="messages" class="messages"></div>
   <div id="quickReplies" class="quick" aria-label="Быстрые ответы"></div>
   <form id="chatForm" class="chat-form">
     <label class="attach" aria-label="Прикрепить фото">📷<input type="file" id="chatPhoto" accept="image/jpeg,image/png,image/webp" hidden></label>
     <label class="attach" aria-label="Прикрепить PDF или аудио">📎<input type="file" id="chatFile" accept="application/pdf,audio/*" hidden></label>
-    <button type="button" id="chatMic" class="attach" aria-label="Голосовое сообщение" hidden>🎤</button>
     <input id="chatInput" maxlength="2000" placeholder="Сообщение" autocomplete="off">
-    <button type="submit" aria-label="Отправить">➤</button>
+    <button type="button" id="chatMic" class="send alt" aria-label="Голосовое сообщение" hidden>🎤</button>
+    <button type="submit" id="chatSend" class="send" aria-label="Отправить">➤</button>
   </form>
 </section>
 
@@ -193,8 +204,8 @@
     <select id="dAge" aria-label="Возраст"><option value="">Любой возраст</option><option value="18-25">18–25</option><option value="26-35">26–35</option><option value="36-99">36 и старше</option></select>
     <select id="dRegion" aria-label="Регион"></select>
   </div>
-  <div class="chips"><button class="chip" id="dActive" type="button">🟢 Был(а) недавно</button></div>
-  <button class="pill-btn" id="dLikes" type="button" style="margin:8px 0">💌 Меня лайкнули (<span id="dLikesN">0</span>)</button>
+  <div class="chips"><button class="chip" id="dActive" type="button">🟢 Недавно онлайн</button>
+    <button class="chip" id="dLikes" type="button">💌 Меня лайкнули (<span id="dLikesN">0</span>)</button></div>
   <div id="datingList" class="dgrid"></div>
 </section>
 
@@ -417,6 +428,11 @@
 <div id="confirmSheet" class="modal hidden" role="alertdialog" aria-modal="true"><div class="sheet">
 <p id="confirmText" style="white-space:pre-wrap;margin:6px 0 14px;font-weight:600"></p>
 <div class="actions"><button type="button" id="confirmNo" class="secondary">Отмена</button><button type="button" id="confirmYes">Да</button></div></div></div>
+
+<div id="dsheet" class="modal hidden" role="dialog" aria-label="Анкета"><div class="sheet dsheet">
+<div class="sheet-top"><b id="dsName">Анкета</b><button id="dsClose" type="button">✕</button></div>
+<img id="dsPhoto" alt=""><p class="dsmeta" id="dsMeta"></p><p id="dsBio" class="dsbio"></p>
+<div class="actions"><button type="button" id="dsLike">♡ Нравится</button><button type="button" id="dsReport" class="secondary">⚑ Пожаловаться</button></div></div></div>
 
 <div id="lightbox" class="lightbox hidden" role="dialog" aria-label="Просмотр фото"><button id="lbClose" aria-label="Закрыть">✕</button>
 <button id="lbPrev" aria-label="Назад">‹</button><img id="lbImg" alt=""><button id="lbNext" aria-label="Дальше">›</button><div id="lbCount"></div></div>

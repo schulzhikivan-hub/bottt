@@ -118,3 +118,12 @@ class ConversationOut(BaseModel):
     last_text: str
     last_at: datetime | None
     unread: int = 0
+    kind: str = "listing"             # listing | match
+    role: str = "buyer"               # buyer: I wrote to the author; seller: someone wrote to me
+    other_name: str = ""
+    other_initial: str = ""
+    listing_cover: str | None = None
+    listing_price: str = ""
+    listing_category: str = ""
+    listing_status: str = ""
+    last_mine: bool = False

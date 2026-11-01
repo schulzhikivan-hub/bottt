@@ -133,7 +133,8 @@ async def send_attachment(conv_id: int, file: UploadFile = File(...), user_id: s
     db.add(msg)
     db.commit()
     db.refresh(msg)
-    guard.notify_user(db, other, "Новое сообщение в KOREA HUB: " + ("🎤 голосовое" if kind[0] == "audio" else "📎 документ"), "messages")
+    from app.main import message_notice
+    guard.notify_user(db, other, message_notice(db, conv, user_id, "🎤 голосовое сообщение" if kind[0] == "audio" else "📎 документ"), "messages")
     return _msg_out(msg, user_id)
 
 

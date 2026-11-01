@@ -609,3 +609,11 @@ class Claim(Base):
     obj_id: Mapped[str] = mapped_column(String(40), primary_key=True)
     staff: Mapped[str] = mapped_column(String(40))
     until: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ConvHide(Base):
+    """«Скрыть чат»: the chat disappears from the list of one person, and comes back when a new message arrives."""
+    __tablename__ = "conv_hides"
+    conv_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_tg_id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

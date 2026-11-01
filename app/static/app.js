@@ -833,14 +833,36 @@ async function loadFavorites() {
 }
 
 // ---------- чаты ----------
+function relTime(iso) {
+  if (!iso) return "";
+  const d = new Date(iso.endsWith("Z") || iso.includes("+") ? iso : iso + "Z");
+  const days = Math.floor((new Date().setHours(0, 0, 0, 0) - new Date(d).setHours(0, 0, 0, 0)) / 86400000);
+  if (days <= 0) return d.toLocaleTimeString("ru-RU", {hour: "2-digit", minute: "2-digit"});
+  if (days === 1) return "Вчера";
+  if (days < 7) return d.toLocaleDateString("ru-RU", {weekday: "short"});
+  return d.toLocaleDateString("ru-RU", {day: "2-digit", month: "2-digit"});
+}
+let convTab = "all", convItems = [];
+function drawConversations() {
+  const box = $("#conversations");
+  const rows = convItems.filter((c) => convTab === "all" ? true : convTab === "unread" ? c.unread > 0 : convTab === "match" ? c.kind === "match" : c.kind === "listing" && c.role === convTab);
+  document.querySelectorAll("#chatTabs [data-ctab]").forEach((b) => b.classList.toggle("active", b.dataset.ctab === convTab));
+  box.innerHTML = rows.length ? rows.map((c) => `
+    <article class="convrow ${c.unread ? "unread" : ""}" data-chat="${c.id}" data-title="${esc(c.other_name)}">
+      <div class="thumb2 ${c.listing_status && c.listing_status !== "approved" ? "cdead" : ""}">${c.listing_cover ? `<img src="${esc(c.listing_cover)}" alt="" loading="lazy">` : c.kind === "match" ? "💗" : (CAT_ICON[c.listing_category] || "📄")}<span class="mini">${esc(c.other_initial)}</span></div>
+      <div class="cbody"><span class="cname">${esc(c.other_name)}</span>
+        <span class="cad">${c.kind === "match" ? "Знакомство" : esc(c.listing_title)}${c.listing_price ? ` <span class="cprice">· ${esc(c.listing_price)}</span>` : ""}${c.listing_status && c.listing_status !== "approved" && c.kind === "listing" ? ' <span class="cprice">· снято</span>' : ""}</span>
+        <span class="clast">${c.last_mine ? "Вы: " : ""}${esc(c.last_text || "Нет сообщений")}</span></div>
+      <div class="cside"><span class="ctime">${esc(relTime(c.last_at))}</span>${c.unread ? `<span class="cbadge">${c.unread}</span>` : ""}</div>
+    </article>`).join("")
+    : `<div class="empty">${convItems.length ? "В этой вкладке пока пусто." : "Переписок пока нет. Откройте объявление и нажмите «Написать»."}</div>`;
+}
+document.addEventListener("click", (e) => { const t = e.target.closest("#chatTabs [data-ctab]"); if (t) { convTab = t.dataset.ctab; drawConversations(); } });
 async function loadConversations() {
   const box = $("#conversations");
   try {
-    const items = await api("/api/conversations");
-    box.innerHTML = items.length ? items.map((c) => `
-      <article class="listing convo" data-chat="${c.id}" data-title="${esc(c.listing_title)}">
-        <h3>${esc(c.listing_title)}${c.unread ? `<span class="unread-dot">${c.unread}</span>` : ""}</h3><p>${esc(c.last_text || "Нет сообщений")}</p></article>`).join("")
-      : '<div class="empty">Переписок пока нет. Откройте объявление и нажмите «Написать».</div>';
+    convItems = await api("/api/conversations");
+    drawConversations();
   } catch (e) { box.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
 }
 async function openChat(id, title) {
@@ -849,17 +871,58 @@ async function openChat(id, title) {
   $("#chatTitle").textContent = title || "Чат";
   $("#chatSub").textContent = "";
   showView("chat", {push: true});
+  fillChatHeader(id);
   await loadMessages();
   loadChatStatus();
   clearInterval(chatTimer); clearInterval(chatStatusTimer);
   chatTimer = setInterval(loadMessages, 5000);
   chatStatusTimer = setInterval(loadChatStatus, 3500);
-  drawQuickReplies(title);
+  syncSendButtons();
+  drawQuickReplies("match", "buyer");   // пока не пришли данные чата: без подсказок
 }
 let chatStatusTimer = null, lastTypingPing = 0;
-const QUICK = ["Здравствуйте! Ещё актуально?", "Когда можно посмотреть?", "Можно ли снизить цену?", "Спасибо, я подумаю", "Где вы находитесь?"];
-function drawQuickReplies() {
-  $("#quickReplies").innerHTML = QUICK.map((t) => `<button type="button" data-quick="${esc(t)}">${esc(t)}</button>`).join("");
+// Кто пишет и по какому объявлению: имя, карточка объявления с фото и ценой (как на Авито)
+async function fillChatHeader(id) {
+  $("#chatAd").hidden = true; $("#chatMenu").hidden = true;
+  try {
+    const c = await api(`/api/conversations/${id}/info`, {quiet: true});
+    if (currentChat !== id) return;
+    $("#chatTitle").textContent = c.other_name;
+    $("#chatAvatar").textContent = c.other_initial;
+    drawQuickReplies(c.kind, c.role);
+    if (c.kind === "listing" && c.listing_id) {
+      const ad = $("#chatAd");
+      ad.hidden = false; ad.dataset.open = c.listing_id;
+      $("#chatAdTitle").textContent = c.listing_title;
+      $("#chatAdPrice").textContent = (c.role === "seller" ? "Ваше объявление · " : "") + (c.listing_status && c.listing_status !== "approved" ? "снято с публикации" : c.listing_price);
+      $("#chatAdImg").hidden = !c.listing_cover; $("#chatAdPh").hidden = !!c.listing_cover;
+      if (c.listing_cover) $("#chatAdImg").src = c.listing_cover; else $("#chatAdPh").textContent = CAT_ICON[c.listing_category] || "📄";
+    } else if (c.kind === "match") { $("#chatSub").dataset.kind = "match"; }
+  } catch (e) { /* шапка не критична */ }
+}
+$("#chatAd").addEventListener("click", (e) => { e.preventDefault(); const id = $("#chatAd").dataset.open; if (id) openDetail(+id); });
+$("#chatMenuBtn").onclick = (e) => { e.stopPropagation(); $("#chatMenu").hidden = !$("#chatMenu").hidden; };
+document.addEventListener("click", (e) => { if (!e.target.closest("#chatMenu, #chatMenuBtn")) $("#chatMenu").hidden = true; });
+$("#chatHide").onclick = async () => {
+  $("#chatMenu").hidden = true;
+  if (!(await confirmDialog("Скрыть чат из списка? Он вернётся, если вам напишут снова."))) return;
+  try { await api(`/api/conversations/${currentChat}/hide`, {method: "POST"}); toast("Чат скрыт"); goBack(); } catch (err) { toast(err.message); }
+};
+// Пустое поле: справа микрофон, есть текст: кнопка «отправить»
+let micSupported = false;
+function syncSendButtons() {
+  const has = $("#chatInput").value.trim().length > 0;
+  $("#chatSend").hidden = micSupported && !has;
+  $("#chatMic").hidden = !(micSupported && !has);
+}
+$("#chatInput").addEventListener("input", syncSendButtons);
+const QUICK_BUYER = ["Здравствуйте! Ещё актуально?", "Когда можно посмотреть?", "Можно ли снизить цену?", "Спасибо, я подумаю", "Где вы находитесь?"];
+const QUICK_SELLER = ["Да, актуально", "Здравствуйте! Чем помочь?", "Приезжайте, адрес пришлю", "Цена окончательная", "Уже продано, извините"];
+let quickSet = QUICK_BUYER;
+function drawQuickReplies(kind = "listing", role = "buyer") {
+  quickSet = kind === "match" ? [] : role === "seller" ? QUICK_SELLER : QUICK_BUYER;
+  $("#quickReplies").hidden = quickSet.length === 0;
+  $("#quickReplies").innerHTML = quickSet.map((t) => `<button type="button" data-quick="${esc(t)}">${esc(t)}</button>`).join("");
 }
 $("#quickReplies").addEventListener("click", (e) => { const b = e.target.closest("[data-quick]"); if (b) { $("#chatInput").value = b.dataset.quick; $("#chatInput").focus(); } });
 $("#chatInput").addEventListener("input", () => {
@@ -880,7 +943,7 @@ async function sendAttachment(file) {
 $("#chatFile").onchange = (e) => { const f = e.target.files[0]; e.target.value = ""; sendAttachment(f); };
 // Голосовое: кнопка видна, только если браузер умеет записывать звук
 if (window.MediaRecorder && navigator.mediaDevices?.getUserMedia) {
-  $("#chatMic").hidden = false;
+  micSupported = true; syncSendButtons();
   let rec = null, chunks = [], stopTimer = null;
   $("#chatMic").onclick = async () => {
     if (rec) { rec.stop(); return; }
@@ -891,10 +954,10 @@ if (window.MediaRecorder && navigator.mediaDevices?.getUserMedia) {
       rec.onstop = () => {
         clearTimeout(stopTimer); stream.getTracks().forEach((t) => t.stop());
         const blob = new Blob(chunks, {type: rec.mimeType || "audio/webm"});
-        rec = null; $("#chatMic").textContent = "🎤";
+        rec = null; $("#chatMic").textContent = "🎤"; $("#chatMic").classList.remove("rec");
         if (blob.size > 800) sendAttachment(new File([blob], "Голосовое сообщение." + (blob.type.includes("mp4") ? "m4a" : "webm"), {type: blob.type}));
       };
-      rec.start(); $("#chatMic").textContent = "⏹";
+      rec.start(); $("#chatMic").textContent = "⏹"; $("#chatMic").classList.add("rec");
       stopTimer = setTimeout(() => rec && rec.stop(), 60000);   // не длиннее минуты
     } catch (err) { toast("Нет доступа к микрофону"); }
   };
@@ -928,8 +991,15 @@ function renderMessages(items, stick) {
   const all = [...olderMessages, ...items];
   const box = $("#messages");
   const before = box.scrollHeight;
+  let lastDay = "";
+  const dayLabel = (iso) => {
+    const d = new Date(iso.endsWith("Z") || iso.includes("+") ? iso : iso + "Z");
+    const diff = Math.floor((new Date().setHours(0, 0, 0, 0) - new Date(d).setHours(0, 0, 0, 0)) / 86400000);
+    return diff <= 0 ? "Сегодня" : diff === 1 ? "Вчера" : d.toLocaleDateString("ru-RU", {day: "numeric", month: "long"});
+  };
   box.innerHTML = (hasOlder ? '<button class="link older" data-older>Ранее</button>' : "") +
-    (all.length ? all.map(msgHtml).join("") : '<div class="empty">Напишите первое сообщение</div>');
+    (all.length ? all.map((m) => { const lab = dayLabel(m.created_at); const sep = lab !== lastDay ? `<div class="dayline">${lab}</div>` : ""; lastDay = lab; return sep + msgHtml(m); }).join("")
+      : '<div class="empty">Напишите первое сообщение</div>');
   box.scrollTop = stick ? box.scrollHeight : box.scrollHeight - before;
 }
 async function loadMessages() {
@@ -997,7 +1067,7 @@ $("#chatForm").onsubmit = async (e) => {
   if (!text || !currentChat) return;
   try {
     await api(`/api/conversations/${currentChat}/messages`, {method: "POST", body: JSON.stringify({text})});
-    input.value = "";
+    input.value = ""; syncSendButtons();
     lastMessageKey = ""; olderMessages = []; hasOlder = false;
     await loadMessages();
   } catch (err) { toast(err.message); }
@@ -1794,7 +1864,39 @@ $("#closeServices").onclick = () => $("#services").classList.add("hidden");
 // ---------- знакомства ----------
 let datingMode = "feed";
 let pendingSelfie = null;
-let datingActive = false;
+let datingActive = false, dsCurrent = null;
+function openDatingSheet(id) {
+  const p = window.__dating?.[id];
+  if (!p) return;
+  dsCurrent = p;
+  $("#dsName").textContent = (p.name ? p.name + ", " : "") + p.age + (p.verified ? " ✔" : "");
+  $("#dsPhoto").src = p.photo_url;
+  $("#dsMeta").textContent = "📍 " + p.city + (p.verified ? " · анкета подтверждена" : "");
+  $("#dsBio").textContent = p.bio || "О себе ничего не написано";
+  $("#dsheet").classList.remove("hidden");
+}
+$("#dsClose").onclick = () => $("#dsheet").classList.add("hidden");
+$("#dsheet").addEventListener("click", (e) => { if (e.target.id === "dsheet") $("#dsheet").classList.add("hidden"); });
+$("#dsLike").onclick = async () => {
+  if (!dsCurrent || !(await requireConsent())) return;
+  try {
+    const r = await api(`/api/dating/${dsCurrent.id}/like`, {method: "POST"});
+    $("#dsheet").classList.add("hidden");
+    if (r.match) { toast("Взаимная симпатия! Можно писать"); openChat(r.conversation_id, dsCurrent.name || "Знакомство"); }
+    else { toast("Отправлено"); document.querySelector(`[data-profile="${dsCurrent.id}"]`)?.remove(); }
+  } catch (err) { toast(err.message); }
+};
+$("#dsReport").onclick = async () => {
+  if (!dsCurrent || !(await requireConsent())) return;
+  const reason = await askReason();
+  if (!reason) return;
+  try { await api("/api/reports", {method: "POST", body: JSON.stringify({target_type: "dating", target_id: String(dsCurrent.id), reason})}); toast("Жалоба отправлена. Спасибо!"); $("#dsheet").classList.add("hidden"); }
+  catch (err) { toast(err.message); }
+};
+document.addEventListener("click", (e) => {
+  const card = e.target.closest("#datingList .dcard");
+  if (card && !e.target.closest("button")) openDatingSheet(card.dataset.profile);
+});
 $("#dActive").onclick = () => { datingActive = !datingActive; $("#dActive").classList.toggle("on", datingActive); loadDating(); };
 async function loadDating() {
   const box = $("#datingList");
@@ -1813,6 +1915,7 @@ async function loadDating() {
     $("#dLikesN").textContent = likes.count;
     $("#dLikes").classList.toggle("on", datingMode === "likes");
     const items = datingMode === "likes" ? likes.items : await api("/api/dating?" + params);
+    window.__dating = Object.fromEntries(items.map((p) => [p.id, p]));
     box.innerHTML = items.length ? items.map((p) => `
       <article class="dcard" data-profile="${p.id}">
         <img src="${esc(p.photo_url)}" alt="" loading="lazy">

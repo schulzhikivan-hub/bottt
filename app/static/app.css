@@ -535,3 +535,69 @@ body.fs1{zoom:1.1}body.fs2{zoom:1.22}
 .guestcard h2{margin:4px 0 0}
 .guestcard p{margin:0;color:var(--muted,#6b7385)}
 .guestcard .submit{width:100%;margin-top:6px}
+
+/* ---- список переписок как на Авито ---- */
+.convlist{display:flex;flex-direction:column;gap:2px;margin-top:6px}
+.convrow{display:grid;grid-template-columns:56px 1fr auto;gap:12px;align-items:center;padding:12px 4px;border-bottom:1px solid var(--border);cursor:pointer}
+.convrow .thumb2{width:56px;height:56px;border-radius:12px;overflow:hidden;background:var(--soft,#e9eef7);display:grid;place-items:center;font-size:24px;position:relative}
+.convrow .thumb2 img{width:100%;height:100%;object-fit:cover;display:block}
+.convrow .thumb2 .mini{position:absolute;right:-3px;bottom:-3px;width:24px;height:24px;border-radius:50%;background:var(--accent,#1b4b9b);color:#fff;font-size:12px;font-weight:700;display:grid;place-items:center;border:2px solid var(--bg,#f3f6fb)}
+.convrow .cbody{min-width:0;display:flex;flex-direction:column;gap:2px}
+.convrow .cname{font-weight:700;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.convrow .cad{font-size:13px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.convrow .cad .cprice{color:var(--muted,#6b7385)}
+.convrow .clast{font-size:13px;color:var(--muted,#6b7385);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.convrow.unread .clast{color:var(--text);font-weight:600}
+.convrow .cside{display:flex;flex-direction:column;align-items:flex-end;gap:6px;align-self:start;padding-top:2px}
+.convrow .ctime{font-size:12px;color:var(--muted,#6b7385)}
+.convrow .cbadge{background:var(--accent,#1b4b9b);color:#fff;border-radius:11px;min-width:22px;height:22px;display:grid;place-items:center;font-size:12px;font-weight:700;padding:0 6px}
+.convrow .crole{font-size:11px;color:var(--muted,#6b7385);background:var(--soft,#eef1f7);border-radius:8px;padding:1px 7px;align-self:flex-start;margin-bottom:2px}
+.convrow .cdead{opacity:.55}
+/* ---- шапка чата ---- */
+.chat-head{position:relative;gap:10px}
+.chat-head .avatar.sm{width:38px;height:38px;font-size:16px;flex:none}
+.chat-head .link{font-size:20px;line-height:1}
+.chat-menu{position:absolute;right:10px;top:54px;z-index:30;background:var(--card);border:1px solid var(--border);border-radius:14px;box-shadow:0 8px 28px rgba(15,30,60,.18);padding:6px;display:flex;flex-direction:column;min-width:200px}
+.chat-menu[hidden]{display:none}
+.chat-menu button{border:0;background:transparent;text-align:left;padding:11px 12px;font-size:15px;border-radius:10px;color:var(--text)}
+.chat-menu button:active{background:var(--soft,#eef1f7)}
+.chat-ad{flex:none;display:flex;align-items:center;gap:10px;padding:8px 14px;background:var(--card);border-bottom:1px solid var(--border);text-decoration:none;color:var(--text)}
+.chat-ad[hidden]{display:none}
+.chat-ad img{width:46px;height:46px;border-radius:10px;object-fit:cover;flex:none}
+.chat-ad .ad-ph{width:46px;height:46px;border-radius:10px;background:var(--soft,#e9eef7);display:grid;place-items:center;font-size:22px;flex:none}
+.chat-ad .ad-body{flex:1;min-width:0;display:flex;flex-direction:column}
+.chat-ad .ad-body b{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chat-ad .ad-body small{color:var(--muted,#6b7385);font-size:13px}
+.chat-ad .ad-go{font-size:13px;color:var(--accent,#1b4b9b);font-weight:600;flex:none}
+.dayline{align-self:center;font-size:12px;color:var(--muted,#6b7385);background:var(--soft,#e9eef7);border-radius:10px;padding:3px 12px;margin:6px 0}
+/* ---- строка ввода ---- */
+.chat-form{align-items:center;gap:6px;padding:8px 10px}
+.chat-form .attach{width:34px;height:38px;font-size:19px;opacity:.75}
+.chat-form input{padding:10px 14px}
+.chat-form .send{width:42px;height:42px;border-radius:50%;font-size:18px;display:grid;place-items:center;padding:0;background:var(--accent,#1b4b9b)}
+.chat-form .send[hidden]{display:none}
+.chat-form .send.rec{background:#d93025}
+.quick{padding:6px 12px;gap:6px}
+/* ---- знакомства: ровнее на телефоне ---- */
+.dgrid{gap:12px}
+.dcard{aspect-ratio:4/5;border-radius:18px;box-shadow:0 6px 18px rgba(15,30,60,.12);cursor:pointer;background:var(--soft,#e9eef7)}
+.dcard .dinfo{padding:34px 12px 12px}
+.dcard .dinfo b{font-size:17px;text-shadow:0 1px 4px #0006}
+.dcard .dinfo span{font-size:13px}
+.dcard .dh{top:auto;bottom:10px;right:10px;width:40px;height:40px;font-size:20px;box-shadow:0 2px 8px #0003}
+.dcard .dr{top:8px;left:auto;right:8px;width:28px;height:28px;font-size:12px;background:#ffffffb8}
+.dcard .dinfo{right:56px}
+.dfilters{margin:8px 0 0}.dfilters select{padding:10px 12px;font-size:14px}
+#datingChips{margin-top:4px}
+.dsheet{max-height:92vh;overflow-y:auto}
+.dsheet img{width:100%;max-height:52vh;object-fit:cover;border-radius:14px;display:block}
+.dsheet .dsmeta{color:var(--muted,#6b7385);margin:10px 0 2px}.dsheet .dsbio{white-space:pre-wrap;margin:4px 0 12px}
+
+#chatAvatar{width:38px;height:38px;border-radius:50%;background:var(--accent,#1b4b9b);color:#fff;font-weight:700;font-size:16px;display:grid;place-items:center;flex:none}
+.quick[hidden]{display:none}
+
+.dcard .dr{display:none}
+.dcard .dh{top:10px;bottom:auto;right:10px;width:38px;height:38px;font-size:19px}
+.dcard .dinfo{right:0;padding:40px 12px 12px}
+.dcard .dinfo b{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dcard .dinfo span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
