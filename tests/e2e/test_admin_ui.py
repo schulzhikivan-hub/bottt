@@ -140,7 +140,11 @@ def test_listing_decision_buttons_work_in_the_panel(admin):
     page.locator("[data-lrow]").first.click()
     page.wait_for_selector("#drawer [data-act=hide]", timeout=10000)
     page.click("#drawer [data-act=hide]")
-    page.wait_for_function("() => document.querySelector('#status').textContent.startsWith('Обновлено')", timeout=15000)
+    for _ in range(50):                                   # the click starts a request; wait until the server has applied it
+        with SessionLocal() as db:
+            if db.query(Listing).first().status == "hidden":
+                break
+        page.wait_for_timeout(200)
     with SessionLocal() as db:
         assert db.query(Listing).first().status == "hidden"
     assert not errors, errors
