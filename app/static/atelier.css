@@ -156,3 +156,61 @@ a{color:#14556a}
  #view-detail .detail{padding:10px 24px}
 }
 @media(max-width:420px){.dgrid{gap:8px}#view-dating .dfilters{grid-template-columns:1fr}.fsec{padding:12px}}
+
+
+/* KOREA HUB — premium editorial home, keeping all existing JS hooks intact. */
+.landing .hero{
+  min-height:clamp(290px,38vw,440px);
+  display:flex;align-items:center;
+  margin:0 -22px 22px;padding:clamp(30px,5vw,66px);
+  border-radius:0 0 34px 34px;
+  background:
+    linear-gradient(90deg,rgba(7,25,42,.88) 0%,rgba(7,25,42,.62) 48%,rgba(7,25,42,.12) 100%),
+    linear-gradient(0deg,rgba(7,25,42,.24),transparent 55%),
+    url("https://images.unsplash.com/photo-1538485399081-7c897e8d7a4b?auto=format&fit=crop&w=2200&q=85") center 48%/cover,
+    linear-gradient(115deg,#102f43,#176b73);
+  box-shadow:0 22px 55px rgba(10,34,49,.20);
+}
+.landing .hero:before{width:420px;height:420px;right:4%;top:-240px;border-color:#ffffff30;box-shadow:0 0 0 34px #ffffff0b,0 0 0 78px #ffffff08,0 0 0 124px #ffffff06}
+.landing .hero:after{width:280px;height:280px;right:24%;bottom:-230px;background:#e28b6866;filter:blur(18px)}
+.landing .hero .skyline{opacity:.05}
+.landing .hero-text{max-width:660px;text-align:left;align-items:flex-start}
+.landing .hero-text span{font-size:11px;letter-spacing:.22em;color:#e1f0ed}
+.landing .hero-text b{font-size:clamp(42px,7vw,76px);letter-spacing:.015em;margin:13px 0 10px;text-shadow:0 8px 30px #061b2c80}
+.landing .hero-text small{display:block;max-width:460px;color:#f0f5f4;font-size:clamp(15px,1.6vw,19px);line-height:1.55}
+.landing .tiles{grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin:22px 0 26px}
+.landing .tiles button{min-height:112px;padding:17px;border-radius:20px;font-size:13px;box-shadow:0 9px 28px rgba(19,48,61,.055)}
+.landing .tiles button svg{width:27px;height:27px}
+.landing .tiles button:hover{transform:translateY(-3px);box-shadow:0 17px 34px rgba(19,48,61,.11)}
+.landing .sticky{top:68px;padding:14px 0 12px}
+.landing .searchbar input{min-height:60px;font-size:16px}
+.landing .chips{padding-top:14px}
+.landing .blockhead{margin:36px 0 15px}
+.landing .blockhead h2{font-size:clamp(20px,2.4vw,27px)}
+.landing #landingBlocks{padding-bottom:16px}
+.landing .picks:empty,.landing .goods:empty{display:none}
+.landing .listings{grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.landing .listing{border-radius:20px;padding:18px}
+.landing .listing img{border-radius:14px}
+@media(min-width:1100px){
+ .landing .hero{margin-left:calc((1240px - 100vw)/2 - 22px);margin-right:calc((1240px - 100vw)/2 - 22px);padding-left:max(48px,calc((100vw - 1160px)/2))}
+ .landing .tiles{grid-template-columns:repeat(5,minmax(0,1fr))}
+}
+@media(max-width:760px){
+ .landing .hero{min-height:310px;margin:0 -16px 18px;padding:34px 22px 48px;border-radius:0 0 26px 26px;background-position:center,center,58% center,center}
+ .landing .hero-text{max-width:90%}
+ .landing .hero-text b{font-size:44px}
+ .landing .hero-text small{font-size:15px}
+ .landing .tiles{grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;margin:16px 0 20px}
+ .landing .tiles button{min-height:94px;padding:13px;border-radius:16px;font-size:12px}
+ .landing .sticky{top:58px}
+ .landing .listings{grid-template-columns:1fr}
+}
+@media(max-width:390px){
+ .landing .hero{min-height:280px}
+ .landing .hero-text b{font-size:38px}
+ .landing .tiles button{padding:11px;min-height:88px}
+}
+@media(prefers-reduced-motion:reduce){
+ .landing .tiles button,.landing .listing{transition:none}
+}
