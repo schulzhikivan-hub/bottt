@@ -2104,7 +2104,7 @@ $("#detailBack").onclick = goBack;
 let servicesFor = null;     // объявление, для которого открыта витрина
 let promoCode = "";        // применённый промокод
 let promoPrices = {};      // service code -> цена со скидкой
-const SAMPLE = {bump: ["⬆ Поднято", ""], vip: ["VIP", ""], pin: ["📌 Закреплено", ""], highlight: ["★ Выделено", "hl"]};
+const SAMPLE = {bump: ["⬆ Поднято", ""], vip: ["VIP", ""], pin: ["📌 Закреплено", ""], highlight: ["★ Выделено", "hl"], autobump: ["🔁 Автоподнятие", ""], pack: ["📦 Максимум: VIP, закрепление, выделение, автоподнятие", "hl"]};
 function renderServices(data) {
   $("#serviceFor").textContent = "Для объявления: " + data.title;
   const balNote = data.balance ? `<p class="muted">Баланс ${data.balance_of === "company" ? "компании" : "личный"}: ${data.balance} KH</p>` : "";
@@ -2115,7 +2115,7 @@ function renderServices(data) {
       ? `<s>${o.stars}</s>${promoPrices[o.code]} KH` : `${o.stars} KH`;
     const [badge, cls] = SAMPLE[o.kind] || ["", ""];
     const until = o.active_until ? ` до ${fmtDate(o.active_until).split(",")[0]}` : "";
-    return `<article class="listing svc"><div class="svc-head"><h3>${esc(o.title)}</h3><span class="svc-price">${price}</span></div>
+    return `<article class="listing svc"><div class="svc-head"><h3>${esc(o.kind === "pack" ? "Пакет «Максимум»" : o.title)}</h3><span class="svc-price">${price}</span></div>
       <p>${esc(o.what)}${o.days > 1 ? " · " + o.days + " дн." : ""}</p>
       <div class="sample ${cls}"><span class="promo ${o.kind}" style="margin:0">${badge}</span> так выглядит в ленте</div>
       ${o.available ? `<div class="actions"><button data-buy="${esc(o.code)}" data-listing="${servicesFor}">Оплатить ${promoPrices[o.code] ?? o.stars} KH</button>${data.balance > 0 && data.can_pay !== false ? `<button class="secondary" data-buy="${esc(o.code)}" data-listing="${servicesFor}" data-bal="1">С баланса</button>` : ""}</div>`
