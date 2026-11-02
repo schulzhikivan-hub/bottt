@@ -10,3 +10,13 @@ def test_every_id_used_by_the_new_user_blocks_exists_in_the_page():
         assert f'id="{ident}"' in html, ident
         assert f'"#{ident}"' in js or ident in ("cabPerson", "cabCompany"), ident
     assert 'id="postAs"' not in html and "fillPostAs" not in js        # no «post as» chooser: the place you come from decides
+
+
+def test_dark_theme_is_opt_in_and_never_touches_the_light_theme():
+    css = (STATIC / "app.css").read_text()
+    block = css[css.index("/* тёмная тема"):]
+    for line in block.split("\n"):
+        if "{" in line and not line.startswith(("/*", "html[data-theme=dark]")):
+            raise AssertionError("a rule of the dark block is not scoped to the dark theme: " + line[:80])
+    js = (STATIC / "app.js").read_text()
+    assert 'localStorage.getItem(THEME_KEY) || "light"' in js        # the default is the light theme as before

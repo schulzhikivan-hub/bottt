@@ -98,6 +98,15 @@ function toast(msg) {
 }
 const fmtDate = (s) => (s ? new Date(s.replace(" ", "T")).toLocaleString("ru-RU") : "");
 // KH — внутренняя валюта сайта: баланс и цены в KH; звёзды Telegram (⭐) покупают KH по курсу обменника
+// тема: «светлая» (как раньше), «тёмная» или «как в Telegram»; выбирает человек, по умолчанию ничего не меняется
+const THEME_KEY = "khTheme";
+function applyTheme() {
+  let t = "light";
+  try { t = localStorage.getItem(THEME_KEY) || "light"; } catch (e) { t = "light"; }
+  const dark = t === "dark" || (t === "tg" && (window.Telegram?.WebApp?.colorScheme === "dark"));
+  document.documentElement.dataset.theme = dark ? "dark" : "light";
+}
+applyTheme();
 let mailOn = false;      // подключена ли почта на сервере (письма подтверждения и восстановления)
 let khInfo = {kh_per_star: 1, balance_only: false, min: 10, max: 10000};
 const starsFor = (kh) => Math.max(1, Math.ceil(kh / (khInfo.kh_per_star || 1) - 1e-9));
@@ -1604,6 +1613,7 @@ async function openMenu(key) {
         <button class="secondary" id="setAvatarDel">Убрать</button><button id="setNameSave">Сохранить имя</button></div>
       <div class="set-row"><div><b>Вход на сайт</b><small>${me?.account?.email ? esc(me.account.email) + (me.account.email_verified ? " ✔ подтверждён" : "") + (me.account.has_password ? " · пароль задан" : " · пароль не задан") : "E-mail и пароль не заданы"}</small></div><button class="secondary" id="setLogin">${me?.account?.has_password ? "Изменить" : "Задать"}</button></div>
       ${mailOn && me?.account?.email && !me.account.email_verified ? '<div class="set-row"><div><b>Подтвердить e-mail</b><small>Пришлём письмо со ссылкой: подтверждённый e-mail нужен, чтобы восстановить пароль</small></div><button class="secondary" id="setConfirmMail">Отправить</button></div>' : ""}
+      <div class="set-row"><div><b>Тема</b><small>Светлая, тёмная или как в Telegram</small></div><select id="setTheme"><option value="light">Светлая</option><option value="dark">Тёмная</option><option value="tg">Как в Telegram</option></select></div>
       <div class="set-row"><div><b>Город</b><small>${esc(me?.city || "не выбран")}</small></div><button class="secondary" id="setCity">Изменить</button></div>
       <div class="set-row"><div><b>Виза</b><small>Видна только вам: подставляется в отклики и фильтры</small></div>
         <select id="myVisa"><option value="">Не указана</option>${fieldDefs.visas.map((v) => `<option value="${v.value}">${v.label}</option>`).join("")}</select></div>
@@ -1631,6 +1641,8 @@ async function openMenu(key) {
       catch (err) { toast(err.message); }
     };
     $("#setCity").onclick = openCity;
+    $("#setTheme").value = localStorage.getItem(THEME_KEY) || "light";
+    $("#setTheme").onchange = (e) => { localStorage.setItem(THEME_KEY, e.target.value); applyTheme(); toast("Тема изменена"); };
     $("#setLogin").onclick = () => openSignup("edit");
     if ($("#setConfirmMail")) $("#setConfirmMail").onclick = async () => {
       try { await api("/api/me/account/email-confirm/send", {method: "POST"}); toast("Письмо отправлено: проверьте почту (и «Спам»)"); } catch (err) { toast(err.message); }
@@ -3630,3 +3642,4 @@ api("/api/mail-state", {quiet: true}).then((x) => { mailOn = Boolean(x.enabled);
   window.addEventListener("online", () => { bar.hidden = true; toast("Связь вернулась"); homeLoaded = false; if (currentView === "home") loadCatalog(); });
   if (navigator.onLine === false) bar.hidden = false;
 })();
+try { tg?.onEvent?.("themeChanged", applyTheme); } catch (e) { /* без событий темы */ }

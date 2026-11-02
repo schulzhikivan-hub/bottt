@@ -1622,17 +1622,28 @@ $("#main").addEventListener("click", async (e) => {
 
 // ---- возвраты ----
 let refundFilter = "open";
+const REF_ST = {new: "новая", in_progress: "в работе", approved: "возвращено", partially_refunded: "возвращено частично", rejected: "отказано", cancelled: "отменён"};
+const REF_COLS = {
+  id: ["№", (r) => r.id, (r) => r.id],
+  payment: ["Платёж", (r) => `#${r.payment_id}<br><small class="muted">${esc(r.service)}</small>`, (r) => r.payment_id],
+  user: ["Человек", (r) => `<a href="#" data-gu="${esc(r.user)}">${esc(r.user)}</a>`, (r) => r.user],
+  paid: ["Сумма платежа", (r) => `${r.paid ?? "—"} ⭐${r.amount ? `<br><small>возвращено ${r.amount}</small>` : ""}`, (r) => r.paid ?? -1],
+  reason: ["Причина", (r) => `${esc(r.reason)}${r.answer ? `<br><small class="muted">Ответ: ${esc(r.answer)}</small>` : ""}`, (r) => r.reason],
+  status: ["Статус", (r) => esc(REF_ST[r.status] || r.status), (r) => r.status],
+};
+const REF_DEFAULT = ["id", "payment", "user", "paid", "reason", "status"];
 async function loadRefunds() {
+  const kitR = listKit("refunds", REF_COLS, REF_DEFAULT, () => ({status: refundFilter}), (x) => { refundFilter = x.status || "open"; });
+  kitR.groupFns = {status: (r) => REF_ST[r.status] || r.status, service: (r) => r.service, user: (r) => r.user};
+  const bar = await kitToolbar(kitR, {status: "статус", service: "услуга", user: "человек"});
   const rows = await api(`/api/admin/refunds?status=${refundFilter}`);
   const ST = {new: "новая", in_progress: "в работе", approved: "возвращено", partially_refunded: "возвращено частично", rejected: "отказано", cancelled: "отменён"};
   $("#main").innerHTML = `<div class="card"><div class="row">${[["open", "Открытые"], ["all", "Все"], ["approved", "Возвращённые"], ["rejected", "Отказы"]].map(([k, n]) => `<button class="act ${k === refundFilter ? "" : "gray"}" data-rff="${k}">${n}</button>`).join("")}
     <a class="act gray" style="text-decoration:none" href="#" id="refundCsv">⬇ Выгрузка CSV</a></div>
-    ${rows.length ? `<table><tr><th>№</th><th>Платёж</th><th>Человек</th><th>Сумма платежа</th><th>Причина</th><th>Статус</th><th></th></tr>${rows.map((r) => `<tr data-rid="${r.id}"><td>${r.id}</td><td>#${r.payment_id}<br><small class="muted">${esc(r.service)}</small></td>
-      <td><a href="#" data-gu="${esc(r.user)}">${esc(r.user)}</a></td><td>${r.paid ?? "—"} ⭐${r.amount ? `<br><small>возвращено ${r.amount}</small>` : ""}</td><td>${esc(r.reason)}${r.answer ? `<br><small class="muted">Ответ: ${esc(r.answer)}</small>` : ""}</td>
-      <td>${esc(ST[r.status] || r.status)}</td><td>
+    ${bar}${rows.length ? kitTable(kitR, rows, (r) => `data-rid="${r.id}"`, (r) => `
       ${r.status === "new" ? '<button class="act gray" data-rf="take">Взять</button>' : ""}
       ${["new", "in_progress"].includes(r.status) ? '<button class="act ok" data-rf="approve-balance">На баланс (остаток)</button><button class="act warn" data-rf="approve-full">Всё в Telegram</button><button class="act no" data-rf="reject">Отказать</button>' : ""}
-      ${["approved", "partially_refunded"].includes(r.status) && r.mode === "balance" ? '<button class="act gray" data-rf="cancel">Отменить (24 ч)</button>' : ""}</td></tr>`).join("")}</table>` : '<p class="muted">Заявок нет.</p>'}</div>`;
+      ${["approved", "partially_refunded"].includes(r.status) && r.mode === "balance" ? '<button class="act gray" data-rf="cancel">Отменить (24 ч)</button>' : ""}`) : '<p class="muted">Заявок нет.</p>'}</div>`;
 }
 $("#main").addEventListener("click", async (e) => {
   const f = e.target.closest("[data-rff]");
