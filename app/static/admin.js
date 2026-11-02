@@ -135,6 +135,18 @@ const TABS = [
   {key: "security", label: "Безопасность", roles: SUP, title: "Система: безопасность, функции, просмотры данных, входы"},
   {key: "settings", label: "Выгрузки", roles: ADM, title: "Система: выгрузки и мои входы"},
 ];
+const SECTION_HELP = {
+  home: "Сводка по работе сервиса и задачам, требующим внимания.",
+  listings: "Проверка новых объявлений, исправления и массовые операции.",
+  people: "Пользователи, работодатели, резюме, отзывы и права сотрудников.",
+  dating: "Проверка анкет знакомств и управление опубликованными профилями.",
+  support: "Жалобы, обращения пользователей и график дежурств.",
+  catalog: "Справочники, статьи и тексты, которые видят пользователи.",
+  marketing: "Баннеры, рассылки, рекламные размещения и акции.",
+  money: "Платежи, возвраты, обмен KH и тарифы.",
+  rules: "Настройки поиска, словари и правила размещения.",
+  system: "Журнал действий, ошибки, безопасность и настройки."
+};
 const TAB_SECTION = Object.fromEntries(SECTIONS.flatMap((s) => s.tabs.map((k) => [k, s.key])));
 const secTabs = (sec) => SECTIONS.find((s) => s.key === sec).tabs.map((k) => TABS.find((t) => t.key === k)).filter((t) => t && t.roles.includes(role()));
 const lastTab = (sec) => { const k = sessionStorage.getItem("adminTab:" + sec); return secTabs(sec).find((t) => t.key === k) || secTabs(sec)[0]; };
@@ -291,7 +303,8 @@ function show(tab) {
   current = tab;
   const sec = TAB_SECTION[tab];
   if (sec) sessionStorage.setItem("adminTab:" + sec, tab);
-  document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("active", b.dataset.sec === sec));
+  document.querySelectorAll("#tabs button").forEach((b) => { const active = b.dataset.sec === sec; b.classList.toggle("active", active); if (active) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current"); });
+  const hint = $("#sectionHint"); hint.textContent = SECTION_HELP[sec] || ""; hint.hidden = !hint.textContent;
   renderSubnav(tab);
   $("#title").textContent = def.title;
   say("Загрузка…");
