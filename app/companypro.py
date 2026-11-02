@@ -1,6 +1,7 @@
 """«Про» for a company: a monthly plan paid from the COMPANY balance in KH. It lifts the limits (more active listings and
 a bigger team) and shows a badge on the public page."""
 import datetime as dt
+import secrets
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import DateTime, Integer
@@ -72,9 +73,10 @@ def buy(company_id: int, user_id: str = Depends(writer), db: Session = Depends(g
         db.add(CompanyPlan(company_id=c.id, until=base + dt.timedelta(days=DAYS)))
     else:
         row.until = base + dt.timedelta(days=DAYS)
+    token = secrets.token_urlsafe(10)                      # unique even for two purchases in one second
     db.add(Payment(user_tg_id=user_id, listing_id=None, service_code=CODE, stars=0, list_stars=price, balance_used=price,
-                   payload=f"pro-{c.id}-{int(now().timestamp())}", status="paid", created_at=now(), paid_at=now(),
-                   telegram_payment_charge_id=f"balance-pro-{c.id}-{int(now().timestamp())}", company_id=c.id, note="Подписка «Про»"))
+                   payload=f"pro-{c.id}-{token}", status="paid", created_at=now(), paid_at=now(),
+                   telegram_payment_charge_id=f"balance-pro-{c.id}-{token}", company_id=c.id, note="Подписка «Про»"))
     log_action(db, user_id, "company.pro", "company", c.id, f"{price} KH, +{DAYS} дн.")
     db.commit()
     return info(db, c.id)
