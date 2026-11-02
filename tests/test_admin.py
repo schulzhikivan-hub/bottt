@@ -30,7 +30,8 @@ def test_admin_page_served(client):
     assert r.status_code == 200
     assert "админ-панель" in r.text
     assert "/static/admin-atelier.css?v=" in r.text
-    css = client.get(r.text.split('/static/admin-atelier.css?v=', 1)[1].split('"', 1)[0].join(["/static/admin-atelier.css?v=", ""]))
+    css_url = "/static/admin-atelier.css?v=" + r.text.split('/static/admin-atelier.css?v=', 1)[1].split('"', 1)[0]
+    css = client.get(css_url)
     assert css.status_code == 200
 
 
@@ -38,7 +39,8 @@ def test_public_page_loads_redesign_assets(client):
     r = client.get("/")
     assert r.status_code == 200
     assert "/static/atelier.css?v=" in r.text
-    css = client.get(r.text.split('/static/atelier.css?v=', 1)[1].split('"', 1)[0].join(["/static/atelier.css?v=", ""]))
+    css_url = "/static/atelier.css?v=" + r.text.split('/static/atelier.css?v=', 1)[1].split('"', 1)[0]
+    css = client.get(css_url)
     assert css.status_code == 200
 
 
