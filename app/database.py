@@ -205,3 +205,5 @@ def migrate() -> None:
         conn.execute(text("ALTER TABLE admins ADD COLUMN IF NOT EXISTS base_role VARCHAR(20)"))
         conn.execute(text("ALTER TABLE admins ADD COLUMN IF NOT EXISTS elevated_until TIMESTAMPTZ"))
         conn.execute(text("ALTER TABLE notifications ADD COLUMN IF NOT EXISTS tg_pending BOOLEAN NOT NULL DEFAULT FALSE"))
+        # the public page of a company got a cover picture after the table was first created on some servers
+        conn.execute(text("ALTER TABLE IF EXISTS company_pages ADD COLUMN IF NOT EXISTS cover_key VARCHAR(40)"))
