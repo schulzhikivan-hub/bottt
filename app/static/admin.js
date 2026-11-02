@@ -1294,10 +1294,24 @@ $("#main").addEventListener("click", async (e) => {
 // ---- платежи и промокоды ----
 let payFilter = {q: "", status: "", service: "", since: "", until: ""}, payLimit = 30;
 $("#main").addEventListener("click", (e) => { if (e.target.id === "payMore") { payLimit += 30; reload(); } });
+const PAY_COLS = {
+  id: ["№", (p) => p.id, (p) => p.id],
+  user: ["Кто", (p) => `<a href="#" data-gu="${esc(p.user)}">${who(p.name, p.user)}</a>`, (p) => (p.name || p.user)],
+  listing: ["Объявление", (p) => (p.listing_id ? `<a href="#" data-preview="${p.listing_id}">#${p.listing_id}</a>` : "—"), (p) => p.listing_id || 0],
+  service: ["Услуга", (p) => `${esc(p.service_title)}${p.promo ? ` · код ${esc(p.promo)}` : ""}`, (p) => p.service_title],
+  stars: ["⭐ / KH", (p) => p.stars, (p) => p.stars],
+  when: ["Когда", (p) => esc(fmt(p.paid_at || p.created_at)), (p) => String(p.paid_at || p.created_at)],
+  status: ["Статус", (p) => esc(PAY_RU[p.status] || p.status), (p) => p.status],
+  promo: ["Промокод", (p) => esc(p.promo || "—"), (p) => p.promo || ""],
+};
+const PAY_DEFAULT = ["id", "user", "listing", "service", "stars", "when", "status"];
 async function loadPayments() {
   const qs = new URLSearchParams({limit: String(payLimit), ...Object.fromEntries(Object.entries(payFilter).filter(([, v]) => v))});
   const [pl, promos, an] = await Promise.all([api("/api/admin/payments-list?" + qs), api("/api/admin/promos"), api("/api/admin/analytics?days=30")]);
   const sold = an.days.filter((d) => d.payments).reverse();
+  const kitP = listKit("payments", PAY_COLS, PAY_DEFAULT, () => payFilter, (x) => { payFilter = {q: "", status: "", service: "", since: "", until: "", ...x}; payLimit = 30; });
+  kitP.groupFns = {status: (p) => PAY_RU[p.status] || p.status, service: (p) => p.service_title, user: (p) => who(p.name, p.user).replace(/<[^>]+>/g, ""), day: (p) => String(p.paid_at || p.created_at).slice(0, 10)};
+  const bar = await kitToolbar(kitP, {status: "статус", service: "услуга", user: "человек", day: "день"});
   const svcOptions = Object.entries(pl.services).map(([k, v]) => `<option value="${esc(k)}" ${payFilter.service === k ? "selected" : ""}>${esc(v)}</option>`).join("");
   $("#main").innerHTML = `
     <div class="card"><h3>Заработано звёзд за 30 дней: ${an.totals.stars} ⭐</h3>
@@ -1313,9 +1327,8 @@ async function loadPayments() {
       <select name="status"><option value="">Любой статус</option>${Object.entries(PAY_RU).map(([k, v]) => `<option value="${k}" ${payFilter.status === k ? "selected" : ""}>${v}</option>`).join("")}</select>
       <select name="service"><option value="">Любая услуга</option>${svcOptions}</select><input name="since" type="date" value="${esc(payFilter.since)}"><input name="until" type="date" value="${esc(payFilter.until)}">
       <button class="act" type="submit">Показать</button><span class="muted">Найдено: ${pl.total} · оплачено: ${pl.paid_stars} ⭐</span></form>
-    ${pl.items.length ? `<table><tr><th>№</th><th>Кто</th><th>Объявление</th><th>Услуга</th><th>⭐</th><th>Когда</th><th>Статус</th><th></th></tr>
-    ${pl.items.map((p) => `<tr data-pay="${p.id}"><td>${p.id}</td><td><a href="#" data-gu="${esc(p.user)}">${who(p.name, p.user)}</a></td><td><a href="#" data-preview="${p.listing_id}">#${p.listing_id}</a></td><td>${esc(p.service_title)}${p.promo ? ` · код ${esc(p.promo)}` : ""}</td><td>${p.stars}</td><td>${esc(fmt(p.paid_at || p.created_at))}</td><td>${esc(PAY_RU[p.status] || p.status)}</td>
-      <td>${p.status === "paid" ? '<button class="act no" data-refund>Вернуть</button>' : ""}</td></tr>`).join("")}</table>` : '<div class="card muted">По этим условиям платежей нет.</div>'}
+    ${bar}${pl.items.length ? kitTable(kitP, pl.items, (p) => `data-pay="${p.id}"`, (p) => (p.status === "paid" ? '<button class="act no" data-refund>Вернуть</button>' : ""))
+      : '<div class="card muted">По этим условиям платежей нет.</div>'}
     ${pl.total > pl.items.length ? `<button class="act gray" id="payMore">Показать ещё</button>` : ""}`;
   $("#pAdd").onclick = async () => {
     const num = (id) => ($(id).value ? Number($(id).value) : null);

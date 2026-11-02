@@ -43,6 +43,8 @@ from app.payments import PaymentError, aware, now
 with startup_lock():   # with several workers only one prepares the database at a time
     Base.metadata.create_all(bind=engine)
     migrate()
+    from app.database import heal_schema
+    heal_schema()                 # any column a model has and the database lacks is added, instead of a 500 on the first request
     upgrade_schema()
     with SessionLocal() as _db:
         seed_reference(_db)

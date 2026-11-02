@@ -207,3 +207,35 @@ def migrate() -> None:
         conn.execute(text("ALTER TABLE notifications ADD COLUMN IF NOT EXISTS tg_pending BOOLEAN NOT NULL DEFAULT FALSE"))
         # the public page of a company got a cover picture after the table was first created on some servers
         conn.execute(text("ALTER TABLE IF EXISTS company_pages ADD COLUMN IF NOT EXISTS cover_key VARCHAR(40)"))
+
+
+def heal_schema(bind=None) -> list[str]:
+    """Add the columns a model has but the database lacks (create_all never alters an existing table).
+    A column added after a table was first created on some server used to end in «ProgrammingError: no such column» on the first
+    request. New columns are always added NULLable (with the model's simple default when it has one), never dropped or retyped.
+    Returns what was added, e.g. ["company_pages.cover_key"]."""
+    from sqlalchemy import inspect
+    eng = bind or engine
+    added: list[str] = []
+    insp = inspect(eng)
+    existing = set(insp.get_table_names())
+    for table in Base.metadata.sorted_tables:
+        if table.name not in existing:
+            continue                                                   # create_all makes whole new tables
+        have = {c["name"] for c in insp.get_columns(table.name)}
+        for col in table.columns:
+            if col.name in have or col.primary_key:
+                continue
+            ddl_type = col.type.compile(dialect=eng.dialect)
+            default = ""
+            d = col.default.arg if col.default is not None and getattr(col.default, "is_scalar", False) else None
+            if d is not None and isinstance(d, (int, float)) and not isinstance(d, bool):
+                default = f" DEFAULT {d}"
+            elif isinstance(d, bool):
+                default = " DEFAULT " + ("TRUE" if d and eng.dialect.name == "postgresql" else "FALSE" if eng.dialect.name == "postgresql" else str(int(d)))
+            elif isinstance(d, str):
+                default = " DEFAULT '" + d.replace("'", "''") + "'"
+            with eng.begin() as conn:
+                conn.execute(text(f'ALTER TABLE {table.name} ADD COLUMN {col.name} {ddl_type}{default}'))
+            added.append(f"{table.name}.{col.name}")
+    return added
