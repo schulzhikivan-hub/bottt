@@ -161,15 +161,25 @@ function startApp() {
     document.documentElement.dataset.theme = next; localStorage.setItem("adminTheme", next);
   };
   $("#burger").onclick = () => {
-    if (window.matchMedia("(max-width:860px)").matches) document.body.classList.toggle("drawer");
-    else { document.body.classList.toggle("rail"); localStorage.setItem("adminRail", document.body.classList.contains("rail") ? "1" : "0"); }
+    if (window.matchMedia("(max-width:860px)").matches) {
+      document.body.classList.toggle("drawer");
+      $("#burger").setAttribute("aria-expanded", document.body.classList.contains("drawer") ? "true" : "false");
+    } else {
+      document.body.classList.toggle("rail");
+      localStorage.setItem("adminRail", document.body.classList.contains("rail") ? "1" : "0");
+    }
   };
-  $("#scrim").onclick = () => document.body.classList.remove("drawer");
+  $("#scrim").onclick = () => {
+    document.body.classList.remove("drawer");
+    $("#burger").setAttribute("aria-expanded", "false");
+  };
 })();
 
 // ---- палитра команд: Ctrl/⌘+K или «/» ----
 let palIndex = 0, palItems = [];
-let palReturnFocus = null;\nfunction palOpen() { palReturnFocus = document.activeElement; $("#pal").classList.remove("hidden"); $("#palQ").value = ""; palRender(); setTimeout(() => $("#palQ").focus(), 30); }\nfunction palClose() { $("#pal").classList.add("hidden"); if (palReturnFocus?.focus) palReturnFocus.focus(); palReturnFocus = null; }
+let palReturnFocus = null;
+function palOpen() { palReturnFocus = document.activeElement; $("#pal").classList.remove("hidden"); $("#palQ").value = ""; palRender(); setTimeout(() => $("#palQ").focus(), 30); }
+function palClose() { $("#pal").classList.add("hidden"); if (palReturnFocus?.focus) palReturnFocus.focus(); palReturnFocus = null; }
 function palRender() {
   const q = $("#palQ").value.trim().toLowerCase();
   const tabs = TABS.filter((t) => t.key && t.roles.includes(role())).map((t) => {
@@ -186,7 +196,8 @@ function palRender() {
   if (q) list.push({ic: "🔎", name: `Искать везде: «${$("#palQ").value.trim().replace(/^\?/, "")}»`, hint: "объявления, люди, обращения, платежи", run: () => { $("#gQuery").value = $("#palQ").value.trim().replace(/^\?/, ""); $("#gSearch").requestSubmit(); }});
   palItems = list.slice(0, 12);
   palIndex = Math.min(palIndex, Math.max(0, palItems.length - 1));
-  $("#palList").innerHTML = palItems.map((x, i) => `<li class="${i === palIndex ? "on" : ""}" id="pal-option-${i}" role="option" aria-selected="${i === palIndex}" data-pi="${i}"><span class="ic" aria-hidden="true">${x.ic}</span><b>${esc(x.name)}</b><small>${esc(x.hint)}</small></li>`).join("") || '<li role="option" aria-disabled="true"><small>Ничего не нашлось</small></li>';\n  $("#palQ").setAttribute("aria-activedescendant", palItems.length ? `pal-option-${palIndex}` : "");
+  $("#palList").innerHTML = palItems.map((x, i) => `<li class="${i === palIndex ? "on" : ""}" id="pal-option-${i}" role="option" aria-selected="${i === palIndex}" data-pi="${i}"><span class="ic" aria-hidden="true">${x.ic}</span><b>${esc(x.name)}</b><small>${esc(x.hint)}</small></li>`).join("") || '<li role="option" aria-disabled="true"><small>Ничего не нашлось</small></li>';
+  $("#palQ").setAttribute("aria-activedescendant", palItems.length ? `pal-option-${palIndex}` : "");
 }
 function palGo(i) { const it = palItems[i]; if (!it) return; palClose(); it.run(); }
 $("#palBtn").onclick = palOpen;
@@ -198,8 +209,13 @@ document.addEventListener("keydown", (e) => {
   const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || "");
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); palOpen(); return; }
   if (e.key === "/" && !typing && $("#pal").classList.contains("hidden")) { e.preventDefault(); palOpen(); return; }
+  if (e.key === "Escape" && !$("#pal").classList.contains("hidden")) { palClose(); return; }
+  if (e.key === "Escape" && document.body.classList.contains("drawer")) {
+    document.body.classList.remove("drawer");
+    $("#burger").setAttribute("aria-expanded", "false");
+    return;
+  }
   if ($("#pal").classList.contains("hidden")) return;
-  if (e.key === "Escape") palClose();
   if (e.key === "ArrowDown") { e.preventDefault(); palIndex = Math.min(palItems.length - 1, palIndex + 1); palRender(); }
   if (e.key === "ArrowUp") { e.preventDefault(); palIndex = Math.max(0, palIndex - 1); palRender(); }
   if (e.key === "Enter") { e.preventDefault(); palGo(palIndex); }
