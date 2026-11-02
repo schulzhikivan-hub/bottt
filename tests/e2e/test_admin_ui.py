@@ -190,11 +190,11 @@ def test_errors_can_be_reset(admin):
 def test_list_columns_sorting_groups_views_and_inline_price(admin):
     page, errors = admin
     assert go(page, "listings", "alllist").startswith("Обновлено")
-    assert "Срок до" not in page.inner_text("#allList")
+    assert "срок до" not in page.inner_text("#allList").lower()
     page.locator("details:has-text('Колонки') summary").click()
     page.locator("[data-kitcol=expires]").check()
     settled(page)
-    assert "Срок до" in page.inner_text("#allList")                      # the chosen column appears
+    assert "срок до" in page.inner_text("#allList").lower()              # the chosen column appears
     page.locator("[data-kitsort='listings:views']").click()
     settled(page)
     assert "▲" in page.inner_text("#allList")                            # sorted by the header
