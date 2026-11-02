@@ -146,7 +146,7 @@ function startApp() {
   $("#who").textContent = ({super_admin: "Суперадмин", admin: "Админ", moderator: "Модератор", support: "Поддержка"}[role()] || role()) + " · " + (sessionStorage.getItem("adminId") || "");
   const mineSections = SECTIONS.filter((sec) => secTabs(sec.key).length);
   $("#tabs").innerHTML = mineSections.map((sec) => `<button data-sec="${sec.key}" title="${esc(sec.name)}"><span class="ic">${sec.icon}</span><span class="lb">${esc(sec.name)}</span><em hidden data-sbadge="${sec.key}"></em></button>`).join("");
-  $("#tabs").querySelectorAll("button").forEach((b) => b.onclick = () => { document.body.classList.remove("drawer"); show(lastTab(b.dataset.sec).key); });
+  $("#tabs").querySelectorAll("button").forEach((b) => b.onclick = () => { document.body.classList.remove("drawer"); $("#burger").setAttribute("aria-expanded", "false"); show(lastTab(b.dataset.sec).key); });
   show(lastTab(mineSections[0].key).key);
   refreshBadges();
 }
@@ -169,8 +169,7 @@ function startApp() {
 
 // ---- палитра команд: Ctrl/⌘+K или «/» ----
 let palIndex = 0, palItems = [];
-function palOpen() { $("#pal").classList.remove("hidden"); $("#palQ").value = ""; palRender(); setTimeout(() => $("#palQ").focus(), 30); }
-function palClose() { $("#pal").classList.add("hidden"); }
+let palReturnFocus = null;\nfunction palOpen() { palReturnFocus = document.activeElement; $("#pal").classList.remove("hidden"); $("#palQ").value = ""; palRender(); setTimeout(() => $("#palQ").focus(), 30); }\nfunction palClose() { $("#pal").classList.add("hidden"); if (palReturnFocus?.focus) palReturnFocus.focus(); palReturnFocus = null; }
 function palRender() {
   const q = $("#palQ").value.trim().toLowerCase();
   const tabs = TABS.filter((t) => t.key && t.roles.includes(role())).map((t) => {
@@ -187,7 +186,7 @@ function palRender() {
   if (q) list.push({ic: "🔎", name: `Искать везде: «${$("#palQ").value.trim().replace(/^\?/, "")}»`, hint: "объявления, люди, обращения, платежи", run: () => { $("#gQuery").value = $("#palQ").value.trim().replace(/^\?/, ""); $("#gSearch").requestSubmit(); }});
   palItems = list.slice(0, 12);
   palIndex = Math.min(palIndex, Math.max(0, palItems.length - 1));
-  $("#palList").innerHTML = palItems.map((x, i) => `<li class="${i === palIndex ? "on" : ""}" data-pi="${i}"><span class="ic">${x.ic}</span><b>${esc(x.name)}</b><small>${esc(x.hint)}</small></li>`).join("") || '<li><small>Ничего не нашлось</small></li>';
+  $("#palList").innerHTML = palItems.map((x, i) => `<li class="${i === palIndex ? "on" : ""}" id="pal-option-${i}" role="option" aria-selected="${i === palIndex}" data-pi="${i}"><span class="ic" aria-hidden="true">${x.ic}</span><b>${esc(x.name)}</b><small>${esc(x.hint)}</small></li>`).join("") || '<li role="option" aria-disabled="true"><small>Ничего не нашлось</small></li>';\n  $("#palQ").setAttribute("aria-activedescendant", palItems.length ? `pal-option-${palIndex}` : "");
 }
 function palGo(i) { const it = palItems[i]; if (!it) return; palClose(); it.run(); }
 $("#palBtn").onclick = palOpen;
