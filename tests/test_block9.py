@@ -141,7 +141,8 @@ def test_banner_photo_and_language_button_are_wired_in_the_page(client):
     js = client.get("/static/app.js").text
     assert "/api/banner-photo" in js and 'classList.add("photo")' in js
     assert client.get("/api/banner-photo").json() == {"exists": False}
-    assert "Сейчас доступен только русский язык" in js and "появятся позже" not in js        # no false promise about other languages
+    assert "startI18n()" in js and "/static/i18n/${i18n.lang}.json" in js
+    assert "English (beta)" in js and "한국어 (beta)" in js
     assert ".hero.photo" in client.get("/static/app.css").text
 
 
