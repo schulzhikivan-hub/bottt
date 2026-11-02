@@ -69,3 +69,34 @@ a{color:#164f68}
 @media(min-width:560px){.shell{border:0;box-shadow:0 0 50px #182b3a0b}}
 @media(max-width:380px){.content{padding-left:14px;padding-right:14px}.topbar{padding-left:14px;padding-right:14px}.brand small{max-width:145px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;transition-duration:.01ms!important}}
+
+/* Homepage editorial composition */
+.landing .hero{
+ min-height:154px;margin:0 -18px 0;padding:26px 22px;border-radius:0 0 25px 25px;
+ background:linear-gradient(112deg,#123e54 0%,#1b6571 58%,#d8795c 125%);
+ box-shadow:0 14px 30px #163e5020;isolation:isolate;
+}
+.landing .hero:before{content:"";position:absolute;z-index:-1;width:220px;height:220px;right:-45px;top:-82px;border:1px solid #ffffff30;border-radius:50%;box-shadow:0 0 0 22px #ffffff0b,0 0 0 48px #ffffff08}
+.landing .hero:after{content:"";position:absolute;z-index:-1;width:130px;height:130px;right:35px;bottom:-95px;background:#e8a17c55;filter:blur(2px);border-radius:50%}
+.hero .skyline{opacity:.12;filter:grayscale(1)}
+.hero-text span{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:#d7e8e5}
+.hero-text b{font-size:30px;letter-spacing:.045em;margin:7px 0 0;font-weight:850}
+.landing .sticky{padding:14px 0 5px}
+.landing .tiles{grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;margin:15px 0 8px}
+.landing .tiles button{min-height:88px;border-radius:17px;padding:13px 6px 11px;background:#fffefa;color:#244454;border:1px solid #e5e2d9;box-shadow:0 5px 15px #182b3a08;font-size:12px;transition:transform .16s,border-color .16s}
+.landing .tiles button:active{transform:scale(.97)}
+.landing .tiles button svg{width:25px;height:25px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.landing .tiles .t-job{color:#286c94}.landing .tiles .t-housing{color:#278166}.landing .tiles .t-market{color:#c17a3a}
+.landing .tiles .t-dating{color:#c45c79}.landing .tiles .t-comm{color:#6f67a8}
+.landing .tiles .t-svc{color:#2d8790}.landing .tiles .t-car{color:#b96554}.landing .tiles .t-docs{color:#537da6}.landing .tiles .t-info{color:#9a7944}
+.landing .tiles .t-more{background:#edf1ed;color:#49636a;border-style:dashed}
+.landing .results-head{padding-top:8px;border-top:1px solid #e4e2da}
+.blockhead{margin:23px 0 11px}
+.blockhead h2{font-size:18px;font-weight:800;letter-spacing:-.035em}
+.jcard{border:1px solid #e6e3da;box-shadow:0 6px 18px #182b3a08;border-radius:17px}
+.jphoto{background:#e9efeb}
+.jbody h3{font-weight:750;letter-spacing:-.02em}
+.jbody .more-btn{border-radius:11px;background:#e8f0f1;color:#164f68}
+.goods button{border:1px solid #e6e3da;border-radius:13px;background:#fffefa;box-shadow:0 3px 10px #182b3a06}
+.goods button.on{outline:2px solid #164f68;background:#e8f0f1}
+@media(max-width:420px){.landing .hero{min-height:142px;padding:22px 18px}.hero-text b{font-size:27px}.landing .tiles{gap:7px}.landing .tiles button{min-height:82px}}
