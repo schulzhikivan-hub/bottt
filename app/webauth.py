@@ -12,7 +12,7 @@ import hashlib
 import json
 import secrets
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
@@ -75,7 +75,10 @@ def reject_login(db: Session, token: str) -> bool:
 # ---- website sign-in ----
 
 @router.post("/api/auth/start")
-def start_login(request: Request, db: Session = Depends(get_db)):
+def start_login(request: Request, response: Response, db: Session = Depends(get_db)):
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
     guard.rate_limit("web", "login_start", 60, 60)
     db.execute(delete(LoginRequest).where(LoginRequest.expires_at < now() - dt.timedelta(hours=1)))
     token = secrets.token_urlsafe(24)
@@ -93,7 +96,11 @@ def start_login(request: Request, db: Session = Depends(get_db)):
 
 
 @router.get("/api/auth/poll/{token}")
-def poll_login(token: str, request: Request, db: Session = Depends(get_db)):
+def poll_login(token: str, request: Request, response: Response, db: Session = Depends(get_db)):
+    # This endpoint hands over one-time user/admin session secrets; never cache its response.
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
     row = db.get(LoginRequest, _hash(token))
     if row is None or aware(row.expires_at) < now() or row.status == "used":
         return {"status": "expired"}
