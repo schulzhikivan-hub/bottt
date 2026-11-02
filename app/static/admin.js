@@ -178,8 +178,8 @@ function startApp() {
 // ---- палитра команд: Ctrl/⌘+K или «/» ----
 let palIndex = 0, palItems = [];
 let palReturnFocus = null;
-function palOpen() { palReturnFocus = document.activeElement; $("#pal").classList.remove("hidden"); $("#palQ").value = ""; palRender(); setTimeout(() => $("#palQ").focus(), 30); }
-function palClose() { $("#pal").classList.add("hidden"); if (palReturnFocus?.focus) palReturnFocus.focus(); palReturnFocus = null; }
+function palOpen() { palReturnFocus = document.activeElement; $("#pal").classList.remove("hidden"); $("#palQ").setAttribute("aria-expanded", "true"); $("#palQ").value = ""; palRender(); setTimeout(() => $("#palQ").focus(), 30); }
+function palClose() { $("#pal").classList.add("hidden"); $("#palQ").setAttribute("aria-expanded", "false"); if (palReturnFocus?.focus) palReturnFocus.focus(); palReturnFocus = null; }
 function palRender() {
   const q = $("#palQ").value.trim().toLowerCase();
   const tabs = TABS.filter((t) => t.key && t.roles.includes(role())).map((t) => {
@@ -210,6 +210,7 @@ document.addEventListener("keydown", (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") { e.preventDefault(); palOpen(); return; }
   if (e.key === "/" && !typing && $("#pal").classList.contains("hidden")) { e.preventDefault(); palOpen(); return; }
   if (e.key === "Escape" && !$("#pal").classList.contains("hidden")) { palClose(); return; }
+  if (e.key === "Tab" && !$("#pal").classList.contains("hidden")) { e.preventDefault(); $("#palQ").focus(); return; }
   if (e.key === "Escape" && document.body.classList.contains("drawer")) {
     document.body.classList.remove("drawer");
     $("#burger").setAttribute("aria-expanded", "false");
