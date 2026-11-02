@@ -821,5 +821,6 @@ html[data-theme=dark] .chip.active{background:var(--accent);color:var(--accent-t
 html[data-theme=dark] .secondary,html[data-theme=dark] button.secondary{background:#22304f;color:var(--text)}
 html[data-theme=dark] .skeleton{background:#1b2745}
 html[data-theme=dark] a{color:var(--accent)}
-html[data-theme=dark] .submit:not(.alt):not(.ok),html[data-theme=dark] #view-detail .submit{color:#0b1224}
+html[data-theme=dark] .submit:not(.alt):not(.ok):not(.ghost),html[data-theme=dark] #view-detail .submit{color:#0b1224}
+html[data-theme=dark] .submit.ghost{background:var(--card);color:var(--text);border-color:var(--border)}
 html[data-theme=dark] .bottom{background:var(--card);border-color:var(--border)}
