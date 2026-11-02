@@ -187,3 +187,77 @@ def test_listing_page_and_posting_wizard(phone):
     assert not problems["js"], problems["js"]
     assert not problems["server"], problems["server"]
     assert not hard, "\n".join(hard) + "\n\nВсе замечания:\n" + "\n".join(report)
+
+
+def _api(base, method, path, user=None, admin=False, **kw):
+    headers = dict(as_user(user)) if user else {}
+    if admin:
+        headers.update(ADMIN)
+    return httpx.request(method, base + path, headers=headers, timeout=20, **kw)
+
+
+def test_a_vacancy_is_posted_through_the_wizard_and_waits_for_moderation(phone, base):
+    page, problems = phone
+    page.evaluate("showView('home')")
+    page.click("#addBtn")
+    page.locator("#addSheet button[data-add='job']").click()
+    page.wait_for_selector("#listingForm", state="visible", timeout=10000)
+    f = page.locator("#listingForm")
+    f.locator("[name=title]").fill("Официант в ресторан, Каннам")
+    f.locator("[name=region_code]").select_option(index=1)
+    page.wait_for_timeout(400)
+    f.locator("[name=district_id]").select_option(index=1)
+    f.locator("[name=price_amount]").fill("2400000")
+    page.click("#nextBtn")
+    page.click("#nextBtn")
+    f.locator("[name=description]").fill("Нужен официант на полный день, график 5/2, обучение и питание.")
+    page.click("#nextBtn")
+    f.locator("[name=contact]").fill("@waiter_job")
+    page.check("#rulesOk")
+    page.click("#sendBtn")
+    page.wait_for_selector("#doneSheet:not(.hidden)", timeout=15000)
+    with SessionLocal() as db:
+        from app.models import Listing
+        row = db.query(Listing).filter(Listing.title == "Официант в ресторан, Каннам").one()
+        assert row.status in {"pending", "approved"} and row.price_amount == 2400000 and row.author_telegram_id == "1"
+    assert not problems["js"] and not problems["server"], problems
+
+
+def test_own_listing_page_and_quick_price_change(phone, base):
+    page, problems = phone
+    r = _api(base, "POST", "/api/listings", user=1, json={"category": "marketplace", "title": "Стул деревянный", "city": "Сеул", "description": "ok " * 10, "contact": "", "price_amount": 100000})
+    lid = r.json()["id"]
+    _api(base, "POST", f"/api/admin/listings/{lid}/approve", admin=True)
+    page.evaluate("showView('profile')")
+    page.wait_for_timeout(600)
+    page.evaluate("showView('mine', {push: true})")
+    page.wait_for_selector(f"#myListings [data-ownopen='{lid}']", timeout=10000)
+    page.click(f"#myListings [data-ownopen='{lid}']")
+    page.wait_for_selector(".ownpage [data-own='price']", timeout=10000)
+    assert "Стул деревянный" in page.inner_text(".ownpage")
+    page.click(".ownpage [data-own='price']")
+    page.fill("#textInput", "90000")
+    page.click("#textOk")
+    for _ in range(50):
+        with SessionLocal() as db:
+            from app.models import Listing
+            if db.get(Listing, lid).price_amount == 90000:
+                break
+        page.wait_for_timeout(200)
+    with SessionLocal() as db:
+        from app.models import Listing
+        assert db.get(Listing, lid).price_amount == 90000
+    assert not problems["js"] and not problems["server"], problems
+
+
+def test_a_message_is_written_and_shown_in_the_chat(phone, base):
+    page, problems = phone
+    lid = httpx.get(base + "/api/catalog?category=job").json()["items"][0]["id"]
+    page.evaluate(f"openDetail({lid})")
+    page.wait_for_selector("#view-detail [data-act='chat']", timeout=10000)
+    page.click("#view-detail [data-act='chat']")
+    page.wait_for_selector("#chatInput", state="visible", timeout=10000)
+    page.fill("#chatInput", "Здравствуйте, вакансия ещё актуальна?")
+    page.click("#chatSend")
+    page.wait_for_selector("#messages >> text=вакансия ещё актуальна", timeout=10000)
+    assert not problems["js"] and not problems["server"], problems
