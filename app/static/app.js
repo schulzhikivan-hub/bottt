@@ -244,7 +244,7 @@ function showView(name, opts = {}) {
   box.classList.toggle("fill", name === "chat");
   const parent = ["detail", "article", "mine", "sub", "notifs"].includes(name) ? backStack[backStack.length - 1] : name;
   const navName = name === "chat" ? "chats" : (NAV_VIEWS.includes(parent) ? parent : "");
-  document.querySelectorAll(".bottom [data-view]").forEach((b) => b.classList.toggle("active", b.dataset.view === navName));
+  document.querySelectorAll(".bottom [data-view]").forEach((b) => { const active = b.dataset.view === navName; b.classList.toggle("active", active); if (active) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current"); });
   if (name !== "chat") { clearInterval(chatTimer); clearInterval(chatStatusTimer); }
   if (NAV_VIEWS.includes(name) && backStack.length === 0) tg?.BackButton?.hide(); else tg?.BackButton?.show();
   if (name === "home" && !homeLoaded) loadCatalog();
