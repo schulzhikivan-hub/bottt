@@ -237,6 +237,10 @@ table.queues td{vertical-align:middle}table.queues tr.zero{opacity:.55}
 .kcol .in{background:var(--brand)}.kcol .out{background:#e8910c}
 .dot{display:inline-block;width:10px;height:10px;border-radius:50%;vertical-align:middle}.dot.in{background:var(--brand)}.dot.out{background:#e8910c}
 .grouprow td{background:var(--surface-2,#eef1f8);font-size:13px;padding:6px 12px}
+/* телефон: широкие таблицы прокручиваются внутри карточки, а не вылезают за экран */
+.card{max-width:100%;overflow-x:auto}
+#allList,#datList,#usersList,#main>table{max-width:100%;overflow-x:auto;display:block}
+@media(max-width:640px){#main{min-width:0}.card table{min-width:560px}}
 </style></head>
 <body>
 <div id="previewModal" class="pmodal" hidden><div class="pbox"><div class="pbar"><b id="previewTitle">Предпросмотр</b>
