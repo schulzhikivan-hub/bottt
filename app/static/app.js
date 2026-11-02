@@ -3312,6 +3312,23 @@ document.addEventListener("click", (e) => {
 });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") { const m = modalOpen(); if (m) closeModal(m); } });
 
+// Быстрый переход к поиску: "/" или Ctrl/Cmd+K. Не перехватываем ввод в полях и открытые диалоги.
+document.addEventListener("keydown", (e) => {
+  if (e.defaultPrevented || e.altKey || e.shiftKey) return;
+  const key = e.key.toLowerCase();
+  const shortcut = (key === "/" && !e.ctrlKey && !e.metaKey) ||
+    (key === "k" && (e.ctrlKey || e.metaKey));
+  if (!shortcut || modalOpen()) return;
+  const target = e.target;
+  if (target instanceof HTMLElement &&
+      (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return;
+  const search = document.getElementById("search");
+  if (!search || search.closest("[hidden]")) return;
+  e.preventDefault();
+  search.focus();
+  search.select();
+});
+
 // Ссылки на правила открываются во внешнем браузере/окне Telegram, а не заменяют приложение
 document.addEventListener("click", (e) => {
   const a = e.target.closest("[data-legal]");
