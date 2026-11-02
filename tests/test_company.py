@@ -382,3 +382,15 @@ def test_public_web_pages_have_structured_data_and_company_page(client):
     other = client.post("/api/listings", json={"category": "marketplace", "title": "Велосипед", "city": "Сеул", "description": "ok", "contact": "", "price_amount": 100000}, headers=as_user(2)).json()["id"]
     client.post(f"/api/admin/listings/{other}/approve", headers=ADMIN)
     assert '"@type": "Product"' in client.get(f"/l/{other}").text
+
+
+def test_admin_sees_company_reviews_and_can_hide_them(client):
+    cid = verified_company(client)
+    lid = approved_company_listing(client, cid)
+    client.post(f"/api/listings/{lid}/apply", json={"contact": "@cook", "message": "Здравствуйте"}, headers=as_user(3))
+    client.post(f"/api/companies/{cid}/reviews", json={"rating": 4, "text": "Нормально"}, headers=as_user(3))
+    rows = client.get("/api/admin/company-reviews", headers=ADMIN).json()
+    assert len(rows) == 1 and rows[0]["company"] == "Кафе Сеул" and rows[0]["rating"] == 4
+    client.post(f"/api/admin/company-reviews/{rows[0]['id']}/hide", headers=ADMIN)
+    assert client.get("/api/admin/company-reviews", headers=ADMIN).json() == []
+    assert len(client.get("/api/admin/company-reviews?status=hidden", headers=ADMIN).json()) == 1

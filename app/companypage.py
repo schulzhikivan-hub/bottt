@@ -149,6 +149,14 @@ def reply(company_id: int, review_id: int, p: ReplyIn, user_id: str = Depends(wr
     return {"reply": r.reply}
 
 
+@router.get("/api/admin/company-reviews")
+def admin_list(status: str = "published", actor: str = Depends(staff(*MOD)), db: Session = Depends(get_db)):
+    rows = db.scalars(select(CompanyReview).where(CompanyReview.status == status).order_by(CompanyReview.id.desc()).limit(100)).all()
+    names = {c.id: c.name for c in db.scalars(select(company.Company).where(company.Company.id.in_([r.company_id for r in rows] or [0]))).all()}
+    return [{"id": r.id, "company_id": r.company_id, "company": names.get(r.company_id, ""), "reviewer": r.reviewer_tg_id, "rating": r.rating,
+             "text": r.text, "reply": r.reply, "status": r.status, "created_at": r.created_at.isoformat()} for r in rows]
+
+
 @router.post("/api/admin/company-reviews/{review_id}/{decision}")
 def admin_decide(review_id: int, decision: str, db: Session = Depends(get_db), actor: str = Depends(staff(*MOD))):
     if decision not in {"hide", "show"}:

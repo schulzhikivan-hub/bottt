@@ -884,7 +884,8 @@ async function loadReviews() {
     <div class="meta">${esc(fmt(r.created_at))}${r.tags ? " · " + esc(r.tags) : ""}</div><p>${esc(r.text || "(без текста)")}</p>${r.reply ? `<p class="muted"><b>Ответ автора:</b> ${esc(r.reply)}</p>` : ""}<button class="act gray" data-gu="${esc(r.reviewer)}">Автор отзыва</button> <button class="act gray" data-preview="${r.listing_id}">👁 Объявление</button> <button class="act" data-revedit>✏ Править текст</button> <button class="act ${act === "hide" ? "no" : "ok"}" data-rev="${act}">${label}</button></div>`;
   window.__revs = Object.fromEntries([...shown, ...hidden].map((r) => [r.id, r]));
   $("#main").innerHTML = `<h3>Опубликованы</h3>` + (shown.length ? shown.map((r) => row(r, "hide", "Скрыть")).join("") : '<div class="card muted">Пока нет.</div>') +
-    `<h3>Скрытые</h3>` + (hidden.length ? hidden.map((r) => row(r, "show", "Вернуть")).join("") : '<div class="card muted">Нет.</div>');
+    `<h3>Скрытые</h3>` + (hidden.length ? hidden.map((r) => row(r, "show", "Вернуть")).join("") : '<div class="card muted">Нет.</div>') +
+    `<h3>Отзывы о компаниях</h3>` + await companyReviewsAdmin();
 }
 $("#main").addEventListener("click", async (e) => {
   try {
@@ -2117,4 +2118,18 @@ $("#main").addEventListener("click", async (e) => {
   const b = e.target.closest("[data-ixrb]");
   if (!b || !confirm("Вернуть старые тексты поиска этой пересборки?")) return;
   try { const r = await post(`/api/admin/search/index-versions/${b.dataset.ixrb}/rollback`); say(`Возвращено: ${r.restored}`); loadIndexVersions(); } catch (err) { say(err.message); }
+});
+
+async function companyReviewsAdmin() {
+  const [shown, hidden] = await Promise.all([api("/api/admin/company-reviews?status=published"), api("/api/admin/company-reviews?status=hidden")]).catch(() => [[], []]);
+  const row = (r, act, label) => `<div class="card" data-crid="${r.id}"><b class="rating">${"★".repeat(r.rating)}</b> · ${esc(r.company)} · от <a href="#" data-gu="${esc(r.reviewer)}">${esc(r.reviewer)}</a>
+    <div class="meta">${esc(fmt(r.created_at))}</div><p>${esc(r.text || "(без текста)")}</p>${r.reply ? `<p class="muted"><b>Ответ компании:</b> ${esc(r.reply)}</p>` : ""}
+    <button class="act ${act === "hide" ? "no" : "ok"}" data-crdo="${act}">${label}</button></div>`;
+  return (shown.length ? shown.map((r) => row(r, "hide", "Скрыть")).join("") : '<div class="card muted">Пока нет.</div>') +
+    (hidden.length ? "<h4>Скрытые</h4>" + hidden.map((r) => row(r, "show", "Вернуть")).join("") : "");
+}
+$("#main").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-crdo]");
+  if (!b) return;
+  try { await post(`/api/admin/company-reviews/${b.closest("[data-crid]").dataset.crid}/${b.dataset.crdo}`); reload(); } catch (err) { say(err.message); }
 });
