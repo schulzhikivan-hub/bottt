@@ -19,7 +19,9 @@ html,body{margin:0}
 body{font-family:Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--text);font-size:14px;line-height:1.45;-webkit-font-smoothing:antialiased}
 .hidden{display:none !important}[hidden]{display:none !important}
 a{color:var(--brand)}
-::selection{background:var(--brand);color:#fff}\n:focus-visible{outline:3px solid color-mix(in srgb,var(--brand) 72%,white);outline-offset:2px}\nbutton,a,input,select,textarea{touch-action:manipulation}
+::selection{background:var(--brand);color:#fff}
+:focus-visible{outline:3px solid color-mix(in srgb,var(--brand) 72%,white);outline-offset:2px}
+button,a,input,select,textarea{touch-action:manipulation}
 
 /* ---------- каркас ---------- */
 .layout{display:flex;min-height:100vh}
@@ -228,7 +230,10 @@ table.queues td{vertical-align:middle}table.queues tr.zero{opacity:.55}
   body.rail{--side-w:272px}body.rail aside .brand div,body.rail #tabs .lb,body.rail #tabs .sep,body.rail aside .foot .me{display:revert}
   header.top{padding:10px 14px;gap:8px}main{padding:14px 14px 70px}
   main table{display:block;overflow-x:auto;max-width:100%}
-  .kv{grid-template-columns:1fr}.hero{padding:18px}.hero h2{font-size:19px}\n  #tabs button{min-height:46px;padding:9px 11px}\n  .subnav button{min-height:40px}\n  .card{padding:14px;border-radius:14px}
+  .kv{grid-template-columns:1fr}.hero{padding:18px}.hero h2{font-size:19px}
+  #tabs button{min-height:46px;padding:9px 11px}
+  .subnav button{min-height:40px}
+  .card{padding:14px;border-radius:14px}
   .tile .n{font-size:26px}.chartbox svg{height:190px}.fstep .lab{width:84px}.hbar .nm{width:38%}
 }
 .kchart{display:flex;align-items:flex-end;gap:3px;height:120px;margin:10px 0}
@@ -240,7 +245,23 @@ table.queues td{vertical-align:middle}table.queues tr.zero{opacity:.55}
 /* телефон: широкие таблицы прокручиваются внутри карточки, а не вылезают за экран */
 .card{max-width:100%;overflow-x:auto}
 #allList,#datList,#usersList,#main>table{max-width:100%;overflow-x:auto;display:block}
-@media(max-width:640px){\n  #main{min-width:0}.card table{min-width:560px}\n  header.top{gap:6px;padding:9px 10px}\n  header.top h1{font-size:16px;max-width:34vw}\n  #status{display:none}\n  .iconbtn{width:42px;height:42px;flex:none}\n  .kbtn{height:42px;padding:8px 10px}\n  main{padding:12px 10px 84px}\n  .stats{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}\n  .stats div{padding:11px}.stats b{font-size:21px}\n  .row{gap:6px}\n  button.act{min-height:40px;padding:10px 12px}\n  input,select,textarea{font-size:16px}\n  .pal{padding:8vh 8px 12px;align-items:flex-start}\n  .pal ul{max-height:62vh}\n  .pal li{min-height:48px}\n}
+@media(max-width:640px){
+  #main{min-width:0}.card table{min-width:560px}
+  header.top{gap:6px;padding:9px 10px}
+  header.top h1{font-size:16px;max-width:34vw}
+  #status{display:none}
+  .iconbtn{width:42px;height:42px;flex:none}
+  .kbtn{height:42px;padding:8px 10px}
+  main{padding:12px 10px 84px}
+  .stats{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+  .stats div{padding:11px}.stats b{font-size:21px}
+  .row{gap:6px}
+  button.act{min-height:40px;padding:10px 12px}
+  input,select,textarea{font-size:16px}
+  .pal{padding:8vh 8px 12px;align-items:flex-start}
+  .pal ul{max-height:62vh}
+  .pal li{min-height:48px}
+}
 </style></head>
 <body>
 <div id="previewModal" class="pmodal" hidden><div class="pbox"><div class="pbar"><b id="previewTitle">Предпросмотр</b>
