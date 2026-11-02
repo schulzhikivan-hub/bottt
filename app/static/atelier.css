@@ -87,7 +87,7 @@ a{color:#14556a}
 .bottom .add svg{stroke:#fff}
 @media(min-width:760px){
  .topbar{padding-left:max(28px,calc((100vw - 1240px)/2));padding-right:max(28px,calc((100vw - 1240px)/2))}
- .content{padding:0 30px 60px}
+ .content{padding:0 30px 112px}
  .landing .hero{margin-left:-30px;margin-right:-30px;padding:42px 42px;min-height:245px;border-radius:0 0 34px 34px}
  .landing .tiles{grid-template-columns:repeat(9,minmax(0,1fr));gap:11px;margin:22px 0}
  .landing .tiles button{min-height:105px;padding:15px}
@@ -98,7 +98,7 @@ a{color:#14556a}
  .landing .listings{grid-template-columns:repeat(2,minmax(0,1fr));gap:15px}
  .landing .hscroll{margin-left:-30px;margin-right:-30px;padding-left:30px;padding-right:30px}
  .landing .jcard{width:270px;border-radius:18px}
- .bottom{position:static;transform:none;width:min(680px,calc(100% - 60px));margin:0 auto 22px;border:1px solid var(--border);border-radius:18px;box-shadow:0 8px 25px #1837440a}
+ .bottom{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);width:min(680px,calc(100% - 60px));margin:0;border:1px solid var(--border);border-radius:18px;box-shadow:0 8px 25px #18374418}
  .detail .dphoto{margin-left:-30px;margin-right:-30px}
  .detail .dphoto .gallery img{max-height:460px;height:460px}
  .sheet{width:min(620px,100%);margin:0 auto;border-radius:24px;max-height:min(90vh,920px)}
