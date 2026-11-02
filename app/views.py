@@ -16,7 +16,7 @@ import datetime as dt
 
 router = APIRouter()
 LIMIT = 20
-TABS = {"users", "listings", "section", "reports", "payments", "refunds"}
+TABS = {"users", "listings", "dating", "section", "reports", "payments", "refunds"}
 
 
 class SavedView(Base):

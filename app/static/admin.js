@@ -1760,24 +1760,40 @@ async function adminImage(url) {
 // ---- объявления: один список со всем нужным ----
 let allFilter = {category: "", status: "", q: "", author: "", flag: ""}, allLimit = 30;
 const ST_BADGE = {approved: "ok", pending: "warn", rejected: "bad", hidden: "bad", needs_fix: "warn"};
+
+const RUB = (n) => (n == null ? "—" : new Intl.NumberFormat("ru-RU").format(n) + " ₩");
+const LIST_COLS = {
+  id: ["№", (x) => x.id, (x) => x.id],
+  category: ["Раздел", (x) => esc(CAT[x.category] || x.category), (x) => x.category],
+  title: ["Название", (x) => `<b>${esc(x.title)}</b> <a href="#" data-inline="${x.id}:title" title="Править название">✏</a>${x.company_name ? `<br><small class="muted">🏬 ${esc(x.company_name)}</small>` : ""}`, (x) => (x.title || "").toLowerCase()],
+  city: ["Город", (x) => esc(x.city), (x) => x.city],
+  price: ["Цена", (x) => `${x.price_amount != null ? RUB(x.price_amount) : esc(x.price || "—")} <a href="#" data-inline="${x.id}:price_amount" title="Править цену">✏</a>`, (x) => x.price_amount ?? -1],
+  status: ["Статус", (x) => `<span class="badge ${ST_BADGE[x.status] || ""}">${esc(STATUS_RU[x.status] || x.status)}</span>${x.has_edit ? ' <span class="badge warn">правка</span>' : ""}${(x.flags || []).length ? " ⚠" : ""}`, (x) => x.status],
+  author: ["Автор", (x) => esc(x.author_name || "…" + String(x.author_id || "").slice(-4)), (x) => x.author_id],
+  views: ["👁", (x) => x.views || 0, (x) => x.views || 0],
+  created: ["Создано", (x) => esc(fmt(x.created_at).slice(0, 10)), (x) => x.created_at || ""],
+  expires: ["Срок до", (x) => esc(fmt(x.expires_at).slice(0, 10) || "—"), (x) => x.expires_at || ""],
+  promo: ["Продвижение", (x) => esc(x.promo || "—"), (x) => x.promo || ""],
+};
+const LIST_DEFAULT = ["id", "category", "title", "city", "price", "status", "author", "views", "created"];
 async function loadAllListings() {
   await loadClaims("listing");
   TEMPLATES = TEMPLATES.length ? TEMPLATES : await api("/api/admin/templates");
   const f = allFilter;
+  const kitL = listKit("listings", LIST_COLS, LIST_DEFAULT, () => allFilter, (x) => { allFilter = {category: "", status: "", flag: "", q: "", author: "", ...x}; allLimit = 30; });
+  kitL.groupFns = {status: (x) => STATUS_RU[x.status] || x.status, category: (x) => CAT[x.category] || x.category, author: (x) => x.author_name || "…" + String(x.author_id || "").slice(-4), city: (x) => x.city};
+  const bar = await kitToolbar(kitL, {status: "статус", category: "раздел", author: "автор", city: "город"});
   $("#main").innerHTML = `<form id="allForm" class="filters"><select name="category"><option value="">Все разделы</option>${Object.entries(CAT).map(([k, v]) => `<option value="${k}" ${f.category === k ? "selected" : ""}>${v}</option>`).join("")}</select>
     <select name="status"><option value="">Любой статус</option>${Object.entries(STATUS_RU).map(([k, v]) => `<option value="${k}" ${f.status === k ? "selected" : ""}>${esc(v)}</option>`).join("")}</select>
     <select name="flag">${[["", "Любые"], ["edit", "С правкой на проверке"], ["quarantine", "В карантине"], ["dispute", "В споре"], ["company", "От компаний"]].map(([k, v]) => `<option value="${k}" ${f.flag === k ? "selected" : ""}>${v}</option>`).join("")}</select>
     <input name="q" placeholder="Слово в названии или тексте" value="${esc(f.q)}" style="width:210px"><input name="author" placeholder="ID автора" value="${esc(f.author)}" style="width:120px">
-    <button class="act" type="submit">Показать</button><span class="muted" id="allTotal"></span></form><div id="allList"></div>`;
+    <button class="act" type="submit">Показать</button><span class="muted" id="allTotal"></span></form>${bar}<div id="allList"></div>`;
   const q = new URLSearchParams({limit: String(allLimit)});
   Object.entries(f).forEach(([k, v]) => { if (v) q.set(k, v); });
   const r = await api("/api/admin/listing-list?" + q);
   $("#allTotal").textContent = "Найдено: " + r.total;
   window.__alllist = Object.fromEntries(r.items.map((x) => [x.id, x]));
-  $("#allList").innerHTML = (r.items.length ? `<table><tr><th>№</th><th>Раздел</th><th>Название</th><th>Город</th><th>Цена</th><th>Статус</th><th>Автор</th><th>👁</th><th>Создано</th><th></th></tr>${r.items.map((x) => `<tr class="clickrow" data-lrow="${x.id}">
-    <td>${x.id}</td><td>${esc(CAT[x.category] || x.category)}</td><td><b>${esc(x.title)}</b>${x.company_name ? `<br><small class="muted">🏬 ${esc(x.company_name)}</small>` : ""}</td><td>${esc(x.city)}</td><td>${esc(x.price || "—")}</td>
-    <td><span class="badge ${ST_BADGE[x.status] || ""}">${esc(STATUS_RU[x.status] || x.status)}</span>${x.has_edit ? ' <span class="badge warn">правка</span>' : ""}${(x.flags || []).length ? " ⚠" : ""}</td>
-    <td>${esc(x.author_name || "…" + String(x.author_id || "").slice(-4))}</td><td>${x.views || 0}</td><td>${esc(fmt(x.created_at).slice(0, 10))}</td><td><button class="act gray">Открыть</button></td></tr>`).join("")}</table>`
+  $("#allList").innerHTML = (r.items.length ? kitTable(kitL, r.items, (x) => `class="clickrow" data-lrow="${x.id}"`, () => '<button class="act gray">Открыть</button>')
     : '<div class="card muted">Ничего не нашли.</div>') + (r.total > r.items.length ? '<button class="act gray" id="allMore">Показать ещё</button>' : "");
 }
 $("#main").addEventListener("submit", (e) => {
@@ -1848,21 +1864,32 @@ $("#main").addEventListener("click", async (e) => {
 // ---- знакомства: все анкеты с правкой ----
 let datFilter = {status: "", gender: "", flag: "", q: ""}, datLimit = 30;
 const D_FLAG = [["", "Любые"], ["selfie", "Ждут проверки селфи"], ["paused", "На паузе"], ["suspect", "Под сомнением"], ["vip", "С VIP"], ["invisible", "Невидимки"]];
+const DAT_COLS = {
+  id: ["№", (p) => p.id, (p) => p.id],
+  name: ["Имя", (p) => `<b>${esc(p.name || "без имени")}</b> ${p.gender === "f" ? "♀" : "♂"}`, (p) => (p.name || "").toLowerCase()],
+  age: ["Возраст", (p) => p.age, (p) => p.age],
+  city: ["Город", (p) => esc(p.city), (p) => p.city],
+  status: ["Статус", (p) => `<span class="badge ${ST_BADGE[p.status === "published" ? "approved" : p.status] || ""}">${esc({pending: "на проверке", published: "опубликована", rejected: "отклонена"}[p.status] || p.status)}</span>`, (p) => p.status],
+  marks: ["Метки", (p) => `${p.selfie_status === "approved" ? "✔ " : p.selfie_status === "pending" ? "📷 " : ""}${p.paused ? "⏸ " : ""}${p.suspect ? "⚠ " : ""}${p.vip ? "👑 " : ""}${p.invisible ? "👻" : ""}`, (p) => (p.vip ? 2 : 0) + (p.suspect ? 1 : 0)],
+  likes: ["Симпатии", (p) => `${p.likes_in}↓ ${p.likes_out}↑`, (p) => p.likes_in],
+  likes_in: ["Получено", (p) => p.likes_in, (p) => p.likes_in],
+};
+const DAT_DEFAULT = ["id", "name", "age", "city", "status", "marks", "likes"];
 async function loadDatingAll() {
   const f = datFilter;
+  const kitD = listKit("dating", DAT_COLS, DAT_DEFAULT, () => datFilter, (x) => { datFilter = {status: "", gender: "", flag: "", q: "", ...x}; datLimit = 30; });
+  kitD.groupFns = {status: (p) => ({pending: "на проверке", published: "опубликованы", rejected: "отклонены"}[p.status] || p.status), city: (p) => p.city, gender: (p) => (p.gender === "f" ? "женщины" : "мужчины")};
+  const bar = await kitToolbar(kitD, {status: "статус", city: "город", gender: "пол"});
   $("#main").innerHTML = `<form id="datForm" class="filters"><select name="status"><option value="">Любой статус</option>${[["pending", "на проверке"], ["published", "опубликованы"], ["rejected", "отклонены"]].map(([k, v]) => `<option value="${k}" ${f.status === k ? "selected" : ""}>${v}</option>`).join("")}</select>
     <select name="gender"><option value="">Любой пол</option><option value="f" ${f.gender === "f" ? "selected" : ""}>женщины</option><option value="m" ${f.gender === "m" ? "selected" : ""}>мужчины</option></select>
     <select name="flag">${D_FLAG.map(([k, v]) => `<option value="${k}" ${f.flag === k ? "selected" : ""}>${v}</option>`).join("")}</select>
-    <input name="q" placeholder="Имя, город, слово, ID" value="${esc(f.q)}" style="width:200px"><button class="act" type="submit">Показать</button><span class="muted" id="datTotal"></span></form><div id="datList"></div>`;
+    <input name="q" placeholder="Имя, город, слово, ID" value="${esc(f.q)}" style="width:200px"><button class="act" type="submit">Показать</button><span class="muted" id="datTotal"></span></form>${bar}<div id="datList"></div>`;
   const q = new URLSearchParams({limit: String(datLimit)});
   Object.entries(f).forEach(([k, v]) => { if (v) q.set(k, v); });
   const r = await api("/api/admin/dating-list?" + q);
   $("#datTotal").textContent = "Найдено: " + r.total;
   window.__datlist = Object.fromEntries(r.items.map((x) => [x.id, x]));
-  $("#datList").innerHTML = (r.items.length ? `<table><tr><th>№</th><th>Имя</th><th>Возраст</th><th>Город</th><th>Статус</th><th>Метки</th><th>Симпатии</th><th></th></tr>${r.items.map((p) => `<tr class="clickrow" data-drow="${p.id}">
-    <td>${p.id}</td><td><b>${esc(p.name || "без имени")}</b> ${p.gender === "f" ? "♀" : "♂"}</td><td>${p.age}</td><td>${esc(p.city)}</td>
-    <td><span class="badge ${ST_BADGE[p.status === "published" ? "approved" : p.status] || ""}">${esc({pending: "на проверке", published: "опубликована", rejected: "отклонена"}[p.status] || p.status)}</span></td>
-    <td>${p.selfie_status === "approved" ? "✔ " : p.selfie_status === "pending" ? "📷 " : ""}${p.paused ? "⏸ " : ""}${p.suspect ? "⚠ " : ""}${p.vip ? "👑 " : ""}${p.invisible ? "👻" : ""}</td><td>${p.likes_in}↓ ${p.likes_out}↑</td><td><button class="act gray">Открыть</button></td></tr>`).join("")}</table>`
+  $("#datList").innerHTML = (r.items.length ? kitTable(kitD, r.items, (p) => `class="clickrow" data-drow="${p.id}"`, () => '<button class="act gray">Открыть</button>')
     : '<div class="card muted">Ничего не нашли.</div>') + (r.total > r.items.length ? '<button class="act gray" id="datMore">Показать ещё</button>' : "");
 }
 $("#main").addEventListener("submit", (e) => {
@@ -1958,3 +1985,99 @@ $("#main").addEventListener("click", async (e) => {
     say("Курс сохранён"); reload();
   } catch (err) { say(err.message); }
 });
+
+// ---- общий набор для списков: колонки, сохранённые виды, сортировка по заголовку, группировка ----
+const KITS = {};
+function listKit(tab, defs, defaults, getFilter, setFilter) {
+  const key = "adminCols:" + tab;
+  const stored = () => { try { const c = JSON.parse(localStorage.getItem(key) || "null"); return Array.isArray(c) && c.length ? c.filter((k) => defs[k]) : defaults; } catch (e) { return defaults; } };
+  const kit = KITS[tab] = Object.assign(KITS[tab] || {}, {tab, defs, defaults, key, getFilter, setFilter, views: [], sort: (KITS[tab] || {}).sort || {key: "", dir: 1}, group: (KITS[tab] || {}).group || ""});
+  kit.cols = stored();
+  return kit;
+}
+async function kitToolbar(kit, groups) {
+  const v = await api("/api/admin/views?tab=" + kit.tab).catch(() => ({mine: [], shared: []}));
+  kit.views = [...v.mine, ...v.shared];
+  return `<div class="filters" data-kit="${kit.tab}"><select data-kitpick><option value="">Сохранённые виды…</option>${v.mine.map((x) => `<option value="${x.id}">${esc(x.name)}${x.shared ? " (общий)" : ""}</option>`).join("")}${v.shared.length ? '<optgroup label="Общие от коллег">' + v.shared.map((x) => `<option value="${x.id}">${esc(x.name)} · ${esc(x.owner)}</option>`).join("") + "</optgroup>" : ""}</select>
+    <button class="act gray" data-kitsave>💾 Сохранить этот вид</button><button class="act gray" data-kitshare>👥 Поделиться</button><button class="act gray" data-kitdel>🗑</button>
+    ${groups ? `<select data-kitgroup><option value="">Без группировки</option>${Object.entries(groups).map(([k, n]) => `<option value="${k}" ${kit.group === k ? "selected" : ""}>Группы: ${esc(n)}</option>`).join("")}</select>` : ""}
+    <details><summary class="act gray" style="display:inline-block;list-style:none">☰ Колонки</summary><div class="card" style="position:absolute;z-index:6">${Object.entries(kit.defs).map(([k, d]) => `<label style="display:block"><input type="checkbox" data-kitcol="${k}" ${kit.cols.includes(k) ? "checked" : ""}> ${d[0]}</label>`).join("")}</div></details></div>`;
+}
+// таблица с выбранными колонками; d = [название, ячейка(x), значение для сортировки(x), группа(x)]
+function kitTable(kit, items, rowAttr, tail) {
+  let rows = [...items];
+  if (kit.sort.key && kit.defs[kit.sort.key]?.[2]) {
+    const f = kit.defs[kit.sort.key][2];
+    rows.sort((a, b) => { const x = f(a), y = f(b); return (x > y ? 1 : x < y ? -1 : 0) * kit.sort.dir; });
+  }
+  const head = kit.cols.map((k) => `<th data-kitsort="${kit.tab}:${k}" style="cursor:pointer">${kit.defs[k][0]}${kit.sort.key === k ? (kit.sort.dir > 0 ? " ▲" : " ▼") : ""}</th>`).join("") + "<th></th>";
+  const line = (x) => `<tr ${rowAttr(x)}>${kit.cols.map((k) => `<td>${kit.defs[k][1](x)}</td>`).join("")}<td>${tail(x)}</td></tr>`;
+  let body = "";
+  const gf = kit.group && kit.groupFns?.[kit.group];
+  if (gf) {
+    const groups = new Map();
+    rows.forEach((x) => { const g = gf(x); (groups.get(g) || groups.set(g, []).get(g)).push(x); });
+    for (const [g, list] of groups) body += `<tr class="grouprow"><td colspan="${kit.cols.length + 1}"><b>${esc(String(g))}</b> · ${list.length}</td></tr>` + list.map(line).join("");
+  } else body = rows.map(line).join("");
+  return `<table><tr>${head}</tr>${body}</table>`;
+}
+$("#main").addEventListener("change", (e) => {
+  const bar = e.target.closest("[data-kit]"); if (!bar) return;
+  const kit = KITS[bar.dataset.kit]; if (!kit) return;
+  if (e.target.matches("[data-kitcol]")) {
+    kit.cols = [...bar.querySelectorAll("[data-kitcol]")].filter((x) => x.checked).map((x) => x.dataset.kitcol);
+    if (!kit.cols.length) kit.cols = kit.defaults;
+    localStorage.setItem(kit.key, JSON.stringify(kit.cols)); reload(); return;
+  }
+  if (e.target.matches("[data-kitgroup]")) { kit.group = e.target.value; reload(); return; }
+  if (e.target.matches("[data-kitpick]") && e.target.value) {
+    const v = kit.views.find((x) => String(x.id) === e.target.value);
+    if (v) {
+      kit.setFilter(v.state.filter || {});
+      if (v.state.cols) { kit.cols = v.state.cols.filter((k) => kit.defs[k]); if (!kit.cols.length) kit.cols = kit.defaults; localStorage.setItem(kit.key, JSON.stringify(kit.cols)); }
+      kit.sort = v.state.sort || {key: "", dir: 1}; kit.group = v.state.group || ""; reload();
+    }
+  }
+});
+$("#main").addEventListener("click", async (e) => {
+  const th = e.target.closest("[data-kitsort]");
+  if (th) { const [tab, k] = th.dataset.kitsort.split(":"); const kit = KITS[tab]; kit.sort = {key: k, dir: kit.sort.key === k ? -kit.sort.dir : 1}; reload(); return; }
+  const bar = e.target.closest("[data-kit]"); if (!bar) return;
+  const kit = KITS[bar.dataset.kit]; if (!kit) return;
+  try {
+    if (e.target.closest("[data-kitsave]")) {
+      const name = prompt("Как назвать этот вид?", ""); if (!name) return;
+      await post("/api/admin/views", {tab: kit.tab, name, state: {filter: kit.getFilter(), cols: kit.cols, sort: kit.sort, group: kit.group}, shared: false}); say("Вид сохранён"); reload();
+    }
+    const pick = bar.querySelector("[data-kitpick]");
+    const chosen = pick?.value ? kit.views.find((x) => String(x.id) === pick.value) : null;
+    if (e.target.closest("[data-kitshare]")) {
+      if (!chosen) { say("Выберите свой вид в списке"); return; }
+      if (!chosen.mine) { say("Делиться можно только своим видом"); return; }
+      await api(`/api/admin/views/${chosen.id}/share`, {method: "PUT", body: JSON.stringify({shared: !chosen.shared})}); say(chosen.shared ? "Вид снова личный" : "Теперь вид видят все сотрудники"); reload();
+    }
+    if (e.target.closest("[data-kitdel]")) {
+      if (!chosen) { say("Выберите вид в списке"); return; }
+      if (!chosen.mine) { say("Удалить можно только свой вид"); return; }
+      if (!confirm(`Удалить вид «${chosen.name}»?`)) return;
+      await api(`/api/admin/views/${chosen.id}`, {method: "DELETE"}); say("Вид удалён"); reload();
+    }
+  } catch (err) { say(err.message); }
+});
+// правка прямо в строке: название и цена объявления
+$("#main").addEventListener("click", async (e) => {
+  const ie = e.target.closest("[data-inline]");
+  if (!ie) return;
+  e.preventDefault();
+  e.stopPropagation();
+  try {
+    const [id, field] = ie.dataset.inline.split(":");
+    const x = (window.__alllist || {})[id]; if (!x) return;
+    const cur = field === "price_amount" ? (x.price_amount ?? "") : x[field];
+    const val = prompt(field === "price_amount" ? "Новая цена, ₩ (число)" : "Новое название", cur); if (val === null) return;
+    const body = {};
+    if (field === "price_amount") { const n = Number(String(val).replace(/\s/g, "")); if (!(n >= 0)) { say("Нужно число"); return; } body.price_amount = n; } else body[field] = val.trim();
+    const why = askOpt("Что поправили (автор увидит)") || "";
+    await api(`/api/admin/listings/${id}/full`, {method: "PUT", body: JSON.stringify({...body, reason: why})}); say("Сохранено"); reload();
+  } catch (err) { say(err.message); }
+}, true);

@@ -75,7 +75,8 @@ def admin(browser, base):
     page = ctx.new_page()
     errors = []
     page.on("pageerror", lambda e: errors.append(str(e)))
-    page.on("dialog", lambda d: d.accept("тест причина"))               # prompts and confirms get an answer
+    page.khdialog = lambda d: d.accept("тест причина")                  # prompts and confirms get an answer
+    page.on("dialog", page.khdialog)
     page.route("**/telegram.org/**", lambda r: r.fulfill(status=200, content_type="application/javascript", body=""))
     page.add_init_script("try{if(window===window.top){sessionStorage.setItem('adminSession','test-session-token');sessionStorage.setItem('adminRole','super_admin');"
                          "sessionStorage.setItem('adminId','999');localStorage.setItem('adminTheme','light');}}catch(e){}")
@@ -183,4 +184,37 @@ def test_errors_can_be_reset(admin):
     page.wait_for_selector(".atoast >> text=Сброшено", timeout=10000)
     with SessionLocal() as db:
         assert db.query(ClientError).count() == 0
+    assert not errors, errors
+
+
+def test_list_columns_sorting_groups_views_and_inline_price(admin):
+    page, errors = admin
+    assert go(page, "listings", "alllist").startswith("Обновлено")
+    assert "Срок до" not in page.inner_text("#allList")
+    page.locator("details:has-text('Колонки') summary").click()
+    page.locator("[data-kitcol=expires]").check()
+    settled(page)
+    assert "Срок до" in page.inner_text("#allList")                      # the chosen column appears
+    page.locator("[data-kitsort='listings:views']").click()
+    settled(page)
+    assert "▲" in page.inner_text("#allList")                            # sorted by the header
+    page.select_option("[data-kitgroup]", "status")
+    settled(page)
+    assert page.locator(".grouprow").count() >= 1
+    # a saved view of this state
+    page.remove_listener("dialog", page.khdialog)
+    answers = ["Мой вид"]
+    page.on("dialog", lambda d: d.accept(answers.pop(0) if answers else "x"))
+    page.click("[data-kitsave]")
+    page.wait_for_selector(".atoast >> text=Вид сохранён", timeout=10000)
+    # inline price edit
+    answers[:] = ["250000", "поправили цену"]
+    page.locator("[data-inline$=':price_amount']").first.click()
+    for _ in range(50):
+        with SessionLocal() as db:
+            if db.query(Listing).first().price_amount == 250000:
+                break
+        page.wait_for_timeout(200)
+    with SessionLocal() as db:
+        assert db.query(Listing).first().price_amount == 250000
     assert not errors, errors
