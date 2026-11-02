@@ -137,6 +137,14 @@ def test_stars_report_by_day_and_service(client):
     assert {s["service"]: s["stars"] for s in data["stars_by_service"]} == {"VIP-вакансия на 7 дней": 100, "Поднять вакансию": 30}
 
 
+def test_user_navigation_remains_zoomable_and_accessible(client):
+    page = client.get("/").text
+    assert "user-scalable=no" not in page
+    assert '<nav class="bottom" aria-label="Основная навигация">' in page
+    js = client.get("/static/app.js").text
+    assert 'setAttribute("aria-current", "page")' in js
+
+
 def test_banner_photo_and_language_button_are_wired_in_the_page(client):
     js = client.get("/static/app.js").text
     assert "/api/banner-photo" in js and 'classList.add("photo")' in js
