@@ -439,6 +439,7 @@ async function useBannerPhoto() {
 }
 // ---------- умные подборки: один тап вместо настройки фильтров ----------
 const PICKS = [
+  {t: "📍 В моём городе", f: () => (me?.region_code ? {region_code: me.region_code, ...(me.district_id ? {district_id: me.district_id} : {})} : null)},
   {t: "🏠 Работа с жильём", f: {category: "job", housing_provided: true}},
   {t: "🍱 Работа с питанием", f: {category: "job", meals_provided: true}},
   {t: "🛂 Работа под мою визу", f: () => (me?.visa ? {category: "job", visa: me.visa} : null)},
@@ -3619,3 +3620,13 @@ function openResetDialog(token) {
 })();
 
 api("/api/mail-state", {quiet: true}).then((x) => { mailOn = Boolean(x.enabled); showForgot(); }).catch(() => {});      // и гостю: у него окно входа
+// ---------- нет связи: честная плашка вместо пустых экранов ----------
+(function offlineBar() {
+  const bar = document.createElement("div");
+  bar.id = "offlineBar"; bar.hidden = navigator.onLine !== false; bar.hidden = true;
+  bar.textContent = "Нет связи с интернетом. Показано то, что уже загружено";
+  document.body.appendChild(bar);
+  window.addEventListener("offline", () => { bar.hidden = false; });
+  window.addEventListener("online", () => { bar.hidden = true; toast("Связь вернулась"); homeLoaded = false; if (currentView === "home") loadCatalog(); });
+  if (navigator.onLine === false) bar.hidden = false;
+})();
