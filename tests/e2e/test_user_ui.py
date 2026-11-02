@@ -130,6 +130,20 @@ def look(page, name, report):
     return over
 
 
+def test_catalog_search_has_keyboard_shortcuts(phone):
+    page, problems = phone
+    search = page.locator("#search")
+    search.fill("вакансия")
+    page.locator("body").click(position={"x": 380, "y": 800})
+    page.keyboard.press("/")
+    assert search.evaluate("(el) => document.activeElement === el")
+    assert search.evaluate("(el) => el.selectionStart === 0 && el.selectionEnd === el.value.length")
+    page.locator("body").click(position={"x": 380, "y": 800})
+    page.keyboard.press("Control+k")
+    assert search.evaluate("(el) => document.activeElement === el")
+    assert not problems["js"], problems["js"]
+
+
 def test_main_screens_fit_the_phone_and_have_no_errors(phone):
     page, problems = phone
     report, hard = [], []
