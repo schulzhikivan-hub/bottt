@@ -218,3 +218,14 @@ def test_list_columns_sorting_groups_views_and_inline_price(admin):
     with SessionLocal() as db:
         assert db.query(Listing).first().price_amount == 250000
     assert not errors, errors
+
+
+def test_admin_navigation_drawer_is_usable_on_mobile(admin):
+    page, errors = admin
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.locator("#burger").click()
+    assert "drawer" in page.locator("body").get_attribute("class")
+    assert page.locator("#scrim").is_visible()
+    page.locator("#scrim").click(position={"x": 380, "y": 420})
+    assert "drawer" not in (page.locator("body").get_attribute("class") or "")
+    assert not errors, errors
