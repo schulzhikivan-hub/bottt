@@ -1544,6 +1544,16 @@ async function renderMyResume(body) {
 }
 // ---------- поиск сотрудников (работодатель с опубликованной вакансией) ----------
 async function renderCvSearch(body) {
+  body.innerHTML = '<div class="empty">Проверяем, есть ли у вас опубликованная вакансия…</div>';
+  let mine;
+  try { mine = await api("/api/me/listings"); }
+  catch (err) { body.innerHTML = `<div class="empty">${esc(err.message)}</div>`; return; }
+  const hasVacancy = mine.some((x) => x.category === "job" && x.status === "approved");
+  if (!hasVacancy) {
+    body.innerHTML = `<div class="empty"><b>Поиск сотрудников доступен работодателям с опубликованной вакансией.</b><p>Сначала разместите вакансию и дождитесь её проверки. После публикации здесь появятся резюме кандидатов.</p><button class="submit" id="cvMyListings" type="button">Перейти к моим объявлениям</button></div>`;
+    $("#cvMyListings").onclick = () => openMenu("mine");
+    return;
+  }
   body.innerHTML = `<form id="cvSearch" class="toolbar"><input name="q" placeholder="Профессия или слово" maxlength="60"><input name="city" placeholder="Город" maxlength="100"><button type="submit">Найти</button></form><div id="cvList"></div>`;
   const run = async () => {
     const f = $("#cvSearch");
