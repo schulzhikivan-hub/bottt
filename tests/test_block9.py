@@ -1,4 +1,5 @@
 import io
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -135,6 +136,13 @@ def test_stars_report_by_day_and_service(client):
     today = data["days"][-1]
     assert today["payments"] == 2 and today["stars"] == 130
     assert {s["service"]: s["stars"] for s in data["stars_by_service"]} == {"VIP-вакансия на 7 дней": 100, "Поднять вакансию": 30}
+
+
+def test_employee_search_explains_vacancy_requirement_before_search():
+    js = (Path(__file__).parents[1] / "app" / "static" / "app.js").read_text()
+    assert 'api("/api/me/listings")' in js
+    assert "Поиск сотрудников доступен работодателям с опубликованной вакансией." in js
+    assert 'api("/api/resumes?" + qs)' in js
 
 
 def test_user_navigation_remains_zoomable_and_accessible(client):
