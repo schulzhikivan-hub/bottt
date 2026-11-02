@@ -1,0 +1,84 @@
+/* KOREA HUB / ATELIER — admin workspace v1 */
+:root{
+ --bg:#f3f2ed;--surface:#fffefa;--surface2:#f6f5ef;--text:#182b3a;--muted:#718087;--line:#e3e1d8;
+ --brand:#164f68;--brand2:#d86f52;--brandsoft:#e8f0f1;--grad:linear-gradient(135deg,#164f68,#287b83);
+ --ok:#23866a;--bad:#c95751;--warn:#d18a32;--okbg:#e7f3ed;--badbg:#faeae7;--warnbg:#f8efdf;
+ --side-w:264px;--radius:17px;--shadow:0 8px 28px rgba(26,43,55,.055);
+}
+:root[data-theme=dark]{
+ --bg:#111b22;--surface:#192832;--surface2:#20333e;--text:#edf1ee;--muted:#a0b0b4;--line:#2d424b;
+ --brand:#80b8c2;--brand2:#e58b70;--brandsoft:#263e48;--okbg:#1c3b32;--badbg:#492d2b;--warnbg:#453b2a;
+ --shadow:0 8px 28px rgba(0,0,0,.22);
+}
+body{font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;letter-spacing:-.012em}
+aside{background:#142d3b;color:#d7e1df}
+aside .brand{padding:22px 18px 18px}
+aside .logo{background:#d86f52;box-shadow:0 7px 18px #d86f5240;border-radius:14px}
+aside .brand b{letter-spacing:.09em}
+aside .brand small{color:#9cb1b5}
+#tabs{padding:8px 12px 14px;gap:3px}
+#tabs button{padding:9px 11px;border-radius:12px;color:#c1d0d0}
+#tabs button .ic{background:#ffffff12;border-radius:10px}
+#tabs button:hover{background:#ffffff12;color:white}
+#tabs button.active{background:#ffffff18;box-shadow:inset 3px 0 0 #e58b70;color:white}
+#tabs button.active .ic{background:#d86f52}
+#tabs .sep{color:#819da4;padding:18px 12px 7px;letter-spacing:.15em}
+aside .foot{border-color:#ffffff18;color:#9cb1b5}
+aside .foot button{border:1px solid #ffffff24;background:#ffffff12;border-radius:10px}
+header.top{padding:13px 26px;background:color-mix(in srgb,var(--surface) 91%,transparent);border-color:var(--line)}
+header.top h1{font-size:19px;font-weight:800;letter-spacing:-.04em}
+header.top .burger,.iconbtn{border-radius:12px;background:var(--surface);border-color:var(--line)}
+.kbtn{border-radius:13px;background:var(--surface2);border-color:var(--line)}
+main{max-width:1440px;padding:26px 30px 72px}
+main>h3{font-size:11px;letter-spacing:.15em;color:var(--muted)}
+.section-hint{font-size:13px;color:var(--muted)}
+.subnav{background:var(--bg);padding-top:12px}
+.subnav button{border-radius:999px;padding:9px 15px;background:var(--surface);border-color:var(--line);font-weight:650}
+.subnav button.on{background:#164f68;border-color:#164f68;box-shadow:0 6px 16px #164f6825}
+.card,.stats div{border-radius:18px;border-color:var(--line);box-shadow:var(--shadow);background:var(--surface)}
+.card{padding:20px}
+.card h3{font-size:16px;font-weight:800;letter-spacing:-.025em}
+.stats{gap:14px}
+.stats div{padding:17px}
+.stats b{font-size:27px;letter-spacing:-.04em}
+button.act{border-radius:11px;padding:10px 15px;font-weight:700}
+button.act:hover{box-shadow:0 7px 18px #164f6822}
+button.ok{background:#23866a}
+button.no{background:#c95751}
+button.warn{background:#d18a32;color:#fff}
+button.gray{background:var(--surface2);border-color:var(--line)}
+input,select,textarea{border-radius:11px;border-color:var(--line);min-height:39px}
+table{border-radius:16px;border-color:var(--line);box-shadow:var(--shadow)}
+th{background:var(--surface2);font-size:10px;letter-spacing:.12em}
+td,th{padding:12px 13px}
+tbody tr:hover td,table tr:hover td{background:color-mix(in srgb,var(--brand) 7%,transparent)}
+.badge{border-radius:999px;background:var(--brandsoft);padding:4px 10px;font-weight:700}
+.toolbar{background:var(--bg);padding:10px 0}
+.hero{border-radius:22px;background:linear-gradient(120deg,#153b50 0%,#1b6571 58%,#d17a5c 125%);box-shadow:0 18px 40px -20px #164f6850}
+.hero h2{font-size:25px;letter-spacing:-.045em}
+.quick button{border-radius:11px}
+#login{background:var(--surface);border:1px solid var(--line);border-radius:24px;box-shadow:var(--shadow)}
+#login .logo{background:#164f68;box-shadow:0 12px 30px #164f6830}
+.atoast{border-radius:13px}
+@media(max-width:860px){
+ :root{--side-w:0px}
+ .layout{display:block}
+ aside{position:fixed;left:0;top:0;bottom:0;width:min(300px,86vw);height:100dvh;transform:translateX(-105%);transition:transform .22s ease;box-shadow:20px 0 60px #142d3b35}
+ body.nav-open aside{transform:translateX(0)}
+ body.rail aside{width:min(300px,86vw)}
+ body.rail aside .brand div,body.rail #tabs .lb,body.rail #tabs .sep,body.rail aside .foot .me{display:block}
+ body.rail #tabs button{justify-content:flex-start}
+ .content{min-height:100vh}
+ header.top{padding:10px 14px;gap:8px}
+ header.top h1{font-size:16px}
+ .kbtn{min-width:0;width:42px;height:42px;padding:0;justify-content:center;font-size:0}
+ .kbtn kbd{display:none}
+ #status{display:none}
+ main{padding:18px 14px 70px}
+ .section-hint{padding-left:14px;padding-right:14px}
+ .subnav{top:58px;padding-left:14px;padding-right:14px}
+ .stats{grid-template-columns:repeat(2,minmax(0,1fr))}
+ table{display:block;overflow-x:auto;white-space:nowrap}
+ .card{padding:15px}
+}
+@media(max-width:420px){.stats{gap:8px}.stats div{padding:12px}.stats b{font-size:23px}}
