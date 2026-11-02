@@ -26,8 +26,11 @@ def notify_staff(db: Session, text: str, key: str, roles: tuple[str, ...] = MOD)
     from app import duty
     if duty.route(db, text, key):                    # somebody is on duty for this area: only they are told (and escalation watches it)
         return 1
+    from app import staffprefs
     sent = 0
     for adm in db.scalars(select(Admin).where(Admin.active.is_(True), Admin.role.in_(roles))).all():
+        if not staffprefs.allows(db, adm.tg_id, key):          # the person chose not to hear about this kind
+            continue
         try:
             guard.rate_limit(adm.tg_id, f"staffnote:{key}", 1, 600)
         except HTTPException:

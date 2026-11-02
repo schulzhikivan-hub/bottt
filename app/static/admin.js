@@ -101,7 +101,7 @@ const SECTIONS = [
   {key: "marketing", icon: "📣", name: "Маркетинг", tabs: ["marketing"]},
   {key: "money", icon: "💰", name: "Деньги", tabs: ["payments", "exchange", "refunds", "pricing", "reportsm"]},
   {key: "rules", icon: "📐", name: "Поиск и правила", tabs: ["rules", "stest"]},
-  {key: "system", icon: "⚙️", name: "Система", tabs: ["audit", "errors", "security", "settings"]},
+  {key: "system", icon: "⚙️", name: "Система", tabs: ["mynotify", "audit", "errors", "security", "settings"]},
 ];
 const TABS = [
   {key: "dash", label: "Рабочий стол", roles: ADM, title: "Главная"},
@@ -129,6 +129,7 @@ const TABS = [
   {key: "reportsm", label: "Отчёты и VIP", roles: FIN, title: "Деньги: отчёты, VIP, подарки"},
   {key: "rules", label: "Правила", roles: ADM, title: "Правила: выдача, платные места, сроки, хранение"},
   {key: "stest", label: "Тест поиска и словари", roles: MOD, title: "Поиск: тест, синонимы, стоп-слова, журнал запросов"},
+  {key: "mynotify", label: "Мои уведомления", roles: SUPPORT, title: "Система: о чём мне сообщает бот"},
   {key: "audit", label: "Журнал действий", roles: ADM, title: "Система: журнал действий"},
   {key: "errors", label: "Ошибки у людей", roles: ADM, title: "Система: ошибки, которые видели пользователи"},
   {key: "security", label: "Безопасность", roles: SUP, title: "Система: безопасность, функции, просмотры данных, входы"},
@@ -1946,7 +1947,7 @@ $("#main").addEventListener("click", async (e) => {
     }
   } catch (err) { say(err.message); }
 });
-const LOADERS = {exchange: () => loadExchange(), dash: loadDash, listings: loadListings, jobs: loadSection, housing: loadSection, market: loadSection, dating: loadDating,
+const LOADERS = {exchange: () => loadExchange(), mynotify: () => loadMyNotify(), dash: loadDash, listings: loadListings, jobs: loadSection, housing: loadSection, market: loadSection, dating: loadDating,
                  employers: loadEmployers, reports: loadReports, reviews: loadReviews, resumes: loadResumes, support: loadSupport, texts: loadTexts, users: loadUsers, community: loadCommunity, guide: loadGuide,
                  marketing: loadMarketing, payments: loadPayments, pricing: loadPricing, rules: loadRules, alllist: loadAllListings, datingall: loadDatingAll, duty: loadDuty, security: loadSecurity, batches: loadBatches, refunds: loadRefunds, companies: loadCompanies, reportsm: loadMoneyReports, stest: loadSearchTest, audit: loadAudit, errors: loadErrors, settings: loadSettings, admins: loadAdmins};
 
@@ -2081,3 +2082,23 @@ $("#main").addEventListener("click", async (e) => {
     await api(`/api/admin/listings/${id}/full`, {method: "PUT", body: JSON.stringify({...body, reason: why})}); say("Сохранено"); reload();
   } catch (err) { say(err.message); }
 }, true);
+
+// ---- мои уведомления: что и насколько срочное мне присылает бот ----
+async function loadMyNotify() {
+  const x = await api("/api/admin/my-notifications");
+  const P = {3: "срочное", 2: "важное", 1: "обычное"};
+  $("#main").innerHTML = `<div class="card"><h3>О чём вам сообщает бот</h3>
+    <p class="muted">Это только ваши настройки. Срочное (безопасность, затянувшаяся модерация) лучше не отключать совсем.</p>
+    <div class="row">${x.modes.map((m) => `<label style="margin-right:14px"><input type="radio" name="nmode" value="${m.key}" ${x.mode === m.key ? "checked" : ""}> ${esc(m.title)}</label>`).join("")}</div>
+    <h4>Отключить отдельные виды</h4>
+    <table><tr><th></th><th>Что</th><th>Насколько срочно</th></tr>${x.kinds.map((k) => `<tr><td><input type="checkbox" data-nmute="${k.key}" ${x.muted.includes(k.key) ? "checked" : ""}></td><td>${esc(k.title)}</td><td>${P[k.priority]}</td></tr>`).join("")}</table>
+    <div class="row"><button class="act ok" id="nSave">💾 Сохранить</button></div></div>`;
+}
+$("#main").addEventListener("click", async (e) => {
+  if (e.target.id !== "nSave") return;
+  try {
+    const mode = document.querySelector("[name=nmode]:checked")?.value || "all";
+    const muted = [...document.querySelectorAll("[data-nmute]:checked")].map((c) => c.dataset.nmute);
+    await api("/api/admin/my-notifications", {method: "PUT", body: JSON.stringify({mode, muted})}); say("Сохранено");
+  } catch (err) { say(err.message); }
+});
