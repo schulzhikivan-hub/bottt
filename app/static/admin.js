@@ -1531,7 +1531,8 @@ async function loadSearchTest() {
       <div class="cols"><div><b>Частые</b>${d.top.map((x) => `<div class="drun" style="display:flex;justify-content:space-between"><span>${esc(x.q)}</span><span class="muted">${x.n}</span></div>`).join("") || '<p class="muted">Пока пусто</p>'}</div>
       <div><b>Ничего не нашли (что добавить?)</b>${d.empty.map((x) => `<div style="display:flex;justify-content:space-between"><span>${esc(x.q)}</span><span class="muted">${x.n}</span></div>`).join("") || '<p class="muted">Таких нет</p>'}</div></div>
       <button class="act gray" id="slReindex">Пересобрать текст поиска</button>${role() === "super_admin" ? '<button class="act gray" id="slCsv">⬇ Выгрузка (суперадмин)</button>' : ""}</div>`);
-    $("#slReindex").onclick = async () => { try { const r = await post("/api/admin/search/reindex"); say(`Обновлено объявлений: ${r.updated}`); } catch (err) { say(err.message); } };
+    $("#slReindex").onclick = async () => { try { const r = await post("/api/admin/search/reindex"); say(`Обновлено объявлений: ${r.updated}` + (r.version ? `, версия #${r.version}` : "")); reload(); } catch (err) { say(err.message); } };
+    loadIndexVersions();
     if ($("#slCsv")) $("#slCsv").onclick = async () => { const r = await fetch("/api/admin/search-log/export", {headers: {"X-Admin-Session": session()}}); const a = document.createElement("a"); a.href = URL.createObjectURL(await r.blob()); a.download = "search-log.csv"; a.click(); };
   }).catch(() => {});
   if ($("#sdSyn")) api("/api/admin/search-dict").then((d) => { $("#sdSyn").value = d.synonyms; $("#sdStop").value = d.stopwords; }).catch(() => {});
@@ -2101,4 +2102,19 @@ $("#main").addEventListener("click", async (e) => {
     const muted = [...document.querySelectorAll("[data-nmute]:checked")].map((c) => c.dataset.nmute);
     await api("/api/admin/my-notifications", {method: "PUT", body: JSON.stringify({mode, muted})}); say("Сохранено");
   } catch (err) { say(err.message); }
+});
+
+async function loadIndexVersions() {
+  const x = await api("/api/admin/search/index-versions").catch(() => null);
+  if (!x || !$("#slCard")) return;
+  document.getElementById("ixCard")?.remove();
+  $("#slCard").insertAdjacentHTML("afterend", `<div class="card" id="ixCard"><h3>Версии индекса поиска</h3>
+    <p class="muted">Объявлений: ${x.listings}. С устаревшим текстом поиска: <b>${x.out_of_date}</b>. Каждая пересборка запоминает старые тексты, её можно откатить.</p>
+    ${x.versions.length ? `<table><tr><th>№</th><th>Когда</th><th>Кто</th><th>Изменено</th><th></th></tr>${x.versions.map((v) => `<tr><td>${v.id}</td><td>${esc(fmt(v.at))}</td><td>${esc(v.by)}</td><td>${v.changed}</td>
+      <td>${v.rolled_back ? '<span class="muted">откатана</span>' : `<button class="act gray" data-ixrb="${v.id}">↩ Откатить</button>`}</td></tr>`).join("")}</table>` : '<p class="muted">Пересборок пока не было.</p>'}</div>`);
+}
+$("#main").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-ixrb]");
+  if (!b || !confirm("Вернуть старые тексты поиска этой пересборки?")) return;
+  try { const r = await post(`/api/admin/search/index-versions/${b.dataset.ixrb}/rollback`); say(`Возвращено: ${r.restored}`); loadIndexVersions(); } catch (err) { say(err.message); }
 });

@@ -81,17 +81,76 @@ def export(days: int = Query(default=90, ge=1, le=90), actor: str = Depends(staf
     return Response(out.getvalue(), media_type="text/csv; charset=utf-8", headers={"Content-Disposition": "attachment; filename=search-log.csv"})
 
 
-# ---------- rebuild of the search text ----------
+# ---------- rebuild of the search text, with versions ----------
+from sqlalchemy import JSON, update      # noqa: E402
+
+KEEP_VERSIONS = 5
+
+
+class IndexVersion(Base):
+    """What a reindex changed: the old text of every changed listing, so the change can be taken back."""
+    __tablename__ = "search_index_versions"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    by: Mapped[str] = mapped_column(String(40), default="")
+    changed: Mapped[int] = mapped_column(Integer, default=0)
+    rolled_back: Mapped[bool] = mapped_column(default=False)
+    data: Mapped[dict] = mapped_column(JSON, default=dict)          # {listing_id: [old search_text, old city_key]}
+
+
+def canonical(item: Listing) -> tuple[str, str]:
+    """The text and the city key a listing must be found by: the same rule as when it is saved."""
+    extra = [str(v) for k, v in (item.details or {}).items() if k in ("company", "position", "station", "brand")]
+    return (" ".join([item.title or "", item.description or "", item.city or "", *extra]).lower(), (item.city or "").strip().lower())
+
+
 @router.post("/api/admin/search/reindex")
 def reindex(actor: str = Depends(staff(*ADM)), db: Session = Depends(get_db)):
-    """The search reads the database directly; «reindex» rebuilds the text each listing is found by (title, description, city)
-    for all listings, in pieces. Safe to run on a live site: a listing is never without text while it is rebuilt."""
-    n = 0
+    """Rebuild the text every listing is found by. The old texts of the changed listings are kept as a version: a mistake in the rule
+    can be taken back with one click. Plain UPDATEs, so a listing is never without text while it is rebuilt."""
+    old: dict[str, list] = {}
+    todo: list[tuple[int, str, str]] = []
     for item in db.scalars(select(Listing)).all():
-        text = " ".join([item.title or "", item.description or "", item.city or ""]).lower()
-        if item.search_text != text:
-            item.search_text = text
-            n += 1
-    log_action(db, actor, "search.reindex", "search", "all", f"обновлено {n}")
+        text, key = canonical(item)
+        if item.search_text != text or item.city_key != key:
+            old[str(item.id)] = [item.search_text, item.city_key]
+            todo.append((item.id, text, key))
+    for lid, text, key in todo:
+        db.execute(update(Listing).where(Listing.id == lid).values(search_text=text, city_key=key))
+    version = None
+    if todo:
+        version = IndexVersion(by=actor, changed=len(todo), data=dict(old))
+        db.add(version)
+        db.flush()
+        stale = db.scalars(select(IndexVersion.id).order_by(IndexVersion.id.desc()).offset(KEEP_VERSIONS)).all()
+        if stale:
+            db.execute(delete(IndexVersion).where(IndexVersion.id.in_(stale)))
+    log_action(db, actor, "search.reindex", "search", "all", f"обновлено {len(todo)}" + (f", версия #{version.id}" if version else ""))
     db.commit()
-    return {"updated": n}
+    return {"updated": len(todo), "version": version.id if version else None}
+
+
+@router.get("/api/admin/search/index-versions")
+def index_versions(actor: str = Depends(staff(*ADM)), db: Session = Depends(get_db)):
+    total = db.scalar(select(func.count()).select_from(Listing)) or 0
+    stale = sum(1 for x in db.scalars(select(Listing)).all() if (x.search_text, x.city_key) != canonical(x))
+    rows = db.scalars(select(IndexVersion).order_by(IndexVersion.id.desc())).all()
+    return {"listings": total, "out_of_date": stale, "versions": [{"id": v.id, "at": v.at.isoformat(), "by": "…" + v.by[-4:], "changed": v.changed,
+                                                                  "rolled_back": v.rolled_back} for v in rows]}
+
+
+@router.post("/api/admin/search/index-versions/{version_id}/rollback")
+def index_rollback(version_id: int, actor: str = Depends(staff(*ADM)), db: Session = Depends(get_db)):
+    """Put the old search texts of that reindex back (only for listings that still exist)."""
+    v = db.get(IndexVersion, version_id)
+    if v is None:
+        raise HTTPException(404, "Версия не найдена")
+    if v.rolled_back:
+        raise HTTPException(409, "Эта версия уже откатывалась")
+    n = 0
+    for lid, (text, key) in v.data.items():
+        n += db.execute(update(Listing).where(Listing.id == int(lid)).values(search_text=text, city_key=key)).rowcount or 0
+    v.rolled_back = True
+    log_action(db, actor, "search.reindex_rollback", "search", str(version_id), f"возвращено {n}")
+    db.commit()
+    return {"restored": n}

@@ -35,3 +35,26 @@ def test_staff_chooses_what_to_hear_about(client):
         adminplus.notify_staff(db, "Новый адрес", "newip", ("super_admin",))         # critical: comes
     assert [t for _, t in client.told] == ["Возврат", "Новый адрес"]
     assert client.put("/api/admin/my-notifications", json={"mode": "everything"}, headers=ADMIN).status_code == 400
+
+
+def test_reindex_keeps_a_version_and_can_be_rolled_back(client):
+    from app.models import Listing
+    from tests.tg import as_user, accept_terms
+    accept_terms(client, 1)
+    lid = client.post("/api/listings", json={"category": "job", "title": "Повар", "city": "Сеул", "description": "кухня", "contact": "",
+                                             "details": {"company": "Кафе Сеул", "position": "Шеф"}}, headers=as_user(1)).json()["id"]
+    with SessionLocal() as db:
+        from sqlalchemy import update
+        db.execute(update(Listing).where(Listing.id == lid).values(search_text="устарело"))      # a stale text, as if the rule had changed
+        db.commit()
+    assert client.get("/api/admin/search/index-versions", headers=ADMIN).json()["out_of_date"] == 1
+    r = client.post("/api/admin/search/reindex", headers=ADMIN).json()
+    assert r["updated"] == 1 and r["version"]
+    with SessionLocal() as db:
+        assert "шеф" in db.get(Listing, lid).search_text and "кафе сеул" in db.get(Listing, lid).search_text
+    assert client.get("/api/admin/search/index-versions", headers=ADMIN).json()["out_of_date"] == 0
+    assert client.post("/api/admin/search/reindex", headers=ADMIN).json() == {"updated": 0, "version": None}     # nothing to do: no empty version
+    assert client.post(f"/api/admin/search/index-versions/{r['version']}/rollback", headers=ADMIN).json() == {"restored": 1}
+    with SessionLocal() as db:
+        assert db.get(Listing, lid).search_text == "устарело"
+    assert client.post(f"/api/admin/search/index-versions/{r['version']}/rollback", headers=ADMIN).status_code == 409
