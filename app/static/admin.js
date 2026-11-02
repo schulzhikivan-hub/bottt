@@ -159,9 +159,39 @@ function startApp() {
   const mineSections = SECTIONS.filter((sec) => secTabs(sec.key).length);
   $("#tabs").innerHTML = mineSections.map((sec) => `<button data-sec="${sec.key}" title="${esc(sec.name)}"><span class="ic">${sec.icon}</span><span class="lb">${esc(sec.name)}</span><em hidden data-sbadge="${sec.key}"></em></button>`).join("");
   $("#tabs").querySelectorAll("button").forEach((b) => b.onclick = () => { document.body.classList.remove("drawer"); $("#burger").setAttribute("aria-expanded", "false"); show(lastTab(b.dataset.sec).key); });
+  renderMobileNav(mineSections);
   show(lastTab(mineSections[0].key).key);
   refreshBadges();
 }
+// ---- мобильная навигация: частые разделы внизу, полный каталог — в меню ----
+function renderMobileNav(visibleSections) {
+  const preferred = ["home", "listings", "people", "support"];
+  const chosen = preferred.map((key) => visibleSections.find((s) => s.key === key)).filter(Boolean).slice(0, 4);
+  const nav = $("#mobileNav");
+  nav.innerHTML = chosen.map((sec) => '<button type="button" data-mobile-sec="' + sec.key + '" aria-label="' + esc(sec.name) + '"><span class="ic">' + sec.icon + '</span><span>' + esc(sec.name) + '</span></button>').join("") +
+    '<button type="button" data-mobile-more aria-label="Все разделы"><span class="ic">☰</span><span>Ещё</span></button>';
+  nav.querySelectorAll("[data-mobile-sec]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const sec = button.dataset.mobileSec;
+      document.body.classList.remove("drawer");
+      $("#burger").setAttribute("aria-expanded", "false");
+      show(lastTab(sec).key);
+    });
+  });
+  nav.querySelector("[data-mobile-more]").addEventListener("click", () => {
+    document.body.classList.add("drawer");
+    $("#burger").setAttribute("aria-expanded", "true");
+  });
+}
+function syncMobileNav(section) {
+  $("#mobileNav")?.querySelectorAll("[data-mobile-sec]").forEach((button) => {
+    const active = button.dataset.mobileSec === section;
+    button.classList.toggle("active", active);
+    if (active) button.setAttribute("aria-current", "page");
+    else button.removeAttribute("aria-current");
+  });
+}
+
 // ---- оформление: тема, узкое меню, ящик на телефоне ----
 (function chrome() {
   const saved = localStorage.getItem("adminTheme");
@@ -306,6 +336,7 @@ function show(tab) {
   document.querySelectorAll("#tabs button").forEach((b) => { const active = b.dataset.sec === sec; b.classList.toggle("active", active); if (active) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current"); });
   const hint = $("#sectionHint"); hint.textContent = SECTION_HELP[sec] || ""; hint.hidden = !hint.textContent;
   renderSubnav(tab);
+  syncMobileNav(sec);
   $("#title").textContent = def.title;
   say("Загрузка…");
   $("#main").innerHTML = "";
