@@ -527,7 +527,7 @@ def person_name(db: Session, tg_id: str, conv: Conversation | None = None) -> st
         if tg_id == conv.seller_tg_id:
             return "Автор объявления"
         return "Соискатель" if listing is not None and listing.category == "job" else "Покупатель"
-    return "Пользователь"
+    return "Без имени"
 
 
 def conversation_card(db: Session, conv: Conversation, user_id: str, last: Message | None = None, unread: int = 0) -> ConversationOut:

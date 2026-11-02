@@ -244,7 +244,7 @@ function showView(name, opts = {}) {
   box.classList.toggle("fill", name === "chat");
   const parent = ["detail", "article", "mine", "sub", "notifs"].includes(name) ? backStack[backStack.length - 1] : name;
   const navName = name === "chat" ? "chats" : (NAV_VIEWS.includes(parent) ? parent : "");
-  document.querySelectorAll(".bottom [data-view]").forEach((b) => b.classList.toggle("active", b.dataset.view === navName));
+  document.querySelectorAll(".bottom [data-view]").forEach((b) => { const active = b.dataset.view === navName; b.classList.toggle("active", active); if (active) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current"); });
   if (name !== "chat") { clearInterval(chatTimer); clearInterval(chatStatusTimer); }
   if (NAV_VIEWS.includes(name) && backStack.length === 0) tg?.BackButton?.hide(); else tg?.BackButton?.show();
   if (name === "home" && !homeLoaded) loadCatalog();
@@ -1544,6 +1544,16 @@ async function renderMyResume(body) {
 }
 // ---------- поиск сотрудников (работодатель с опубликованной вакансией) ----------
 async function renderCvSearch(body) {
+  body.innerHTML = '<div class="empty">Проверяем, есть ли у вас опубликованная вакансия…</div>';
+  let mine;
+  try { mine = await api("/api/me/listings"); }
+  catch (err) { body.innerHTML = `<div class="empty">${esc(err.message)}</div>`; return; }
+  const hasVacancy = mine.some((x) => x.category === "job" && x.status === "approved");
+  if (!hasVacancy) {
+    body.innerHTML = `<div class="empty"><b>Поиск сотрудников доступен работодателям с опубликованной вакансией.</b><p>Сначала разместите вакансию и дождитесь её проверки. После публикации здесь появятся резюме кандидатов.</p><button class="submit" id="cvMyListings" type="button">Перейти к моим объявлениям</button></div>`;
+    $("#cvMyListings").onclick = () => openMenu("mine");
+    return;
+  }
   body.innerHTML = `<form id="cvSearch" class="toolbar"><input name="q" placeholder="Профессия или слово" maxlength="60"><input name="city" placeholder="Город" maxlength="100"><button type="submit">Найти</button></form><div id="cvList"></div>`;
   const run = async () => {
     const f = $("#cvSearch");

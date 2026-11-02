@@ -800,7 +800,8 @@ img.co-ava{object-fit:cover}
 /* доступность: видно, где фокус; анимации отключаются, если человек просил */
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 @media (prefers-reduced-motion:reduce){*{animation-duration:.01ms !important;animation-iteration-count:1 !important;transition-duration:.01ms !important;scroll-behavior:auto !important}}
-.chip,.pill,.link{min-height:32px}
+.chip,.pill,.link{min-height:40px}
+@media(max-width:520px){input:not([type=checkbox]):not([type=radio]):not([type=range]),select,textarea{font-size:16px}}
 
 .promo.autobump{background:#dfeaff}.promo.pack{background:#ffe9b0;white-space:normal}
 

@@ -1,4 +1,5 @@
 import io
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -137,11 +138,27 @@ def test_stars_report_by_day_and_service(client):
     assert {s["service"]: s["stars"] for s in data["stars_by_service"]} == {"VIP-вакансия на 7 дней": 100, "Поднять вакансию": 30}
 
 
+def test_employee_search_explains_vacancy_requirement_before_search():
+    js = (Path(__file__).parents[1] / "app" / "static" / "app.js").read_text()
+    assert 'api("/api/me/listings")' in js
+    assert "Поиск сотрудников доступен работодателям с опубликованной вакансией." in js
+    assert 'api("/api/resumes?" + qs)' in js
+
+
+def test_user_navigation_remains_zoomable_and_accessible(client):
+    page = client.get("/").text
+    assert "user-scalable=no" not in page
+    assert '<nav class="bottom" aria-label="Основная навигация">' in page
+    js = client.get("/static/app.js").text
+    assert 'setAttribute("aria-current", "page")' in js
+
+
 def test_banner_photo_and_language_button_are_wired_in_the_page(client):
     js = client.get("/static/app.js").text
     assert "/api/banner-photo" in js and 'classList.add("photo")' in js
     assert client.get("/api/banner-photo").json() == {"exists": False}
-    assert "Сейчас доступен только русский язык" in js and "появятся позже" not in js        # no false promise about other languages
+    assert "startI18n()" in js and "/static/i18n/${i18n.lang}.json" in js
+    assert "English (beta)" in js and "한국어 (beta)" in js
     assert ".hero.photo" in client.get("/static/app.css").text
 
 

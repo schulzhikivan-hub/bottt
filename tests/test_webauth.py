@@ -22,6 +22,7 @@ def client(monkeypatch):
 def start(client):
     r = client.post("/api/auth/start", headers={"user-agent": "TestBrowser/1.0", "x-forwarded-for": "203.0.113.7"})
     assert r.status_code == 200
+    assert r.headers["cache-control"] == "no-store, no-cache, must-revalidate"
     return r.json()
 
 
@@ -37,13 +38,17 @@ def test_start_returns_bot_link(client):
 
 def test_poll_waits_until_confirmed(client):
     token = start(client)["token"]
-    assert client.get(f"/api/auth/poll/{token}").json() == {"status": "pending"}
+    r = client.get(f"/api/auth/poll/{token}")
+    assert r.json() == {"status": "pending"}
+    assert r.headers["cache-control"] == "no-store, no-cache, must-revalidate"
 
 
 def test_confirmed_login_gives_user_session_that_works(client):
     token = start(client)["token"]
     assert confirm(token, "4242")
-    data = client.get(f"/api/auth/poll/{token}").json()
+    response = client.get(f"/api/auth/poll/{token}")
+    assert response.headers["cache-control"] == "no-store, no-cache, must-revalidate"
+    data = response.json()
     assert data["status"] == "ok" and data["tg_id"] == "4242"
     assert "admin_session" not in data  # an ordinary user gets no admin access
     headers = {"X-Web-Session": data["session"]}
