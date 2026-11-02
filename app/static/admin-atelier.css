@@ -64,7 +64,7 @@ tbody tr:hover td,table tr:hover td{background:color-mix(in srgb,var(--brand) 7%
  :root{--side-w:0px}
  .layout{display:block}
  aside{position:fixed;left:0;top:0;bottom:0;width:min(300px,86vw);height:100dvh;transform:translateX(-105%);transition:transform .22s ease;box-shadow:20px 0 60px #142d3b35}
- body.nav-open aside{transform:translateX(0)}
+ body.drawer aside{transform:translateX(0)}
  body.rail aside{width:min(300px,86vw)}
  body.rail aside .brand div,body.rail #tabs .lb,body.rail #tabs .sep,body.rail aside .foot .me{display:block}
  body.rail #tabs button{justify-content:flex-start}
