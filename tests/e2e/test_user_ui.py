@@ -136,7 +136,7 @@ def test_main_screens_fit_the_phone_and_have_no_errors(phone):
     hard += [f"home: {x}" for x in look(page, "home", report)]
     page.click("#tilesMore")                                   # the rest of the tiles
     hard += [f"home-more: {x}" for x in look(page, "home-more", report)]
-    page.click("[data-pick='0']")                              # a smart collection
+    page.locator("[data-pick]").first.click()                   # a smart collection (some depend on the person's profile)
     page.wait_for_timeout(800)
     hard += [f"pick: {x}" for x in look(page, "pick", report)]
     for view in ("saved", "chats", "profile", "dating", "community", "guide"):

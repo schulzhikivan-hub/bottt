@@ -71,17 +71,17 @@ h1{{font-size:22px;margin:4px 0 8px}}.price{{font-size:22px;font-weight:800;colo
 .legal h2{{font-size:17px;margin:18px 0 6px}}.legal p,.legal li{{line-height:1.5}}
 footer{{text-align:center;color:#6f7b91;font-size:13px;padding:18px}}
 footer a{{color:#6f7b91}}
-</style></head><body>
+</style>{head_extra}</head><body>
 <div class="top"><a href="/"><img src="/static/favicon.png" alt=""><b>KOREA HUB</b></a></div>
 <main>{body}</main>
 <footer><a href="/legal/terms">Пользовательское соглашение</a> · <a href="/legal/privacy">Политика конфиденциальности</a></footer>
 </body></html>"""
 
 
-def page(title: str, desc: str, body: str, canonical: str, robots: str = "index,follow", image: str | None = None) -> HTMLResponse:
+def page(title: str, desc: str, body: str, canonical: str, robots: str = "index,follow", image: str | None = None, head_extra: str = "") -> HTMLResponse:
     return HTMLResponse(PAGE.format(title=html.escape(title), desc=html.escape(desc[:200]), robots=robots,
                                     canonical=html.escape(canonical), image=html.escape(image or f"{base_url()}/static/og.png"),
-                                    body=body))
+                                    body=body, head_extra=head_extra))
 
 
 @router.get("/l/{listing_id}")
@@ -133,12 +133,11 @@ def listing_page(db: Session, x: Listing, banner: str = "", gallery: bool = Fals
             f'<p style="white-space:pre-wrap">{html.escape(x.description or "")}</p>'
             f'<a class="cta" href="{html.escape(_bot_link(x.id))}">Открыть в KOREA HUB и написать автору</a>'
             f'<p class="meta">Контакты автора видны в приложении. Не переводите предоплату незнакомым людям.</p></div>')
-    body += _jsonld(db, x, image)
-    return page(f"{x.title} — {SITE_NAME}", desc, body, f"{base_url()}/l/{x.id}", image=image)
+    return page(f"{x.title} — {SITE_NAME}", desc, body, f"{base_url()}/l/{x.id}", image=image, head_extra=_jsonld(db, x, image))
 
 
 def _script(data: dict) -> str:
-    return '<script type="application/ld+json">' + json.dumps(data, ensure_ascii=False).replace("</", "<\\/") + "</script>"
+    return '<script type="application/ld+json">' + json.dumps(data, ensure_ascii=False).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026") + "</script>"
 
 
 def _jsonld(db: Session, x: Listing, image: str | None) -> str:
@@ -199,7 +198,7 @@ def public_company(company_id: int, db: Session = Depends(get_db)):
            **({"description": c.description} if c.description else {}), **({"sameAs": [c.website]} if c.website else {}),
            **({"aggregateRating": {"@type": "AggregateRating", "ratingValue": rev["rating"], "reviewCount": rev["count"]}} if rev["count"] else {})}
     return page(f"{c.name} — вакансии и отзывы — {SITE_NAME}", f"{c.name}: {pg['page']['tagline'] or c.description or 'компания на KOREA HUB'}",
-                body + _script(org), f"{base_url()}/k/{c.id}")
+                body, f"{base_url()}/k/{c.id}", head_extra=_script(org))
 
 
 def _not_found(listing_id: int) -> HTMLResponse:
