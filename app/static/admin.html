@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="color-scheme" content="light dark">
+<meta name="color-scheme" content="light dark"><meta name="theme-color" content="#14163a"><meta name="description" content="Панель управления KOREA HUB">
 <title>KOREA HUB — админ-панель</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
@@ -19,7 +19,7 @@ html,body{margin:0}
 body{font-family:Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--text);font-size:14px;line-height:1.45;-webkit-font-smoothing:antialiased}
 .hidden{display:none !important}[hidden]{display:none !important}
 a{color:var(--brand)}
-::selection{background:var(--brand);color:#fff}
+::selection{background:var(--brand);color:#fff}\n:focus-visible{outline:3px solid color-mix(in srgb,var(--brand) 72%,white);outline-offset:2px}\nbutton,a,input,select,textarea{touch-action:manipulation}
 
 /* ---------- каркас ---------- */
 .layout{display:flex;min-height:100vh}
@@ -46,7 +46,7 @@ body.rail aside .brand div,body.rail #tabs .lb,body.rail #tabs .sep,body.rail as
 body.rail #tabs button{justify-content:center}body.rail #tabs button em{position:absolute;top:2px;right:4px;font-size:10px;padding:0 5px;min-width:16px}
 .content{flex:1;min-width:0;display:flex;flex-direction:column}
 header.top{display:flex;align-items:center;gap:12px;padding:12px 24px;background:color-mix(in srgb,var(--surface) 86%,transparent);backdrop-filter:blur(14px);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:20}
-header.top .burger{border:1px solid var(--line);background:var(--surface);color:var(--text);border-radius:11px;width:38px;height:38px;cursor:pointer;font-size:17px;flex:none}
+header.top .burger{border:1px solid var(--line);background:var(--surface);color:var(--text);border-radius:11px;width:42px;height:42px;cursor:pointer;font-size:17px;flex:none}
 header.top h1{margin:0;font-size:18px;letter-spacing:-.2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 header.top .grow{flex:1}
 #status{color:var(--muted);font-size:12px;white-space:nowrap}
@@ -228,7 +228,7 @@ table.queues td{vertical-align:middle}table.queues tr.zero{opacity:.55}
   body.rail{--side-w:272px}body.rail aside .brand div,body.rail #tabs .lb,body.rail #tabs .sep,body.rail aside .foot .me{display:revert}
   header.top{padding:10px 14px;gap:8px}main{padding:14px 14px 70px}
   main table{display:block;overflow-x:auto;max-width:100%}
-  .kv{grid-template-columns:1fr}.hero{padding:18px}.hero h2{font-size:19px}
+  .kv{grid-template-columns:1fr}.hero{padding:18px}.hero h2{font-size:19px}\n  #tabs button{min-height:46px;padding:9px 11px}\n  .subnav button{min-height:40px}\n  .card{padding:14px;border-radius:14px}
   .tile .n{font-size:26px}.chartbox svg{height:190px}.fstep .lab{width:84px}.hbar .nm{width:38%}
 }
 .kchart{display:flex;align-items:flex-end;gap:3px;height:120px;margin:10px 0}
@@ -240,7 +240,7 @@ table.queues td{vertical-align:middle}table.queues tr.zero{opacity:.55}
 /* телефон: широкие таблицы прокручиваются внутри карточки, а не вылезают за экран */
 .card{max-width:100%;overflow-x:auto}
 #allList,#datList,#usersList,#main>table{max-width:100%;overflow-x:auto;display:block}
-@media(max-width:640px){#main{min-width:0}.card table{min-width:560px}}
+@media(max-width:640px){\n  #main{min-width:0}.card table{min-width:560px}\n  header.top{gap:6px;padding:9px 10px}\n  header.top h1{font-size:16px;max-width:34vw}\n  #status{display:none}\n  .iconbtn{width:42px;height:42px;flex:none}\n  .kbtn{height:42px;padding:8px 10px}\n  main{padding:12px 10px 84px}\n  .stats{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}\n  .stats div{padding:11px}.stats b{font-size:21px}\n  .row{gap:6px}\n  button.act{min-height:40px;padding:10px 12px}\n  input,select,textarea{font-size:16px}\n  .pal{padding:8vh 8px 12px;align-items:flex-start}\n  .pal ul{max-height:62vh}\n  .pal li{min-height:48px}\n}
 </style></head>
 <body>
 <div id="previewModal" class="pmodal" hidden><div class="pbox"><div class="pbar"><b id="previewTitle">Предпросмотр</b>
@@ -260,13 +260,13 @@ table.queues td{vertical-align:middle}table.queues tr.zero{opacity:.55}
 <div class="layout hidden" id="app">
   <aside>
     <div class="brand"><div class="logo">K</div><div><b>KOREA HUB</b><small>центр управления</small></div></div>
-    <nav id="tabs"></nav>
+    <nav id="tabs" aria-label="Разделы панели"></nav>
     <div class="foot"><div class="me"><span id="who"></span></div><button id="logout" hidden title="Выйти">⎋</button></div>
   </aside>
   <div class="scrim" id="scrim"></div>
   <div class="content">
     <header class="top">
-      <button class="burger" id="burger" aria-label="Меню">☰</button>
+      <button class="burger" id="burger" type="button" aria-label="Открыть меню" aria-controls="tabs" aria-expanded="false">☰</button>
       <h1 id="title">Главная</h1><span class="grow"></span><span id="status"></span>
       <button class="kbtn" id="palBtn" type="button" aria-label="Поиск и команды">🔎 <span>Поиск и команды</span><kbd>Ctrl K</kbd></button>
       <button class="iconbtn" id="themeBtn" type="button" aria-label="Тема" title="Светлая / тёмная">🌓</button>
@@ -276,7 +276,7 @@ table.queues td{vertical-align:middle}table.queues tr.zero{opacity:.55}
     <main id="main"></main>
   </div>
 </div>
-<div class="pal hidden" id="pal"><div class="box"><input id="palQ" placeholder="Куда перейти или что найти? №объявления, имя, ID, слово…" autocomplete="off"><ul id="palList"></ul>
+<div class="pal hidden" id="pal" role="dialog" aria-modal="true" aria-label="Поиск и команды"><div class="box"><input id="palQ" role="combobox" aria-autocomplete="list" aria-controls="palList" aria-expanded="true" placeholder="Куда перейти или что найти? №объявления, имя, ID, слово…" autocomplete="off"><ul id="palList" role="listbox" aria-label="Результаты поиска"></ul>
   <div class="hint">↑↓ выбрать · Enter открыть · Esc закрыть · начните с «?» чтобы искать по всей базе</div></div></div>
 <div id="toasts" class="toasts" aria-live="polite"></div>
 <script src="/static/admin.js"></script>
