@@ -16,6 +16,11 @@ class Settings(BaseSettings):
     new_account_minutes: int = 10    # a newer account may publish only one listing per hour (set 0 to switch off)
     krw_rub: float = 0.0             # rubles for 1 won (e.g. 0.065); 0 = do not show the ruble equivalent
     krw_usd: float = 0.0             # dollars for 1 won (e.g. 0.00072); 0 = do not show
+    smtp_host: str = ""              # mail for confirming e-mail and restoring a password; empty = the site sends no mail
+    smtp_port: int = 587             # 465 = SSL at once, otherwise STARTTLS
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""              # «KOREA HUB <noreply@your-domain>»
     log_level: str = "INFO"
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

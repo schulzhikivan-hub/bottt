@@ -9,9 +9,9 @@ Rules
 - a wrong password is answered the same way as an unknown e-mail (no way to find out who is registered);
 - 8 attempts per 15 minutes per address and per e-mail; 10 failures in a row lock the account for 15 minutes;
 - changing the password needs the old one; it closes all other website sessions;
-- forgot the password: sign in through Telegram and set a new one (no e-mail is sent, so none can be intercepted);
-- the e-mail is not confirmed by a letter (the server sends no mail yet): it is only a login name of an account that was
-  already proved by Telegram. `email_verified` is kept for the day mail is switched on;
+- forgot the password: sign in through Telegram and set a new one; when the owner has set up SMTP (app/mailer.py) the
+  e-mail can also be confirmed by a letter and the password restored by a letter (app/accountmail.py), for a confirmed e-mail only;
+- without a letter the e-mail is only a login name of an account that was already proved by Telegram;
 - administrators open the admin panel only through Telegram, never by password."""
 import datetime as dt
 import hashlib

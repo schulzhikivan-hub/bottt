@@ -98,6 +98,7 @@ function toast(msg) {
 }
 const fmtDate = (s) => (s ? new Date(s.replace(" ", "T")).toLocaleString("ru-RU") : "");
 // KH — внутренняя валюта сайта: баланс и цены в KH; звёзды Telegram (⭐) покупают KH по курсу обменника
+let mailOn = false;      // подключена ли почта на сервере (письма подтверждения и восстановления)
 let khInfo = {kh_per_star: 1, balance_only: false, min: 10, max: 10000};
 const starsFor = (kh) => Math.max(1, Math.ceil(kh / (khInfo.kh_per_star || 1) - 1e-9));
 const fmtKRW = (n) => new Intl.NumberFormat("ru-RU").format(n) + " ₩";
@@ -1600,7 +1601,8 @@ async function openMenu(key) {
         <small class="muted">Имя видит только работодатель, когда вы откликаетесь</small></div></div>
       <div class="actions"><label class="btn secondary" style="flex:1;text-align:center;cursor:pointer;padding:10px;border-radius:10px">Загрузить фото<input type="file" id="setAvatarFile" accept="image/jpeg,image/png,image/webp" hidden></label>
         <button class="secondary" id="setAvatarDel">Убрать</button><button id="setNameSave">Сохранить имя</button></div>
-      <div class="set-row"><div><b>Вход на сайт</b><small>${me?.account?.email ? esc(me.account.email) + (me.account.has_password ? " · пароль задан" : " · пароль не задан") : "E-mail и пароль не заданы"}</small></div><button class="secondary" id="setLogin">${me?.account?.has_password ? "Изменить" : "Задать"}</button></div>
+      <div class="set-row"><div><b>Вход на сайт</b><small>${me?.account?.email ? esc(me.account.email) + (me.account.email_verified ? " ✔ подтверждён" : "") + (me.account.has_password ? " · пароль задан" : " · пароль не задан") : "E-mail и пароль не заданы"}</small></div><button class="secondary" id="setLogin">${me?.account?.has_password ? "Изменить" : "Задать"}</button></div>
+      ${mailOn && me?.account?.email && !me.account.email_verified ? '<div class="set-row"><div><b>Подтвердить e-mail</b><small>Пришлём письмо со ссылкой: подтверждённый e-mail нужен, чтобы восстановить пароль</small></div><button class="secondary" id="setConfirmMail">Отправить</button></div>' : ""}
       <div class="set-row"><div><b>Город</b><small>${esc(me?.city || "не выбран")}</small></div><button class="secondary" id="setCity">Изменить</button></div>
       <div class="set-row"><div><b>Виза</b><small>Видна только вам: подставляется в отклики и фильтры</small></div>
         <select id="myVisa"><option value="">Не указана</option>${fieldDefs.visas.map((v) => `<option value="${v.value}">${v.label}</option>`).join("")}</select></div>
@@ -1629,6 +1631,9 @@ async function openMenu(key) {
     };
     $("#setCity").onclick = openCity;
     $("#setLogin").onclick = () => openSignup("edit");
+    if ($("#setConfirmMail")) $("#setConfirmMail").onclick = async () => {
+      try { await api("/api/me/account/email-confirm/send", {method: "POST"}); toast("Письмо отправлено: проверьте почту (и «Спам»)"); } catch (err) { toast(err.message); }
+    };
     $("#myVisa").onchange = async () => {
       try { const r = await api("/api/me/settings", {method: "PUT", body: JSON.stringify({visa: $("#myVisa").value})}); me.visa = r.visa; showProfileChips(); toast("Сохранено"); }
       catch (err) { toast(err.message); }
@@ -3566,3 +3571,51 @@ document.addEventListener("click", async (e) => {
     loadMessages();
   } catch (err) { toast(err.message); }
 });
+
+// ---------- письма: «забыли пароль», подтверждение e-mail по ссылке ----------
+function showForgot() {
+  const info = $("#pwLoginInfo");
+  if (!info || !mailOn) return;
+  info.innerHTML = 'Забыли пароль? <button type="button" class="link" id="pwForgot">Прислать ссылку на почту</button>';
+}
+document.addEventListener("click", async (e) => {
+  if (e.target.id !== "pwForgot") return;
+  const email = (document.querySelector('#pwLoginForm [name=email]').value || "").trim() || (await askText("Ваш e-mail", "name@example.com"));
+  if (!email) return;
+  try {
+    await api("/api/auth/password-reset/request", {method: "POST", body: JSON.stringify({email}), quiet: true});
+    $("#pwLoginInfo").textContent = "Если такой подтверждённый e-mail есть, мы отправили на него письмо со ссылкой на 1 час.";
+  } catch (err) { $("#pwLoginInfo").textContent = err.message; }
+});
+function openResetDialog(token) {
+  const m = document.createElement("div");
+  m.className = "modal";
+  m.innerHTML = `<div class="sheet"><div class="sheet-top"><b>Новый пароль</b><button type="button" data-x aria-label="Закрыть">✕</button></div>
+    <form class="dform" id="resetForm"><label>Пароль (8–72 знака, буквы и цифры)<input name="password" type="password" required minlength="8" maxlength="72" autocomplete="new-password"></label>
+    <label>Ещё раз<input name="password2" type="password" required minlength="8" maxlength="72" autocomplete="new-password"></label>
+    <button class="submit" type="submit">Сохранить пароль</button><p class="muted" id="resetInfo"></p></form></div>`;
+  document.body.appendChild(m);
+  m.querySelector("[data-x]").onclick = () => m.remove();
+  m.querySelector("#resetForm").onsubmit = async (ev) => {
+    ev.preventDefault();
+    const f = ev.target;
+    if (f.password.value !== f.password2.value) { $("#resetInfo").textContent = "Пароли не совпадают"; return; }
+    try {
+      await api("/api/auth/password-reset", {method: "POST", body: JSON.stringify({token, password: f.password.value}), quiet: true});
+      m.remove(); toast("Пароль изменён. Теперь войдите по e-mail и новому паролю");
+    } catch (err) { $("#resetInfo").textContent = err.message; }
+  };
+}
+(function handleMailLinks() {
+  const q = new URLSearchParams(location.search), confirm = q.get("confirm"), reset = q.get("reset");
+  if (!confirm && !reset) return;
+  history.replaceState(null, "", location.pathname);              // the one-time token must not stay in the address bar
+  setTimeout(async () => {
+    try {
+      if (confirm) { await api("/api/auth/email-confirm", {method: "POST", body: JSON.stringify({token: confirm}), quiet: true}); toast("E-mail подтверждён ✔"); }
+      if (reset) openResetDialog(reset);
+    } catch (err) { toast(err.message); }
+  }, 1200);
+})();
+
+api("/api/mail-state", {quiet: true}).then((x) => { mailOn = Boolean(x.enabled); showForgot(); }).catch(() => {});      // и гостю: у него окно входа
