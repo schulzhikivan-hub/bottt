@@ -5,7 +5,7 @@ import hashlib
 from pathlib import Path
 
 STATIC = Path(__file__).parent / "static"
-_FILES = ("index.html", "app.js", "app.css", "admin.html", "admin.js", "sw.js")
+_FILES = ("index.html", "app.js", "app.css", "atelier.css", "admin.html", "admin.js", "admin-atelier.css", "sw.js")
 _cache: dict = {}
 
 
@@ -24,7 +24,7 @@ def page(name: str) -> str:
     """index.html or admin.html with versioned links to scripts and styles."""
     text = (STATIC / name).read_text(encoding="utf-8")
     v = build_id()
-    for asset in ("app.js", "app.css", "admin.js"):
+    for asset in ("app.js", "app.css", "atelier.css", "admin.js", "admin-atelier.css"):
         text = text.replace(f'/static/{asset}"', f'/static/{asset}?v={v}"')
     return text.replace("</head>", f'<meta name="build" content="{v}"></head>', 1)
 
