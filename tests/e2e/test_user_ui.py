@@ -134,11 +134,11 @@ def test_catalog_search_has_keyboard_shortcuts(phone):
     page, problems = phone
     search = page.locator("#search")
     search.fill("вакансия")
-    page.locator("body").click(position={"x": 380, "y": 800})
+    page.locator("body").click(position={"x": 195, "y": 300})
     page.keyboard.press("/")
     assert search.evaluate("(el) => document.activeElement === el")
     assert search.evaluate("(el) => el.selectionStart === 0 && el.selectionEnd === el.value.length")
-    page.locator("body").click(position={"x": 380, "y": 800})
+    page.locator("body").click(position={"x": 195, "y": 300})
     page.keyboard.press("Control+k")
     assert search.evaluate("(el) => document.activeElement === el")
     assert not problems["js"], problems["js"]
