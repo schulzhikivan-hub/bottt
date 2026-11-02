@@ -261,3 +261,22 @@ def test_a_message_is_written_and_shown_in_the_chat(phone, base):
     page.click("#chatSend")
     page.wait_for_selector("#messages >> text=вакансия ещё актуальна", timeout=10000)
     assert not problems["js"] and not problems["server"], problems
+
+
+def test_interface_language_can_be_switched_to_english_and_korean(browser, base):
+    for lang, expect in (("en", "My listings"), ("ko", "내 게시글")):
+        ctx = browser.new_context(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True)
+        page = ctx.new_page()
+        errors = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+        page.route("**/telegram.org/**", lambda r: r.fulfill(status=200, content_type="application/javascript", body=""))
+        page.add_init_script(f"try{{if(window===window.top){{localStorage.setItem('webSession','{TOKEN}');localStorage.setItem('welcomeSeen','1');localStorage.setItem('khLang','{lang}');}}}}catch(e){{}}")
+        page.goto(base + "/")
+        page.wait_for_selector("#view-home", timeout=15000)
+        page.wait_for_timeout(1500)
+        page.evaluate("showView('profile')")
+        page.wait_for_timeout(800)
+        assert expect in page.inner_text("#view-profile"), (lang, page.inner_text("#view-profile")[:300])
+        assert page.inner_text("#langBtn") == lang.upper()
+        assert not errors, errors
+        ctx.close()

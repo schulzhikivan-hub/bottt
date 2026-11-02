@@ -98,6 +98,31 @@ function toast(msg) {
 }
 const fmtDate = (s) => (s ? new Date(s.replace(" ", "T")).toLocaleString("ru-RU") : "");
 // KH — внутренняя валюта сайта: баланс и цены в KH; звёзды Telegram (⭐) покупают KH по курсу обменника
+// ---------- язык интерфейса: перевод по словарю (app/static/i18n/*.json); чего нет в словаре, остаётся по-русски ----------
+const LANG_KEY = "khLang";
+const i18n = {lang: (() => { try { return localStorage.getItem(LANG_KEY) || "ru"; } catch (e) { return "ru"; } })(), dict: null};
+function trNode(node) {
+  const d = i18n.dict;
+  if (!d) return;
+  if (node.nodeType === 3) {
+    const t = node.nodeValue, key = t.trim();
+    if (key && d[key] && !node.parentElement?.closest("script, style, textarea")) node.nodeValue = t.replace(key, d[key]);
+  } else if (node.nodeType === 1) {
+    if (node.matches?.("script, style, textarea")) return;
+    for (const a of ["placeholder", "aria-label", "title"]) { const v = node.getAttribute?.(a); if (v && d[v.trim()]) node.setAttribute(a, d[v.trim()]); }
+    node.childNodes.forEach(trNode);
+  }
+}
+async function startI18n() {
+  if (i18n.lang === "ru") return;
+  try { i18n.dict = await (await fetch(`/static/i18n/${i18n.lang}.json`)).json(); } catch (e) { i18n.dict = null; return; }
+  document.documentElement.lang = i18n.lang;
+  trNode(document.body);
+  if (d_title(i18n.dict)) document.title = d_title(i18n.dict);
+  new MutationObserver((muts) => { for (const m of muts) { if (m.type === "characterData") trNode(m.target); else m.addedNodes.forEach(trNode); } })
+    .observe(document.body, {childList: true, subtree: true, characterData: true});
+}
+const d_title = (d) => d[document.title.trim()];
 // тема: «светлая» (как раньше), «тёмная» или «как в Telegram»; выбирает человек, по умолчанию ничего не меняется
 const THEME_KEY = "khTheme";
 function applyTheme() {
@@ -3121,7 +3146,13 @@ $("#consentOk").onclick = async () => {
 };
 function showCityChip() { $("#cityChipText").textContent = (me?.city || "Город").split(",")[0]; }
 $("#cityChip").onclick = () => openCity();
-$("#langBtn").onclick = () => toast("Сейчас доступен только русский язык");
+$("#langBtn").textContent = ({ru: "RU", en: "EN", ko: "KO"})[i18n.lang] || "RU";
+$("#langBtn").onclick = async () => {
+  const k = await chooseDialog("Язык / Language / 언어", [{key: "ru", label: "Русский"}, {key: "en", label: "English (beta)"}, {key: "ko", label: "한국어 (beta)"}]);
+  if (!k || k === i18n.lang) return;
+  localStorage.setItem(LANG_KEY, k);
+  location.reload();                              // чистый перезапуск: тексты возвращаются или переводятся целиком
+};
 function showBell(n) { $("#bellBadge").textContent = n > 99 ? "99+" : n; $("#bellBadge").hidden = !n; }
 $("#bellBtn").onclick = async () => { if (await requireConsent()) showView("notifs", {push: true}); };
 async function loadNotifs() {
@@ -3643,3 +3674,5 @@ api("/api/mail-state", {quiet: true}).then((x) => { mailOn = Boolean(x.enabled);
   if (navigator.onLine === false) bar.hidden = false;
 })();
 try { tg?.onEvent?.("themeChanged", applyTheme); } catch (e) { /* без событий темы */ }
+
+startI18n();
