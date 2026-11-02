@@ -368,3 +368,17 @@ def test_company_cover_and_reply_templates(client, tmp_path):
     assert [x["text"] for x in client.get(f"/api/company/{cid}/reply-templates", headers=as_user(1)).json()] == ["Приходите в офис к 10:00"]
     assert client.get(f"/api/company/{cid}/reply-templates", headers=as_user(3)).status_code == 404                # outsiders see nothing
     assert client.delete(f"/api/company/{cid}/reply-templates/{t.json()['id']}", headers=as_user(1)).status_code == 200
+
+
+def test_public_web_pages_have_structured_data_and_company_page(client):
+    cid = verified_company(client)
+    lid = approved_company_listing(client, cid)
+    page = client.get(f"/l/{lid}").text
+    assert "application/ld+json" in page and '"@type": "JobPosting"' in page and '"hiringOrganization"' in page and "Кафе Сеул" in page
+    comp = client.get(f"/k/{cid}")
+    assert comp.status_code == 200 and "Кафе Сеул" in comp.text and f"/l/{lid}" in comp.text and '"@type": "Organization"' in comp.text
+    assert client.get("/k/9999").status_code == 404
+    assert f"/k/{cid}" in client.get("/sitemap.xml").text
+    other = client.post("/api/listings", json={"category": "marketplace", "title": "Велосипед", "city": "Сеул", "description": "ok", "contact": "", "price_amount": 100000}, headers=as_user(2)).json()["id"]
+    client.post(f"/api/admin/listings/{other}/approve", headers=ADMIN)
+    assert '"@type": "Product"' in client.get(f"/l/{other}").text

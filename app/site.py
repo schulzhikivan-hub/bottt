@@ -1,6 +1,7 @@
 """The site outside Telegram: public listing pages that search engines and link previews can read, robots.txt,
 sitemap.xml, and the legal pages (DRAFT texts that a lawyer must review before launch)."""
 import html
+import json
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -132,7 +133,73 @@ def listing_page(db: Session, x: Listing, banner: str = "", gallery: bool = Fals
             f'<p style="white-space:pre-wrap">{html.escape(x.description or "")}</p>'
             f'<a class="cta" href="{html.escape(_bot_link(x.id))}">Открыть в KOREA HUB и написать автору</a>'
             f'<p class="meta">Контакты автора видны в приложении. Не переводите предоплату незнакомым людям.</p></div>')
+    body += _jsonld(db, x, image)
     return page(f"{x.title} — {SITE_NAME}", desc, body, f"{base_url()}/l/{x.id}", image=image)
+
+
+def _script(data: dict) -> str:
+    return '<script type="application/ld+json">' + json.dumps(data, ensure_ascii=False).replace("</", "<\\/") + "</script>"
+
+
+def _jsonld(db: Session, x: Listing, image: str | None) -> str:
+    """Structured data for search engines: a vacancy becomes a JobPosting (Google for Jobs), anything else an offered product."""
+    url = f"{base_url()}/l/{x.id}"
+    place = {"@type": "Place", "address": {"@type": "PostalAddress", "addressLocality": (x.city or "").split(",")[0].strip(), "addressCountry": "KR"}}
+    if x.category == "job":
+        org = (x.details or {}).get("company") or SITE_NAME
+        url_org = None
+        if x.company_id:
+            from app.company import Company
+            co = db.get(Company, x.company_id)
+            if co is not None:
+                org, url_org = co.name, f"{base_url()}/k/{co.id}"
+        data = {"@context": "https://schema.org", "@type": "JobPosting", "title": x.title, "description": x.description or x.title, "url": url,
+                "datePosted": (x.published_at or x.created_at).date().isoformat(), "jobLocation": place, "directApply": False,
+                "hiringOrganization": {"@type": "Organization", "name": org, **({"sameAs": url_org} if url_org else {})}}
+        if x.expires_at:
+            data["validThrough"] = aware(x.expires_at).isoformat()
+        if x.employment:
+            data["employmentType"] = {"full": "FULL_TIME", "part": "PART_TIME", "contract": "CONTRACTOR", "temp": "TEMPORARY"}.get(x.employment, "OTHER")
+        if x.price_amount:
+            unit = {"month": "MONTH", "day": "DAY", "hour": "HOUR"}.get(x.salary_period or "month", "MONTH")
+            data["baseSalary"] = {"@type": "MonetaryAmount", "currency": "KRW", "value": {"@type": "QuantitativeValue", "value": x.price_amount, "unitText": unit}}
+        return _script(data)
+    offer = {"@type": "Offer", "priceCurrency": "KRW", "availability": "https://schema.org/InStock", "url": url}
+    if x.price_amount is not None:
+        offer["price"] = x.price_amount
+    data = {"@context": "https://schema.org", "@type": "Product", "name": x.title, "description": x.description or x.title, "offers": offer,
+            **({"image": image} if image else {})}
+    return _script(data)
+
+
+@router.get("/k/{company_id}")
+def public_company(company_id: int, db: Session = Depends(get_db)):
+    """A verified company as a normal web page: who they are, their open vacancies and the rating from reviews."""
+    from app import companypage
+    from app.company import Company
+    c = db.get(Company, company_id)
+    if c is None or c.status != "verified":
+        return HTMLResponse(page("Компания не найдена — KOREA HUB", "Компания не найдена.",
+                                 '<div class="card"><h1>Компания не найдена</h1></div>', f"{base_url()}/k/{company_id}", robots="noindex,nofollow").body, status_code=404)
+    pg = companypage.public_extra(db, c.id)
+    rows = db.scalars(select(Listing).where(Listing.company_id == c.id, Listing.status == "approved",
+                                            or_(Listing.expires_at.is_(None), Listing.expires_at > now())).order_by(Listing.id.desc()).limit(30)).all()
+    rev = pg["reviews"]
+    facts = "".join(f"<li>✔ {html.escape(companypage.BENEFITS.get(k, k))}</li>" for k in pg["page"]["benefits"])
+    jobs = "".join(f'<li><a href="/l/{x.id}">{html.escape(x.title)}</a> · {html.escape(_price(x))}</li>' for x in rows)
+    body = (f'<div class="card"><h1>{html.escape(c.name)} ✔</h1><div class="meta">{html.escape(c.city or "")}'
+            f'{f" · ★ {rev['rating']} ({rev['count']})" if rev["count"] else ""}</div>'
+            f'{f"<p>{html.escape(pg['page']['tagline'])}</p>" if pg["page"]["tagline"] else ""}'
+            f'<p style="white-space:pre-wrap">{html.escape(c.description or "")}</p>'
+            f'{f"<ul>{facts}</ul>" if facts else ""}'
+            f'{f"<p>📍 {html.escape(pg['page']['address'])}</p>" if pg["page"]["address"] else ""}'
+            f'<h2>Открытые объявления ({len(rows)})</h2>{f"<ul>{jobs}</ul>" if jobs else "<p class=meta>Сейчас открытых объявлений нет.</p>"}'
+            f'<a class="cta" href="{html.escape(base_url())}">Открыть KOREA HUB</a></div>')
+    org = {"@context": "https://schema.org", "@type": "Organization", "name": c.name, "url": f"{base_url()}/k/{c.id}",
+           **({"description": c.description} if c.description else {}), **({"sameAs": [c.website]} if c.website else {}),
+           **({"aggregateRating": {"@type": "AggregateRating", "ratingValue": rev["rating"], "reviewCount": rev["count"]}} if rev["count"] else {})}
+    return page(f"{c.name} — вакансии и отзывы — {SITE_NAME}", f"{c.name}: {pg['page']['tagline'] or c.description or 'компания на KOREA HUB'}",
+                body + _script(org), f"{base_url()}/k/{c.id}")
 
 
 def _not_found(listing_id: int) -> HTMLResponse:
@@ -174,7 +241,7 @@ def public_section(category: str, city: str | None = None, db: Session = Depends
 @router.get("/robots.txt")
 def robots():
     return PlainTextResponse(
-        "User-agent: *\nAllow: /\nAllow: /l/\nDisallow: /admin\nDisallow: /api/\n"
+        "User-agent: *\nAllow: /\nAllow: /l/\nAllow: /k/\nDisallow: /admin\nDisallow: /api/\n"
         f"Sitemap: {base_url()}/sitemap.xml\n")
 
 
@@ -198,6 +265,9 @@ def sitemap(db: Session = Depends(get_db)):
     for x in rows:
         last = f"<lastmod>{aware(x.published_at).date().isoformat()}</lastmod>" if x.published_at else ""
         urls.append(f"<url><loc>{html.escape(base_url())}/l/{x.id}</loc>{last}</url>")
+    from app.company import Company
+    for cid in db.scalars(select(Company.id).where(Company.status == "verified").order_by(Company.id.desc()).limit(2000)).all():
+        urls.append(f"<url><loc>{html.escape(base_url())}/k/{cid}</loc></url>")
     return Response('<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
                     + "".join(urls) + "</urlset>", media_type="application/xml")
 
