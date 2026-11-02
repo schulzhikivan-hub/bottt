@@ -263,6 +263,121 @@ table.queues td{vertical-align:middle}table.queues tr.zero{opacity:.55}
   .pal ul{max-height:62vh}
   .pal li{min-height:48px}
 }
+
+/* KOREA HUB ADMIN — visual system refresh */
+:root{
+ --bg:#f5f7fc;--surface:#fff;--surface2:#f8faff;--text:#172033;--muted:#718096;--line:#e7ebf3;
+ --brand:#4568e8;--brand2:#20b9ad;--brandsoft:#edf1ff;--grad:linear-gradient(135deg,#4568e8 0%,#20b9ad 100%);
+ --ok:#15966b;--bad:#dc5260;--warn:#d99524;--okbg:#e7f7f0;--badbg:#fff0f1;--warnbg:#fff7e8;
+ --side-w:268px;--radius:18px;--shadow:0 2px 8px rgba(27,39,70,.035),0 14px 34px -22px rgba(27,39,70,.22);
+}
+:root[data-theme=dark]{
+ --bg:#0b1020;--surface:#121a2d;--surface2:#182239;--text:#edf2ff;--muted:#94a3bb;--line:#25314a;
+ --brandsoft:#202d53;--okbg:#12382f;--badbg:#40232d;--warnbg:#40331c;--shadow:0 12px 30px -18px #000b;
+}
+body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI",sans-serif;letter-spacing:-.012em}
+.layout{min-height:100dvh}
+aside{background:#101a31;border-right:1px solid #ffffff0c;box-shadow:8px 0 30px #0d17300b}
+aside .brand{padding:25px 20px 23px;gap:13px}
+aside .logo{width:42px;height:42px;border-radius:14px;background:linear-gradient(145deg,#6d8bff,#27c7b5);box-shadow:0 8px 24px #4568e855}
+aside .brand b{font-size:15px;letter-spacing:.9px}
+aside .brand small{display:block;margin-top:3px;color:#9ba9c8}
+#tabs{padding:8px 12px 18px;gap:4px}
+#tabs .sep{padding:20px 12px 7px;color:#7283a8;font-size:10px;letter-spacing:1.6px}
+#tabs button{min-height:44px;padding:8px 11px;border-radius:12px;color:#aebbd5;gap:12px}
+#tabs button .ic{width:32px;height:32px;border-radius:10px;background:#ffffff0b}
+#tabs button:hover{background:#ffffff0d;color:#fff}
+#tabs button.active{background:linear-gradient(90deg,#4568e83a,#20b9ad14);box-shadow:inset 3px 0 #7894ff;color:#fff}
+#tabs button.active .ic{background:linear-gradient(145deg,#4568e8,#20b9ad)}
+aside .foot{padding:16px;border-top:1px solid #ffffff12}
+aside .foot button{width:36px;height:36px;border-radius:11px}
+body.rail aside{box-shadow:none}
+.content{background:var(--bg)}
+header.top{min-height:76px;padding:14px clamp(16px,3vw,34px);gap:13px;background:color-mix(in srgb,var(--surface) 92%,transparent);border-bottom:1px solid var(--line)}
+header.top .burger{width:42px;height:42px;border-radius:13px;background:var(--surface2);border-color:var(--line)}
+header.top h1{font-size:20px;font-weight:750;letter-spacing:-.6px}
+#status{font-size:12px;padding:6px 10px;border-radius:999px;background:var(--okbg);color:var(--ok)}
+.kbtn{min-width:210px;height:42px;border-radius:13px;background:var(--surface2);border-color:var(--line)}
+.iconbtn{width:42px;height:42px;border-radius:13px;background:var(--surface2)}
+main{max-width:1540px;padding:28px clamp(16px,3vw,36px) 72px}
+.section-hint{padding:10px clamp(16px,3vw,36px) 0;font-size:12px}
+.subnav{padding:12px clamp(16px,3vw,36px) 2px;gap:8px;background:var(--bg)}
+.subnav button{padding:9px 15px;border-radius:11px;background:var(--surface);border-color:var(--line);font-size:12px}
+.subnav button.on{background:var(--brand);box-shadow:0 5px 14px #4568e833}
+.card,.stats div,.tile,.kpi,.today{border-radius:18px;border-color:var(--line);box-shadow:var(--shadow)}
+.card{padding:21px;margin-bottom:16px}
+.card h3{font-size:15px;font-weight:750}
+.stats{gap:14px}
+.stats div{padding:18px}
+.stats b{font-size:28px;letter-spacing:-1px}
+.stats small{font-size:12px}
+table{border-radius:15px;box-shadow:0 1px 3px #17203308}
+th{padding:13px 14px;font-size:10px;letter-spacing:.8px}
+td{padding:13px 14px}
+tbody tr:hover td,table tr:hover td{background:color-mix(in srgb,var(--brand) 5%,var(--surface))}
+input,select,textarea{border-radius:12px;min-height:40px}
+textarea{min-height:90px}
+button.act{border-radius:11px;padding:10px 15px;font-weight:700}
+button.act:not(.gray):not(.ok):not(.no):not(.warn){background:var(--brand)}
+button.gray{background:var(--surface2);border-color:var(--line)}
+.toolbar{top:76px;padding:12px 0;background:var(--bg)}
+.hero{border-radius:22px;padding:28px 30px;background:radial-gradient(circle at 85% 15%,#ffffff30,transparent 25%),linear-gradient(115deg,#243f9c 0%,#4568e8 52%,#20b9ad 125%);box-shadow:0 20px 48px -28px #3457c9aa}
+.hero h2{font-size:25px}
+.tile,.kpi,.today{transition:transform .16s ease,border-color .16s ease,box-shadow .16s ease}
+.tile:hover,.kpi:hover,.today:hover{transform:translateY(-2px);box-shadow:0 12px 30px -20px #233a70aa}
+.dhead{margin-bottom:18px}
+.dhead h2{font-size:27px;font-weight:800;letter-spacing:-.9px}
+.dhead p{color:var(--muted);font-size:13px}
+.todaybar{gap:12px}
+.today{padding:17px}
+.today b{font-size:30px}
+.cols2,.cols3{gap:16px}
+.chartcard{padding:20px}
+.feed button,.fstep{border-radius:12px}
+.drawer{border-radius:22px 0 0 22px;box-shadow:-25px 0 70px #101a3130}
+.drawer .dhd{padding:17px 20px}
+.drawer .dbody{padding:18px 20px 48px}
+.pal .box{border-radius:20px;box-shadow:0 30px 100px #08132e55}
+#login{margin:clamp(36px,10vh,110px) auto;padding:36px 32px;border-radius:24px;box-shadow:0 24px 70px -36px #243b77aa}
+#login h3{font-size:21px;letter-spacing:-.5px}
+#login .logo{width:64px;height:64px;border-radius:20px}
+#login .act{min-height:46px;padding:12px 22px}
+.badge{font-weight:700}
+@media(max-width:1000px){main{padding-top:20px}.toolbar{top:60px}}
+@media(max-width:860px){
+ aside{width:min(310px,86vw);border-radius:0 20px 20px 0}
+ header.top{min-height:64px;padding:10px 14px}
+ header.top h1{font-size:17px}
+ main{padding:18px 14px 84px}
+ .card{padding:16px}
+ .hero{padding:22px 19px}
+ .hero h2{font-size:21px}
+ .dhead h2{font-size:22px}
+ .drawer{border-radius:0}
+ body.drawer .scrim{background:#08132e88;backdrop-filter:blur(2px)}
+}
+@media(max-width:640px){
+ #login{margin:9vh 14px;padding:28px 20px}
+ header.top{gap:7px}
+ header.top h1{max-width:35vw;font-size:16px}
+ .iconbtn,.burger{flex:none}
+ .kbtn{min-width:42px;width:42px;justify-content:center}
+ main{padding:14px 11px 90px}
+ .stats{gap:9px}
+ .stats div{padding:13px;border-radius:14px}
+ .stats b{font-size:23px}
+ .card{padding:14px;border-radius:15px}
+ .dhead h2{font-size:20px}
+ .todaybar{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .today{padding:13px;border-radius:14px}
+ .today b{font-size:25px}
+ .quick2{width:100%}
+ .quick2 button{flex:1}
+ .toolbar{top:58px}
+ .pal .box{border-radius:16px}
+}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important;transition-duration:.01ms!important}}
+
 </style></head>
 <body>
 <div id="previewModal" class="pmodal" hidden><div class="pbox"><div class="pbar"><b id="previewTitle">Предпросмотр</b>
