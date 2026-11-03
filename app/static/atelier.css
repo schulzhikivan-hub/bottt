@@ -214,3 +214,12 @@ a{color:#14556a}
 @media(prefers-reduced-motion:reduce){
  .landing .tiles button,.landing .listing{transition:none}
 }
+
+/* Mobile viewport corrections verified against the 390px phone layout. */
+@media(max-width:560px){
+  .landing .hero{width:auto;max-width:none;margin-left:-14px;margin-right:-14px}
+  .landing .hscroll{width:100%;max-width:100%;min-width:0;box-sizing:border-box;margin-left:0;margin-right:0;padding-left:0;padding-right:0;overflow-x:auto}
+  .detail .dphoto{width:100%;max-width:100%;min-width:0;box-sizing:border-box;margin-left:0;margin-right:0;overflow:hidden}
+  .detail .dphoto .nophoto{width:100%;max-width:100%;min-width:0;box-sizing:border-box}
+}
+.shell:has(#view-chat:not([hidden])) .bottom{display:none!important}
