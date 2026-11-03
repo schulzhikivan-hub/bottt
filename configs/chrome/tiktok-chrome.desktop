@@ -1,8 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=TikTok (Chrome)
-Comment=Браузер с сохранённым профилем TikTok
-Exec=__HOME__/.local/bin/tiktok-chrome.sh
-Icon=google-chrome
-Terminal=false
-Categories=Network;WebBrowser;

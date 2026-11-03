@@ -1,0 +1,89 @@
+import pytest
+from fastapi.testclient import TestClient
+
+from app.config import settings
+from app.database import Base, engine
+from app.main import app
+from app import bot as bot_module
+from tests.tg import as_user, reset_db, accept_terms
+
+
+@pytest.fixture()
+def client():
+    reset_db()
+    with TestClient(app) as c:
+        accept_terms(c, 42)
+        yield c
+
+
+def create(client, title="Работа на заводе"):
+    r = client.post("/api/listings", json={
+        "category": "job", "title": title, "city": "Асан",
+        "price": "2 800 000 ₩", "description": "Смена 8-17", "contact": "@test",
+    }, headers=as_user(42))
+    assert r.status_code == 201
+    return r.json()["id"]
+
+
+def test_admin_page_served(client):
+    r = client.get("/admin")
+    assert r.status_code == 200
+    assert "админ-панель" in r.text
+    assert "/static/admin-atelier.css?v=" in r.text
+    css_url = "/static/admin-atelier.css?v=" + r.text.split('/static/admin-atelier.css?v=', 1)[1].split('"', 1)[0]
+    css = client.get(css_url)
+    assert css.status_code == 200
+
+
+def test_public_page_loads_redesign_assets(client):
+    r = client.get("/")
+    assert r.status_code == 200
+    assert "/static/atelier.css?v=" in r.text
+    css_url = "/static/atelier.css?v=" + r.text.split('/static/atelier.css?v=', 1)[1].split('"', 1)[0]
+    css = client.get(css_url)
+    assert css.status_code == 200
+
+
+def test_admin_api_requires_key(client):
+    assert client.get("/api/admin/listings").status_code == 401
+    assert client.get("/api/admin/listings", headers={"X-Admin-Session": "wrong-token"}).status_code == 401
+
+
+def test_approve_publishes_listing(client):
+    listing_id = create(client)
+    headers = {"X-Admin-Session": "test-session-token"}
+    pending = client.get("/api/admin/listings", headers=headers).json()
+    assert any(x["id"] == listing_id for x in pending)
+
+    r = client.post(f"/api/admin/listings/{listing_id}/approve", headers=headers)
+    assert r.status_code == 200
+    assert r.json()["status"] == "approved"
+    assert any(x["id"] == listing_id for x in client.get("/api/listings").json())
+
+
+def test_reject_hides_listing(client):
+    listing_id = create(client)
+    headers = {"X-Admin-Session": "test-session-token"}
+    client.post(f"/api/admin/listings/{listing_id}/reject", headers=headers)
+    assert all(x["id"] != listing_id for x in client.get("/api/listings").json())
+
+
+def test_moderate_twice_is_refused(client):
+    listing_id = create(client)
+    item, error = bot_module.moderate(listing_id, "approve")
+    assert error == "" and item.status == "approved"
+    item, error = bot_module.moderate(listing_id, "reject", "поздно")
+    assert "уже" in error
+
+
+def test_moderate_unknown_id(client):
+    item, error = bot_module.moderate(999999, "approve")
+    assert item is None and "не найдено" in error
+
+
+def test_admin_ids_parsing(monkeypatch):
+    monkeypatch.setattr(settings, "admin_ids", "111, 222,,abc,333")
+    assert bot_module.admin_ids() == {111, 222, 333}
+    assert bot_module.is_admin(222)
+    assert not bot_module.is_admin(999)
+    assert not bot_module.is_admin(None)

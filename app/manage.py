@@ -1,0 +1,337 @@
+"""Own-listing management, employer application, settings, and administrator user tools."""
+from typing import Literal
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
+from sqlalchemy import select, or_
+from sqlalchemy.orm import Session
+
+from app.audit import log_action
+from app.admin_auth import staff, SUPPORT, MOD, ADM, SUP
+from app.guard import check_text
+from app import applications, catalog, lifecycle
+from app.catalog import drop_irrelevant
+from app.fields import (VisaCode, Employment, Schedule, SalaryPeriod, HousingType, GoodsCategory)
+from app import admin_ops as ops
+from app import geo
+from app.payments import aware
+from app.database import get_db
+from app.models import Listing, User, Block, Report
+from app.schemas import CATEGORIES, ListingOut
+from app.users import writer, get_or_create_user
+
+router = APIRouter()
+
+
+def _run(operation, *args):
+    try:
+        return operation(*args)
+    except ops.OpError as exc:
+        raise HTTPException(exc.status, exc.message)
+EDITABLE = {"draft", "pending", "approved", "rejected", "needs_fix"}
+
+
+def _own_listing(db: Session, listing_id: int, user_id: str) -> Listing:
+    item = db.get(Listing, listing_id)
+    from app import company
+    if item is None or not company.can_manage(db, user_id, item) or item.status == "archived":
+        raise HTTPException(404, "Объявление не найдено")
+    return item
+
+
+class ListingEdit(BaseModel):
+    title: str | None = Field(default=None, min_length=3, max_length=160)
+    city: str | None = Field(default=None, max_length=100)
+    region_code: str | None = Field(default=None, max_length=20)
+    district_id: int | None = None
+    price: str | None = Field(default=None, max_length=80)
+    description: str | None = Field(default=None, max_length=4000)
+    contact: str | None = Field(default=None, max_length=160)
+    price_amount: int | None = Field(default=None, ge=0, le=10_000_000_000)
+    housing_provided: bool | None = None
+    meals_provided: bool | None = None
+    rooms: int | None = Field(default=None, ge=0, le=20)
+    condition: Literal["new", "used"] | None = None
+    salary_period: SalaryPeriod | None = None
+    visas: list[VisaCode] | None = Field(default=None, max_length=11)
+    employment: Employment | None = None
+    schedule: Schedule | None = None
+    housing_type: HousingType | None = None
+    deposit: int | None = Field(default=None, ge=0, le=10_000_000_000)
+    area_m2: int | None = Field(default=None, ge=1, le=2000)
+    pets_allowed: bool | None = None
+    furnished: bool | None = None
+    goods_category: GoodsCategory | None = None
+    negotiable: bool | None = None
+    details: dict | None = None
+
+
+@router.put("/api/listings/{listing_id}", response_model=ListingOut)
+def edit_listing(listing_id: int, payload: ListingEdit, user_id: str = Depends(writer),
+                 db: Session = Depends(get_db)):
+    item = _own_listing(db, listing_id, user_id)
+    if item.status not in EDITABLE:
+        raise HTTPException(409, "Это объявление нельзя изменить. Сначала верните его из закрытых")
+    changes = drop_irrelevant(item.category, payload.model_dump(exclude_none=True))
+    if not changes:
+        return catalog.with_promo(db, [item], owner=True)[0]
+    check_text(changes.get("title", item.title), changes.get("description", item.description))
+    if any(k in changes for k in ("city", "region_code", "district_id")):
+        place = geo.resolve_place(db, changes.pop("district_id", None), changes.pop("region_code", None), changes.pop("city", None))
+        if place is None:
+            raise HTTPException(400, "Выберите город или район из списка. Сайт только для Южной Кореи")
+        changes.update(city=place.label, region_code=place.region_code, district_id=place.district_id)
+    # A published listing stays visible: small changes apply at once, important ones wait for a moderator
+    if item.status != "draft":
+        from app import listingtools
+        listingtools.snapshot(db, item, "Перед правкой автора", user_id)      # a way back to what it was
+    lifecycle.edit(db, item, changes)
+    db.commit()
+    db.refresh(item)
+    return catalog.with_promo(db, [item], owner=True)[0]
+
+
+def _set_status(db: Session, listing_id: int, user_id: str, allowed: set[str], new_status: str,
+                message: str) -> Listing:
+    item = _own_listing(db, listing_id, user_id)
+    if item.status not in allowed:
+        raise HTTPException(409, message)
+    item.status = new_status
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+class ReserveIn(BaseModel):
+    on: bool = True
+
+
+@router.post("/api/listings/{listing_id}/reserve", response_model=ListingOut)
+def reserve_listing(listing_id: int, payload: ReserveIn, user_id: str = Depends(writer), db: Session = Depends(get_db)):
+    """«Зарезервировано»: the listing stays visible with a mark, so people know someone is already buying."""
+    item = _own_listing(db, listing_id, user_id)
+    if item.category != "marketplace":
+        raise HTTPException(400, "Отметка «зарезервировано» есть только у товаров, автомобилей и услуг")
+    if item.status != "approved":
+        raise HTTPException(409, "Отметить можно только опубликованное объявление")
+    item.reserved = payload.on
+    db.commit()
+    db.refresh(item)
+    return catalog.with_promo(db, [item], owner=True)[0]
+
+
+@router.post("/api/listings/{listing_id}/submit", response_model=ListingOut)
+def submit_draft(listing_id: int, user_id: str = Depends(writer), db: Session = Depends(get_db)):
+    """Send a draft to moderation (housing and goods need a photo)."""
+    item = _own_listing(db, listing_id, user_id)
+    if item.status != "draft":
+        raise HTTPException(409, "Это объявление уже отправлено")
+    if lifecycle.needs_photo(db, item):
+        raise HTTPException(400, "Добавьте хотя бы одно фото")
+    item.status = "pending"
+    db.commit()
+    from app import support
+    support.maybe_auto_approve(db, item)
+    db.refresh(item)
+    return catalog.with_promo(db, [item], owner=True)[0]
+
+
+@router.post("/api/listings/{listing_id}/renew", response_model=ListingOut)
+def renew_listing(listing_id: int, user_id: str = Depends(writer), db: Session = Depends(get_db)):
+    """Extend a published or just expired listing for another period. No new moderation: the text is unchanged."""
+    item = _own_listing(db, listing_id, user_id)
+    if item.status not in {"approved", "expired"}:
+        raise HTTPException(409, "Продлить можно опубликованное или завершившееся объявление")
+    opens = lifecycle.renew_available_from(item)
+    if opens is not None:
+        raise HTTPException(409, f"Объявление опубликовано до {aware(item.expires_at).strftime('%d.%m.%Y')}. "
+                                 f"Продлить можно с {opens.strftime('%d.%m.%Y')}: за 30 дней до окончания")
+    lifecycle.renew(item)
+    db.commit()
+    db.refresh(item)
+    return catalog.with_promo(db, [item], owner=True)[0]
+
+
+@router.post("/api/listings/{listing_id}/close", response_model=ListingOut)
+def close_listing(listing_id: int, user_id: str = Depends(writer), db: Session = Depends(get_db)):
+    result = _set_status(db, listing_id, user_id, {"approved"}, "closed",
+                         "Закрыть можно только опубликованное объявление")
+    applications.notify_ended(db, db.get(Listing, listing_id), "закрыта")
+    return result
+
+
+@router.post("/api/listings/{listing_id}/sold", response_model=ListingOut)
+def mark_sold(listing_id: int, user_id: str = Depends(writer), db: Session = Depends(get_db)):
+    item = _own_listing(db, listing_id, user_id)
+    if item.category != "marketplace":
+        raise HTTPException(400, "Отметка «продано» доступна только в Барахолке")
+    return _set_status(db, listing_id, user_id, {"approved"}, "sold",
+                       "Отметить продано можно только опубликованный товар")
+
+
+@router.post("/api/listings/{listing_id}/reopen", response_model=ListingOut)
+def reopen_listing(listing_id: int, user_id: str = Depends(writer), db: Session = Depends(get_db)):
+    # Возврат снова проходит модерацию, как новое объявление
+    return _set_status(db, listing_id, user_id, {"closed", "sold"}, "pending",
+                       "Вернуть можно только закрытое или проданное объявление")
+
+
+@router.post("/api/listings/{listing_id}/archive")
+def archive_listing(listing_id: int, user_id: str = Depends(writer), db: Session = Depends(get_db)):
+    item = _own_listing(db, listing_id, user_id)
+    was_live = item.status == "approved"
+    item.status = "archived"
+    db.commit()
+    if was_live:
+        applications.notify_ended(db, item, "снята с публикации")
+    return {"id": item.id, "status": "archived"}
+
+
+# ---------- Settings and employer application ----------
+
+class SettingsIn(BaseModel):
+    city: str | None = Field(default=None, max_length=100)
+    region_code: str | None = Field(default=None, max_length=20)
+    district_id: int | None = None
+    visa: VisaCode | Literal[""] | None = None
+
+
+class NotificationsIn(BaseModel):
+    messages: bool
+
+
+@router.put("/api/me/notifications")
+def update_notifications(payload: NotificationsIn, user_id: str = Depends(writer), db: Session = Depends(get_db)):
+    user = get_or_create_user(db, user_id)
+    user.notify_messages = payload.messages
+    db.commit()
+    return {"messages": user.notify_messages}
+
+
+@router.put("/api/me/settings")
+def update_settings(payload: SettingsIn, user_id: str = Depends(writer), db: Session = Depends(get_db)):
+    user = get_or_create_user(db, user_id)
+    if payload.visa is not None:
+        user.visa = payload.visa
+    if payload.visa is None or payload.city or payload.region_code or payload.district_id:
+        place = geo.resolve_place(db, payload.district_id, payload.region_code, payload.city)
+        if place is None:
+            raise HTTPException(400, "Выберите город или район из списка. Сайт только для Южной Кореи")
+        user.city, user.region_code, user.district_id = place.label, place.region_code, place.district_id
+    db.commit()
+    return {"city": user.city, "region_code": user.region_code, "district_id": user.district_id, "visa": user.visa}
+
+
+class EmployerIn(BaseModel):
+    company_name: str = Field(min_length=2, max_length=160)
+    registration_no: str = Field(min_length=3, max_length=80)
+    contact_person: str = Field(min_length=2, max_length=80)
+
+
+@router.post("/api/me/employer")
+def apply_employer(payload: EmployerIn, user_id: str = Depends(writer), db: Session = Depends(get_db)):
+    user = get_or_create_user(db, user_id)
+    if user.employer_status == "approved":
+        raise HTTPException(409, "Статус работодателя уже подтверждён")
+    if user.employer_status == "pending":
+        raise HTTPException(409, "Заявка уже на проверке")
+    user.company_name = payload.company_name.strip()
+    user.registration_no = payload.registration_no.strip()
+    user.contact_person = payload.contact_person.strip()
+    user.employer_status = "pending"
+    db.commit()
+    from app import company
+    company.sync_company_from_employer(db, user)
+    from app import adminplus
+    adminplus.notify_staff(db, "Новая заявка работодателя ждёт проверки (админка → Работодатели).", "employer")
+    return {"employer_status": user.employer_status}
+
+
+# ---------- Administrator: users, employers, journal ----------
+
+class ReasonIn(BaseModel):
+    reason: str = Field(min_length=3, max_length=300)
+
+
+@router.get("/api/admin/users")
+def admin_users(q: str = Query(default="", max_length=40), actor: str = Depends(staff(*SUPPORT)),
+                db: Session = Depends(get_db)):
+    stmt = select(User).order_by(User.created_at.desc()).limit(100)
+    if q.strip():
+        stmt = select(User).where(User.tg_id.contains(q.strip())).limit(100)
+    return [{"tg_id": u.tg_id, "city": u.city, "consent": u.consent_at is not None,
+             "blocked": u.blocked, "block_reason": u.block_reason, "deleted": u.deleted_at is not None,
+             "employer_status": u.employer_status, "company_name": u.company_name, "trusted": u.trusted}
+            for u in db.scalars(stmt).all()]
+
+
+@router.post("/api/admin/users/{tg_id}/trust/{state}")
+def admin_trust(tg_id: str, state: str, actor: str = Depends(staff(*MOD)), db: Session = Depends(get_db)):
+    """The «Проверенный автор» mark. Only moderators and up; the action is logged."""
+    if state not in {"on", "off"}:
+        raise HTTPException(400, "Состояние: on или off")
+    user = db.get(User, tg_id)
+    if user is None:
+        raise HTTPException(404, "Пользователь не найден")
+    user.trusted = state == "on"
+    log_action(db, actor, f"user.trust_{state}", "user", tg_id, "")
+    db.commit()
+    return {"tg_id": tg_id, "trusted": user.trusted}
+
+
+@router.post("/api/admin/users/{tg_id}/block")
+def admin_block(tg_id: str, payload: ReasonIn, actor: str = Depends(staff(*SUPPORT)), db: Session = Depends(get_db)):
+    _run(ops.block_user, db, actor, tg_id, payload.reason)
+    return {"tg_id": tg_id, "blocked": True}
+
+
+@router.post("/api/admin/users/{tg_id}/unblock")
+def admin_unblock(tg_id: str, payload: ReasonIn, actor: str = Depends(staff(*SUPPORT)), db: Session = Depends(get_db)):
+    _run(ops.unblock_user, db, actor, tg_id, payload.reason)
+    return {"tg_id": tg_id, "blocked": False}
+
+
+@router.get("/api/admin/employers")
+def admin_employers(status: str = "pending", actor: str = Depends(staff(*MOD)), db: Session = Depends(get_db)):
+    rows = db.scalars(select(User).where(User.employer_status == status).limit(100)).all()
+    return [{"tg_id": u.tg_id, "company_name": u.company_name, "registration_no": u.registration_no,
+             "contact_person": u.contact_person, "employer_status": u.employer_status} for u in rows]
+
+
+@router.post("/api/admin/employers/{tg_id}/{decision}")
+def admin_employer_decision(tg_id: str, decision: str, reason: str = Query(default="", max_length=300),
+                            actor: str = Depends(staff(*MOD)), db: Session = Depends(get_db)):
+    user = _run(ops.decide_employer, db, actor, tg_id, decision, reason)
+    return {"tg_id": tg_id, "employer_status": user.employer_status}
+
+
+@router.get("/api/admin/audit")
+def admin_audit(limit: int = Query(default=100, ge=1, le=500), who: str = Query(default="", max_length=40),
+                action: str = Query(default="", max_length=60), object_type: str = Query(default="", max_length=30),
+                object_id: str = Query(default="", max_length=40), q: str = Query(default="", max_length=60),
+                since: str = Query(default="", max_length=10), until: str = Query(default="", max_length=10),
+                actor: str = Depends(staff(*ADM)), db: Session = Depends(get_db)):
+    """The journal with filters: who, what, which object, free text in details, from–to date (YYYY-MM-DD)."""
+    import datetime as _dt
+    from app.models import AuditLog
+    stmt = select(AuditLog)
+    if who:
+        stmt = stmt.where(AuditLog.actor == who)
+    if action:
+        stmt = stmt.where(AuditLog.action.like(action.replace("%", "") + "%"))
+    if object_type:
+        stmt = stmt.where(AuditLog.object_type == object_type)
+    if object_id:
+        stmt = stmt.where(AuditLog.object_id == object_id)
+    if q:
+        stmt = stmt.where(AuditLog.details.ilike(f"%{q}%"))
+    try:
+        if since:
+            stmt = stmt.where(AuditLog.created_at >= _dt.datetime.fromisoformat(since).replace(tzinfo=_dt.timezone.utc))
+        if until:
+            stmt = stmt.where(AuditLog.created_at < _dt.datetime.fromisoformat(until).replace(tzinfo=_dt.timezone.utc) + _dt.timedelta(days=1))
+    except ValueError:
+        raise HTTPException(400, "Дата в формате ГГГГ-ММ-ДД")
+    rows = db.scalars(stmt.order_by(AuditLog.id.desc()).limit(limit)).all()
+    return [{"id": r.id, "actor": r.actor, "action": r.action, "object_type": r.object_type,
+             "object_id": r.object_id, "details": r.details, "created_at": str(r.created_at)} for r in rows]

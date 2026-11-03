@@ -1,0 +1,3711 @@
+const tg = window.Telegram?.WebApp;
+tg?.ready();
+tg?.expand();
+try { tg?.disableVerticalSwipes?.(); } catch (e) { /* старая версия Telegram */ }
+
+const $ = (s) => document.querySelector(s);
+const esc = (s = "") => String(s).replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const CAT = {job: "Работа", housing: "Жильё", marketplace: "Барахолка"};
+const STATUS = {pending: ["На модерации", "pending"], approved: ["Опубликовано", "approved"],
+                rejected: ["Отклонено", "rejected"], needs_fix: ["Нужно исправить", "pending"],
+                hidden: ["Скрыто", "rejected"], closed: ["Закрыто", "rejected"], sold: ["Продано", "approved"],
+                archived: ["В архиве", "rejected"], draft: ["Черновик", "pending"], expired: ["Срок истёк", "rejected"]};
+const REASONS = {fraud: "Мошенничество", fake: "Поддельное объявление", spam: "Спам",
+                 offensive: "Оскорбления", inappropriate: "Неприемлемый контент", rights: "Нарушение прав",
+                 minor: "Несовершеннолетний", profile: "Жалоба на профиль"};
+const SECTIONS = {visas: "Визы и документы", registration: "Регистрация и адрес", medicine: "Медицина",
+                  banks: "Банки и мобильная связь", housing: "Жильё", work: "Работа и трудовые права",
+                  emergency: "Экстренные ситуации"};
+const PROMO = {pin: "📌 Закреплено", vip: "VIP", bump: "⬆ Поднято", highlight: "★ Выделено", autobump: "🔁 Автоподнятие"};
+const NAV_VIEWS = ["home", "saved", "chats", "profile"];
+const MAIN_VIEWS = [...NAV_VIEWS, "dating", "community", "guide"];
+const ALL_VIEWS = [...MAIN_VIEWS, "detail", "chat", "article", "mine", "sub", "notifs"];
+
+let currentChat = null;
+let chatTimer = null;
+let lastMessageKey = "";
+let olderMessages = [];   // подгруженные по кнопке «Ранее»
+let hasOlder = false;
+let me = null;
+let favIds = new Set();
+let ownItems = {};
+let datingGender = "";
+let currentEditId = null;
+let formPhotos = [];   // уже загруженные: {id, thumb, status}
+let formFiles = [];    // новые файлы, ещё не отправленные
+let removedPhotos = [];
+let ownFilter = "all";
+let mineAll = [];
+
+// ---------- запросы ----------
+// Внутри Telegram вход автоматический (подпись initData). На сайте: сессия после входа через бота.
+const inTelegram = Boolean(tg?.initData);
+function authHeaders() {
+  const headers = {};
+  if (inTelegram) headers["X-Telegram-Init-Data"] = tg.initData;
+  else if (localStorage.getItem("webSession")) headers["X-Web-Session"] = localStorage.getItem("webSession");
+  return headers;
+}
+// Нет связи: понятное сообщение вместо «Failed to fetch»
+const setOffline = (off) => { const b = document.getElementById("offlineBar"); if (b) b.hidden = !off; };
+window.addEventListener("offline", () => setOffline(true));
+window.addEventListener("online", () => setOffline(false));
+if (!navigator.onLine) setTimeout(() => setOffline(true), 0);
+async function api(path, options = {}) {
+  const headers = authHeaders();
+  if (options.body && typeof options.body === "string") headers["Content-Type"] = "application/json";
+  let r;
+  try { r = await fetch(path, {...options, headers: {...headers, ...(options.headers || {})}}); }
+  catch (e) { setOffline(true); throw new Error("Нет связи с интернетом. Проверьте подключение и повторите"); }
+  setOffline(false);
+  let data = null;
+  try { data = await r.json(); } catch (e) { data = null; }
+  if (r.status === 401 && !inTelegram) {
+    if (localStorage.getItem("webSession")) { localStorage.removeItem("webSession"); applyGuestMode(currentView); }   // сессия истекла
+    if (!options.quiet && !GUEST_VIEWS[currentView]) showWebLogin();
+  }
+  if (!r.ok) {
+    const rid = r.headers.get("x-request-id") || "";
+    let msg = typeof data?.detail === "string" ? data.detail : "";
+    if (!msg && Array.isArray(data?.detail)) msg = "Проверьте поля: " + data.detail.map((d) => d.msg).filter(Boolean).slice(0, 2).join("; ");
+    if (r.status >= 500 || !msg) {
+      reportError(path, r.status, msg || "Ошибка сервера", rid);
+      msg = `Ошибка сервера (${r.status}). Код для поддержки: ${rid || "—"}`;
+    }
+    throw new Error(msg);
+  }
+  return data;
+}
+// Приложение само сообщает серверу об ошибке: скриншоты и пересказ не нужны
+const reported = new Set();
+function reportError(where, status, message, rid = "") {
+  const key = where + status + message;
+  if (reported.has(key) || reported.size > 20) return;
+  reported.add(key);
+  try { fetch("/api/client-log", {method: "POST", headers: {...authHeaders(), "Content-Type": "application/json"},
+    body: JSON.stringify({where: String(where).slice(0, 120), status, message: String(message).slice(0, 300), request_id: rid})}).catch(() => {}); } catch (e) { /* не критично */ }
+}
+window.addEventListener("error", (e) => reportError("js:" + (e.filename || "").split("/").pop() + ":" + e.lineno, 0, e.message || "error"));
+window.addEventListener("unhandledrejection", (e) => reportError("promise", 0, String(e.reason?.message || e.reason || "rejected")));
+
+const applyTextSize = () => { document.body.classList.remove("fs1", "fs2"); const n = localStorage.getItem("fs"); if (n) document.body.classList.add("fs" + n); };
+applyTextSize();
+function toast(msg) {
+  const t = $("#toast"); t.textContent = msg; t.style.display = "block";
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => (t.style.display = "none"), 3000);
+  tg?.HapticFeedback?.notificationOccurred("success");
+}
+const fmtDate = (s) => (s ? new Date(s.replace(" ", "T")).toLocaleString("ru-RU") : "");
+// KH — внутренняя валюта сайта: баланс и цены в KH; звёзды Telegram (⭐) покупают KH по курсу обменника
+// ---------- язык интерфейса: перевод по словарю (app/static/i18n/*.json); чего нет в словаре, остаётся по-русски ----------
+const LANG_KEY = "khLang";
+const i18n = {lang: (() => { try { return localStorage.getItem(LANG_KEY) || "ru"; } catch (e) { return "ru"; } })(), dict: null};
+function trNode(node) {
+  const d = i18n.dict;
+  if (!d) return;
+  if (node.nodeType === 3) {
+    const t = node.nodeValue, key = t.trim();
+    if (key && d[key] && !node.parentElement?.closest("script, style, textarea")) node.nodeValue = t.replace(key, d[key]);
+  } else if (node.nodeType === 1) {
+    if (node.matches?.("script, style, textarea")) return;
+    for (const a of ["placeholder", "aria-label", "title"]) { const v = node.getAttribute?.(a); if (v && d[v.trim()]) node.setAttribute(a, d[v.trim()]); }
+    node.childNodes.forEach(trNode);
+  }
+}
+async function startI18n() {
+  if (i18n.lang === "ru") return;
+  try { i18n.dict = await (await fetch(`/static/i18n/${i18n.lang}.json`)).json(); } catch (e) { i18n.dict = null; return; }
+  document.documentElement.lang = i18n.lang;
+  trNode(document.body);
+  if (d_title(i18n.dict)) document.title = d_title(i18n.dict);
+  new MutationObserver((muts) => { for (const m of muts) { if (m.type === "characterData") trNode(m.target); else m.addedNodes.forEach(trNode); } })
+    .observe(document.body, {childList: true, subtree: true, characterData: true});
+}
+const d_title = (d) => d[document.title.trim()];
+// тема: «светлая» (как раньше), «тёмная» или «как в Telegram»; выбирает человек, по умолчанию ничего не меняется
+const THEME_KEY = "khTheme";
+function applyTheme() {
+  let t = "light";
+  try { t = localStorage.getItem(THEME_KEY) || "light"; } catch (e) { t = "light"; }
+  const dark = t === "dark" || (t === "tg" && (window.Telegram?.WebApp?.colorScheme === "dark"));
+  document.documentElement.dataset.theme = dark ? "dark" : "light";
+}
+applyTheme();
+let mailOn = false;      // подключена ли почта на сервере (письма подтверждения и восстановления)
+let khInfo = {kh_per_star: 1, balance_only: false, min: 10, max: 10000};
+const starsFor = (kh) => Math.max(1, Math.ceil(kh / (khInfo.kh_per_star || 1) - 1e-9));
+const fmtKRW = (n) => new Intl.NumberFormat("ru-RU").format(n) + " ₩";
+
+// Своё окно подтверждения: системные окна Telegram бывают заняты или недоступны и тогда дают ошибку
+function confirmDialog(message, yes = "Да") {
+  return new Promise((resolve) => {
+    $("#confirmText").textContent = message;
+    $("#confirmYes").textContent = yes;
+    const sheet = $("#confirmSheet");
+    const done = (v) => { sheet.classList.add("hidden"); resolve(v); };
+    $("#confirmYes").onclick = () => done(true);
+    $("#confirmNo").onclick = () => done(false);
+    sheet.onclick = (e) => { if (e.target === sheet) done(false); };
+    sheet.classList.remove("hidden");
+    $("#confirmNo").focus();
+  });
+}
+
+// Окно выбора причины жалобы (системное prompt() в Telegram может не открыться)
+function askReason() {
+  return new Promise((resolve) => {
+    $("#reasonList").innerHTML = Object.entries(REASONS)
+      .map(([key, title]) => `<button class="wide" data-reason="${key}">${esc(title)}</button>`).join("");
+    const sheet = $("#reasonSheet");
+    sheet.classList.remove("hidden");
+    const done = (value) => { sheet.classList.add("hidden"); resolve(value); };
+    $("#reasonList").onclick = (e) => { const b = e.target.closest("[data-reason]"); if (b) done(b.dataset.reason); };
+    $("#closeReason").onclick = () => done(null);
+  });
+}
+
+// ---------- вход на сайте через Telegram (в Mini App не нужен) ----------
+let loginPoll = null;
+function showWebLogin() { if (!inTelegram) $("#webLogin").classList.remove("hidden"); }
+// Гость (на сайте, без входа): личные разделы показывают один экран «Войти», а не пустой кабинет с меню
+const isGuest = () => !inTelegram && !localStorage.getItem("webSession");
+const GUEST_VIEWS = {
+  profile: ["👤", "Личный кабинет", "Войдите через Telegram, чтобы публиковать объявления, откликаться на вакансии, сохранять избранное и переписываться с авторами."],
+  saved: ["♡", "Избранное", "Войдите через Telegram, чтобы сохранять объявления и получать уведомления, если цена снизится."],
+  chats: ["💬", "Сообщения", "Войдите через Telegram, чтобы писать авторам объявлений и получать ответы."],
+  notifs: ["🔔", "Уведомления", "Войдите через Telegram, чтобы видеть ответы на отклики, решения модератора и новые объявления по вашим поискам."],
+};
+function applyGuestMode(name) {
+  const el = document.getElementById("view-" + name);
+  if (!el || !GUEST_VIEWS[name]) return false;
+  const guest = isGuest();
+  el.classList.toggle("guest-mode", guest);
+  let card = el.querySelector(":scope > .guestcard");
+  if (guest && !card) {
+    const [icon, title, text] = GUEST_VIEWS[name];
+    el.insertAdjacentHTML("afterbegin", `<div class="guestcard"><div class="gicon">${icon}</div><h2>${title}</h2><p>${text}</p>
+      <button class="submit" data-guest-mail type="button">Войти по e-mail и паролю</button>
+      <button class="secondary" data-guest-login type="button">Войти через Telegram</button>
+      <p class="muted">Смотреть объявления, вакансии и гид можно и без входа.</p></div>`);
+  }
+  return guest;
+}
+document.addEventListener("click", (e) => {
+  if (e.target.closest("[data-guest-mail]")) { showWebLogin(); setTimeout(() => document.querySelector("#pwLoginForm [name=email]")?.focus(), 150); }
+  if (e.target.closest("[data-guest-login]")) { showWebLogin(); startWebLogin(); }
+});
+async function startWebLogin() {
+  const info = $("#webLoginInfo");
+  info.textContent = "Готовим вход…";
+  try {
+    const r = await api("/api/auth/start", {method: "POST", quiet: true});
+    const link = $("#webLoginLink");
+    link.href = r.url; link.hidden = false;
+    window.open(r.url, "_blank");
+    info.textContent = "Подтвердите вход в Telegram кнопкой «Это я, войти». Страница обновится сама.";
+    clearInterval(loginPoll);
+    const started = Date.now();
+    loginPoll = setInterval(async () => {
+      if (Date.now() - started > 300000) { clearInterval(loginPoll); info.textContent = "Время вышло. Нажмите кнопку ещё раз."; return; }
+      try {
+        const p = await api(`/api/auth/poll/${r.token}`, {quiet: true});
+        if (p.status === "ok") { clearInterval(loginPoll); localStorage.setItem("webSession", p.session); location.reload(); }
+        else if (p.status === "rejected") { clearInterval(loginPoll); info.textContent = "Вход отклонён в Telegram."; }
+        else if (p.status === "expired") { clearInterval(loginPoll); info.textContent = "Ссылка устарела. Нажмите кнопку ещё раз."; }
+      } catch (e) { /* связь пропала на секунду, пробуем снова */ }
+    }, 2000);
+  } catch (e) { info.textContent = e.message; }
+}
+$("#webLoginBtn").onclick = startWebLogin;
+$("#closeWebLogin").onclick = () => { clearInterval(loginPoll); $("#webLogin").classList.add("hidden"); };
+$("#loginTop").onclick = showWebLogin;
+
+async function loadMe() { me = await api("/api/me"); return me; }
+async function requireConsent() {
+  try { await loadMe(); } catch (e) { return false; }  // без входа api() сам показал окно входа
+  if (!me.consent) { $("#consent").classList.remove("hidden"); return false; }
+  return true;
+}
+
+// ---------- навигация: шапка и нижняя панель не двигаются, прокручивается только #scroll ----------
+let currentView = "home";
+let backStack = [];
+const scrollPos = {};
+let homeLoaded = false;
+
+function showView(name, opts = {}) {
+  const box = $("#scroll");
+  scrollPos[currentView] = box.scrollTop;
+  if (opts.push) backStack.push(currentView);
+  else if (!opts.back && NAV_VIEWS.includes(name)) backStack = [];
+  currentView = name;
+  for (const v of ALL_VIEWS) { const el = $("#view-" + v); if (el) el.hidden = v !== name; }
+  box.classList.toggle("fill", name === "chat");
+  const parent = ["detail", "article", "mine", "sub", "notifs"].includes(name) ? backStack[backStack.length - 1] : name;
+  const navName = name === "chat" ? "chats" : (NAV_VIEWS.includes(parent) ? parent : "");
+  document.querySelectorAll(".bottom [data-view]").forEach((b) => { const active = b.dataset.view === navName; b.classList.toggle("active", active); if (active) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current"); });
+  if (name !== "chat") { clearInterval(chatTimer); clearInterval(chatStatusTimer); }
+  if (NAV_VIEWS.includes(name) && backStack.length === 0) tg?.BackButton?.hide(); else tg?.BackButton?.show();
+  if (name === "home" && !homeLoaded) loadCatalog();
+  const guestHere = applyGuestMode(name);
+  if (name === "saved" && !guestHere) loadFavorites();
+  if (name === "chats" && !guestHere) loadConversations();
+  if ((name === "profile" || name === "mine") && !guestHere) loadProfile();
+  if (name === "notifs" && !guestHere) loadNotifs();
+  if (name === "community") loadGroups();
+  if (name === "guide") loadGuide();
+  if (name === "dating") loadDating();
+  box.scrollTop = opts.restore ? (scrollPos[name] || 0) : 0;
+  clearTimeout(showView.navTimer);
+  showView.navTimer = setTimeout(() => { if (typeof refreshNavBadge === "function") refreshNavBadge(); }, 900);      // прочитал чат: значок гаснет сразу
+}
+function goBack() {
+  const open = typeof modalOpen === "function" ? modalOpen() : null;
+  if (open) { closeModal(open); return; }
+  const previous = backStack.pop() || "home";
+  showView(previous, {back: true, restore: true});
+}
+tg?.BackButton?.onClick(goBack);
+
+// ---------- справочники полей: визы, графики, типы жилья… (приходят с сервера) ----------
+let fieldDefs = null;
+async function loadFields() {
+  if (!fieldDefs) fieldDefs = await api("/api/fields", {quiet: true});
+  document.querySelectorAll("select[data-list]").forEach((sel) => {
+    sel.innerHTML = `<option value="">${sel.dataset.any || "Не указано"}</option>` +
+      (fieldDefs[sel.dataset.list] || []).map((i) => `<option value="${i.value}">${esc(i.label)}</option>`).join("");
+  });
+  document.querySelectorAll("[data-visas]").forEach((box) => {
+    box.innerHTML = fieldDefs.visas.map((v) => `<label class="vchip"><input type="checkbox" value="${v.value}"><span>${v.label}</span></label>`).join("");
+  });
+  return fieldDefs;
+}
+const labelOf = (list, value) => (fieldDefs?.[list] || []).find((i) => i.value === value)?.label || value;
+
+// ---------- карточки ----------
+const promoBadge = (x) => (x.promo ? `<span class="promo ${x.promo}">${PROMO[x.promo] || ""}</span>` : "") + (x.reserved ? '<span class="reserved-tag">Зарезервировано</span>' : "");
+function priceText(x) {
+  if (x.price_amount == null) return x.price || "Цена договорная";
+  let text = fmtKRW(x.price_amount);
+  if (x.category === "job" && x.details?.salary_max) text = new Intl.NumberFormat("ru-RU").format(x.price_amount) + " – " + fmtKRW(x.details.salary_max);
+  const suffix = x.category === "job" ? labelOf("salary_period", x.salary_period || "month") : x.category === "housing" ? "в месяц" : "";
+  return [text, suffix, x.price].filter(Boolean).join(" ");
+}
+let ratesCfg = {};
+// Приблизительный пересчёт: курс задаёт владелец в настройках сервера, к конкретной цене не привязан
+function approxPrice(x) {
+  if (x.price_amount == null || !(ratesCfg.rub || ratesCfg.usd)) return "";
+  const n = (v) => new Intl.NumberFormat("ru-RU", {maximumFractionDigits: 0}).format(v);
+  const parts = [];
+  if (ratesCfg.rub) parts.push("≈ " + n(x.price_amount * ratesCfg.rub) + " ₽");
+  if (ratesCfg.usd) parts.push("≈ $" + n(x.price_amount * ratesCfg.usd));
+  return `<div class="muted">${parts.join(" · ")} (примерно)</div>`;
+}
+function pills(x) {
+  const out = [];
+  if (x.category === "job") {
+    if (x.housing_provided) out.push("🏠 Жильё");
+    if (x.meals_provided) out.push("🍱 Питание");
+    if (x.schedule) out.push(labelOf("schedule", x.schedule));
+    (x.visas || []).slice(0, 3).forEach((v) => out.push(v));
+  }
+  if (x.category === "housing") {
+    if (x.housing_type) out.push(labelOf("housing_type", x.housing_type));
+    if (x.rooms) out.push(`🛏 ${x.rooms} комн.`);
+    if (x.area_m2) out.push(`${x.area_m2} м²`);
+  }
+  if (x.category === "marketplace") {
+    if (x.goods_category) out.push(labelOf("goods_category", x.goods_category));
+    if (x.condition) out.push(labelOf("condition", x.condition));
+  }
+  return out.map((t) => `<span class="pill">${esc(t)}</span>`).join("");
+}
+// Полный список характеристик для страницы объявления
+function specs(x) {
+  const d = x.details || {};
+  const yes = (v, a = "Да", b = "Нет") => (v === true ? a : v === false ? b : null);
+  const rows = [];
+  if (x.category === "job") {
+    rows.push(["Компания", d.company], ["Должность", d.position],
+      ["Занятость", x.employment && labelOf("employment", x.employment)], ["График", x.schedule && labelOf("schedule", x.schedule)],
+      ["Подходящие визы", (x.visas || []).join(", ")], ["Жильё", yes(x.housing_provided, "Предоставляется", "Нет")],
+      ["Питание", yes(x.meals_provided, "Включено", "Нет")], ["Развозка", yes(d.transport)],
+      ["Опыт", yes(d.experience, "Нужен", "Не нужен")], ["Мест", d.vacancies], ["Начало работы", d.start_date]);
+  } else if (x.category === "housing") {
+    rows.push(["Тип", x.housing_type && labelOf("housing_type", x.housing_type)],
+      ["Залог", x.deposit != null && fmtKRW(x.deposit)], ["Коммунальные", d.maintenance_fee != null && fmtKRW(d.maintenance_fee)],
+      ["Площадь", x.area_m2 && x.area_m2 + " м²"], ["Комнат", x.rooms], ["Этаж", d.floor], ["Свободно с", d.available_from],
+      ["Срок договора", d.contract_term], ["Станция метро", d.station],
+      ["Животные", yes(x.pets_allowed, "Можно", "Нельзя")], ["Мебель", yes(x.furnished, "Есть", "Нет")]);
+    if (x.price_amount != null && x.deposit != null) {
+      rows.push(["Въезд", `залог + первый месяц = ${fmtKRW(x.deposit + x.price_amount)}`]);
+    }
+  } else {
+    rows.push(["Категория", x.goods_category && labelOf("goods_category", x.goods_category)],
+      ["Состояние", x.condition && labelOf("condition", x.condition)], ["Бренд", d.brand], ["Модель", d.model],
+      ["Год выпуска", d.year], ["Пробег", d.mileage_km != null && new Intl.NumberFormat("ru-RU").format(d.mileage_km) + " км"],
+      ["Где оказывается", d.service_area], ["Опыт", d.experience_years != null && d.experience_years + " лет"],
+      ["Торг", yes(x.negotiable, "Возможен", "Нет")], ["Доставка", yes(d.delivery, "Есть", "Нет")]);
+  }
+  const html = rows.filter(([, v]) => v !== null && v !== undefined && v !== "" && v !== false)
+    .map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("");
+  return html ? `<dl class="specs">${html}</dl>` : "";
+}
+const CAT_ICON = {job: "💼", housing: "🏠", marketplace: "🛍️"};
+function listingCard(x) {
+  const fav = favIds.has(x.id);
+  return `<article class="listing hcard ${x.promo === "highlight" ? "hl" : ""}" data-id="${x.id}" data-cat="${x.category}" data-open="${x.id}">
+    <div class="thumb">${x.cover ? `<img src="${esc(x.cover)}" alt="" loading="lazy">` : CAT_ICON[x.category] || "📄"}</div>
+    <div class="body">
+      ${promoBadge(x)}
+      <h3>${esc(x.title)}</h3>
+      <div class="price">${esc(priceText(x))}</div>
+      <div class="meta">📍 ${esc(x.city)} · ${esc(CAT[x.category] || x.category)}</div>
+      ${x.company_name ? `<div class="meta">🏢 ${esc(x.company_name)}${x.company_verified ? " ✔" : ""}</div>` : ""}
+      <div class="pills">${pills(x)}</div>
+    </div>
+    <button class="fav ${fav ? "on" : ""}" data-act="fav" aria-label="В избранное">${fav ? "♥" : "♡"}</button>
+  </article>`;
+}
+
+// ---------- каталог: поиск, фильтры, страницы ----------
+const DEFAULT_FILTERS = {q: "", category: "", region_code: "", district_id: "", price_min: "", price_max: "", sort: "new",
+                         housing_provided: false, meals_provided: false, condition: "", rooms_min: "",
+                         visa: "", schedule: "", employment: "", housing_type: "", deposit_max: "", area_min: "",
+                         pets_allowed: false, furnished: false, goods_category: "", year_min: "", year_max: "", mileage_max: ""};
+const SECTION_FILTERS = ["housing_provided", "meals_provided", "condition", "rooms_min", "visa", "schedule", "employment",
+                         "housing_type", "deposit_max", "area_min", "pets_allowed", "furnished", "goods_category", "year_min", "year_max", "mileage_max"];
+let filters = {...DEFAULT_FILTERS};
+const page = {offset: 0, loading: false, run: 0};
+
+function catalogParams(offset) {
+  const p = new URLSearchParams({limit: "20", offset: String(offset)});
+  for (const [key, value] of Object.entries(filters)) {
+    if (value === "" || value === false || value == null) continue;
+    p.set(key === "region_code" ? "region" : key, value === true ? "true" : value);
+  }
+  return p;
+}
+function activeFilterCount() {
+  return ["region_code", "price_min", "price_max", ...SECTION_FILTERS].filter((k) => filters[k]).length;
+}
+function updateFilterUi() {
+  const n = activeFilterCount();
+  $("#filterBadge").hidden = n === 0;
+  $("#filterBadge").textContent = n;
+  document.querySelectorAll("#chips .chip").forEach((c) => c.classList.toggle("active", c.dataset.cat === filters.category));
+  $("#sortSelect").value = filters.sort;
+  // Без поиска и фильтров показываем «витрину»: баннер и плитки разделов
+  $("#view-home").classList.toggle("landing", !filters.q && !filters.category && n === 0 && filters.sort === "new");
+  renderCategoryHead();
+}
+const PILLS = {
+  job: [["Город", "region_code"], ["Зарплата", "price_min"], ["График", "schedule"], ["Жильё", "housing_provided"], ["Виза", "visa"]],
+  housing: [["Город", "region_code"], ["Цена", "price_max"], ["Тип жилья", "housing_type"], ["Комнат", "rooms_min"]],
+  marketplace: [["Город", "region_code"], ["Цена", "price_max"], ["Состояние", "condition"]],
+};
+const GOODS = [["phones", "Телефоны", "📱"], ["furniture", "Мебель", "🛋️"], ["appliances", "Техника", "🔌"], ["auto", "Авто", "🚗"],
+               ["clothes", "Одежда", "👕"], ["kids", "Детские", "🧸"], ["tools", "Инструменты", "🛠️"], ["other", "Разное", "📦"]];
+function renderCategoryHead() {
+  const cat = filters.category;
+  $("#catHead").hidden = !cat;
+  $("#pillRow").hidden = !cat;
+  $("#chips").hidden = Boolean(cat);
+  $("#goodsGrid").hidden = cat !== "marketplace";
+  if (!cat) return;
+  $("#catTitle").textContent = {job: "💼 Работа", housing: "🏠 Жильё", marketplace: "🛍️ Барахолка"}[cat];
+  $("#pillRow").innerHTML = PILLS[cat].map(([label, key]) =>
+    `<button class="pill-btn ${filters[key] ? "on" : ""}" data-pill>${label} ▾</button>`).join("");
+  document.querySelectorAll("[data-pill]").forEach((b) => b.onclick = openFilters);
+  if (cat === "marketplace") {
+    $("#goodsGrid").innerHTML = GOODS.map(([v, label, icon]) =>
+      `<button class="${filters.goods_category === v ? "on" : ""}" data-goods-cat="${v}"><i>${icon}</i>${label}</button>`).join("");
+    document.querySelectorAll("[data-goods-cat]").forEach((b) => b.onclick = () => {
+      filters.goods_category = filters.goods_category === b.dataset.goodsCat ? "" : b.dataset.goodsCat;
+      reloadCatalog();
+    });
+  }
+}
+$("#catBack").onclick = () => {
+  filters.category = "";
+  for (const k of SECTION_FILTERS) filters[k] = DEFAULT_FILTERS[k];
+  reloadCatalog();
+};
+
+function jobCard(x) {
+  const bits = [];
+  if (x.schedule) bits.push(`<span class="pill">${esc(labelOf("schedule", x.schedule))}</span>`);
+  if (x.housing_provided) bits.push('<span class="pill">🏠 Жильё</span>');
+  return `<article class="jcard" data-id="${x.id}" data-cat="job" data-open="${x.id}">
+    <div class="jphoto${x.cover ? "" : " nophoto"}">${x.cover ? `<img src="${esc(x.cover)}" alt="" loading="lazy">` : "💼"}${promoBadge(x)}</div>
+    <div class="jbody"><h3>${esc(x.title)}</h3><div class="meta">📍 ${esc(x.city)}</div>
+    <div class="price">${esc(priceText(x))}</div><div class="pills">${bits.join("")}</div>
+    <button class="more-btn" data-open-btn>Подробнее</button></div></article>`;
+}
+async function loadBanners() {
+  const box = $("#banners");
+  try {
+    const rows = await api("/api/banners", {quiet: true});
+    box.innerHTML = rows.map((b) => b.link
+      ? `<a href="${esc(b.link)}" data-banner="${esc(b.link)}">📢 ${esc(b.text)}</a>` : `<div>📢 ${esc(b.text)}</div>`).join("");
+    box.hidden = !rows.length;
+  } catch (e) { box.hidden = true; }
+}
+document.addEventListener("click", (e) => {
+  const a = e.target.closest("[data-banner]");
+  if (!a) return;
+  e.preventDefault();
+  const link = a.dataset.banner;
+  const m = link.match(/[?&]listing=(\d+)/);
+  if (m) openDetail(m[1]);
+  else if (tg?.openTelegramLink && link.startsWith("https://t.me/")) tg.openTelegramLink(link);
+  else if (tg?.openLink) tg.openLink(link);
+  else window.open(link, "_blank", "noopener");
+});
+let bannerChecked = false;
+async function useBannerPhoto() {
+  if (bannerChecked) return;
+  bannerChecked = true;
+  try {   // если в app/static лежит banner.jpg, он ложится на баннер под текст
+    if ((await api("/api/banner-photo", {quiet: true})).exists) $(".hero").classList.add("photo");
+  } catch (e) { /* остаётся рисунок */ }
+}
+// ---------- умные подборки: один тап вместо настройки фильтров ----------
+const PICKS = [
+  {t: "📍 В моём городе", f: () => (me?.region_code ? {region_code: me.region_code, ...(me.district_id ? {district_id: me.district_id} : {})} : null)},
+  {t: "🏠 Работа с жильём", f: {category: "job", housing_provided: true}},
+  {t: "🍱 Работа с питанием", f: {category: "job", meals_provided: true}},
+  {t: "🛂 Работа под мою визу", f: () => (me?.visa ? {category: "job", visa: me.visa} : null)},
+  {t: "💴 Жильё без залога", f: {category: "housing", deposit_max: 0}},
+  {t: "🪑 Жильё с мебелью", f: {category: "housing", furnished: true}},
+  {t: "🐾 Можно с животными", f: {category: "housing", pets_allowed: true}},
+  {t: "📉 Дешёвые вещи", f: {category: "marketplace", sort: "price_asc"}},
+];
+function renderPicks() {
+  const box = $("#picks");
+  box.innerHTML = PICKS.map((p, i) => {
+    const f = typeof p.f === "function" ? p.f() : p.f;
+    return f ? `<button type="button" data-pick="${i}">${p.t}</button>` : "";
+  }).join("");
+}
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-pick]");
+  if (!b) return;
+  const p = PICKS[Number(b.dataset.pick)], f = typeof p.f === "function" ? p.f() : p.f;
+  if (!f) return;
+  filters = {...DEFAULT_FILTERS, ...f};
+  $("#search").value = "";
+  reloadCatalog();
+});
+// ---------- «Первая неделя в Корее»: чек-лист с ссылками на гид ----------
+const WEEK_STEPS = [
+  ["visa", "🛂 Проверить визу и документы", "visas"], ["reg", "📍 Зарегистрировать адрес и получить ARC", "registration"],
+  ["bank", "🏦 Банк и SIM-карта", "banks"], ["med", "🏥 Медицинская страховка", "medicine"],
+  ["home", "🏠 Найти жильё", "tile:housing"], ["work", "💼 Найти работу", "tile:job"],
+];
+const weekDone = () => { try { return JSON.parse(localStorage.getItem("khWeek") || "{}"); } catch (e) { return {}; } };
+function renderWeek() {
+  const box = $("#firstWeek");
+  if (localStorage.getItem("khWeekHide")) { box.hidden = true; return; }
+  const done = weekDone(), n = WEEK_STEPS.filter(([k]) => done[k]).length, open = Boolean(localStorage.getItem("khWeekOpen"));
+  box.hidden = false;
+  box.innerHTML = `<div class="fw-head" data-weektoggle><b>Первая неделя в Корее</b><span>${n} из ${WEEK_STEPS.length}</span><button type="button" class="link" data-weekhide>Скрыть</button></div>
+    <div class="fw-bar"><i style="width:${Math.round(100 * n / WEEK_STEPS.length)}%"></i></div>
+    ${!open ? '<p class="muted fw-more" data-weektoggle>Развернуть чек-лист ▾</p>' : ""}
+    ${!open ? "" : WEEK_STEPS.map(([k, t, go]) => `<div class="fw-row"><label><input type="checkbox" data-weekck="${k}" ${done[k] ? "checked" : ""}> ${t}</label><button type="button" class="link" data-weekgo="${go}">Открыть ›</button></div>`).join("")}`;
+}
+document.addEventListener("change", (e) => {
+  const c = e.target.closest("[data-weekck]");
+  if (!c) return;
+  const d = weekDone(); d[c.dataset.weekck] = c.checked; localStorage.setItem("khWeek", JSON.stringify(d)); renderWeek();
+});
+document.addEventListener("click", (e) => {
+  if (e.target.closest("[data-weekhide]")) { localStorage.setItem("khWeekHide", "1"); renderWeek(); return; }
+  if (e.target.closest("[data-weektoggle]")) { if (localStorage.getItem("khWeekOpen")) localStorage.removeItem("khWeekOpen"); else localStorage.setItem("khWeekOpen", "1"); renderWeek(); return; }
+  const g = e.target.closest("[data-weekgo]");
+  if (!g) return;
+  const v = g.dataset.weekgo;
+  if (v.startsWith("tile:")) { filters = {...DEFAULT_FILTERS, category: v.slice(5)}; reloadCatalog(); } else openSection(v);
+});
+async function loadLanding() {
+  renderPicks();
+  renderWeek();
+  useBannerPhoto();
+  loadBanners();
+  const jobs = $("#freshJobs"), ads = $("#freshAds");
+  jobs.innerHTML = '<div class="skeleton" style="width:236px;height:230px"></div><div class="skeleton" style="width:236px;height:230px"></div>';
+  ads.innerHTML = '<div class="skeleton"></div><div class="skeleton"></div>';
+  const failed = (box, again) => {
+    box.innerHTML = '<div class="hint-empty">Не удалось загрузить данные<br><button class="retry">Повторить</button></div>';
+    box.querySelector(".retry").onclick = again;
+  };
+  try {
+    const r = await api("/api/catalog?limit=8&category=job", {quiet: true});
+    jobs.innerHTML = r.items.length ? r.items.map(jobCard).join("") : '<div class="hint-empty">Свежих вакансий пока нет</div>';
+  } catch (e) { failed(jobs, loadLanding); }
+  try {
+    const [h, m] = await Promise.all([api("/api/catalog?limit=6&category=housing", {quiet: true}),
+                                      api("/api/catalog?limit=6&category=marketplace", {quiet: true})]);
+    const items = [...h.items, ...m.items].sort((a, b) => b.id - a.id).slice(0, 8);
+    ads.innerHTML = items.length ? items.map(listingCard).join("") : '<div class="hint-empty">Новых объявлений пока нет</div>';
+  } catch (e) { failed(ads, loadLanding); }
+  homeLoaded = true;
+}
+async function loadCatalog(append = false) {
+  if (!append && $("#view-home").classList.contains("landing")) return loadLanding();
+  const myRun = ++page.run;
+  page.loading = true;
+  const box = $("#listings");
+  if (!append) {
+    page.offset = 0;
+    $("#moreBtn").hidden = true;
+    box.innerHTML = '<div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div>';
+  }
+  try {
+    const r = await api("/api/catalog?" + catalogParams(page.offset), {quiet: true});
+    if (myRun !== page.run) return;      // за это время запрос изменили: показываем только свежий ответ
+    const html = r.items.map(listingCard).join("");
+    if (append) box.insertAdjacentHTML("beforeend", html);
+    else box.innerHTML = html || `<div class="empty">${activeFilterCount() || filters.q || filters.category
+      ? 'Ничего не нашли. Проверьте написание или сбросьте фильтры.<br><button class="link" id="emptyReset">Сбросить фильтры</button> · <button class="link" id="emptyWatch">Сообщить, когда появится</button>'
+      : "Пока нет объявлений. Добавьте первое кнопкой «+»."}${relaxHtml(r.relax)}</div>`;
+    page.offset += r.items.length;
+    if (!append && r.items.length) insertAds(box, r.items.length);
+    $("#resultCount").textContent = !r.total ? "Ничего не найдено"
+      : $("#view-home").classList.contains("landing") ? "Популярные объявления"
+      : r.corrected ? `Показано по запросу «${r.corrected}» (найдено: ${r.total})` : `Найдено: ${r.total}`;
+    $("#moreBtn").hidden = !r.has_more;
+    homeLoaded = true;
+  } catch (e) {
+    if (!append && myRun === page.run) box.innerHTML = `<div class="empty">Не удалось загрузить: ${esc(e.message)}<br><button class="link" id="retryCatalog">Повторить</button></div>`;
+  }
+  if (myRun === page.run) page.loading = false;
+}
+// реклама: отдельная полоса между обычными карточками, всегда с пометкой; места выбирает сервер (app/policy.py)
+async function insertAds(box, count) {
+  try {
+    const slots = await api(`/api/ads?organic=${count}&page=0`, {quiet: true});
+    const cards = [...box.querySelectorAll(".listing:not(.ad)")];
+    for (const s of [...slots].sort((a, b) => b.at - a.at)) {
+      const a = s.ad, before = cards[s.at];
+      const html = `<article class="listing hcard ad" data-ad="${a.id}" data-var="${a.variant || "a"}" ${a.link.startsWith("/?listing=") ? `data-open="${esc(a.link.split("=")[1])}"` : `data-adurl="${esc(a.link)}"`}>
+        <div class="body"><span class="adlabel">Реклама</span><h3>${esc(a.title)}</h3><div class="meta">${esc(a.text)}</div></div></article>`;
+      if (before) before.insertAdjacentHTML("beforebegin", html); else box.insertAdjacentHTML("beforeend", html);
+    }
+  } catch (e) { /* реклама не обязательна: лента работает и без неё */ }
+}
+document.addEventListener("click", (e) => {
+  const ad = e.target.closest("[data-ad]");
+  if (!ad) return;
+  fetch(`/api/ads/${ad.dataset.ad}/click?v=${ad.dataset.var || "a"}`, {method: "POST"}).catch(() => {});
+  if (ad.dataset.adurl) { e.stopPropagation(); window.open(ad.dataset.adurl, "_blank", "noopener"); }
+}, true);
+// пусто: предложить снять одно условие, после которого что-то находится
+function relaxHtml(rows) {
+  if (!rows || !rows.length) return "";
+  return `<div class="relax"><small class="muted">Можно попробовать:</small>${rows.map((x) =>
+    `<button class="chip" data-relax="${esc(x.drop)}">${esc(x.label)} (${x.total})</button>`).join("")}</div>`;
+}
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-relax]");
+  if (!b) return;
+  const key = {region: "region_code", city: "region_code"}[b.dataset.relax] || b.dataset.relax;
+  if (key === "q") $("#search").value = "";
+  if (key in filters) filters[key] = DEFAULT_FILTERS[key];
+  if (b.dataset.relax === "city") filters.district_id = "";
+  reloadCatalog();
+});
+document.addEventListener("click", async (e) => {
+  if (e.target.id === "retryCatalog") reloadCatalog();
+  if (e.target.id === "emptyReset") { filters = {...DEFAULT_FILTERS}; $("#search").value = ""; reloadCatalog(); }
+  if (e.target.id === "emptyWatch") {
+    if (!(await requireConsent())) return;
+    const body = {q: filters.q || undefined, category: filters.category || undefined, region: filters.region_code || undefined};
+    try { await api("/api/me/searches", {method: "POST", body: JSON.stringify(body)}); toast("Сообщим в Telegram, когда появится"); } catch (err) { toast(err.message); }
+  }
+});
+let userSort = false;      // человек сам выбрал порядок: тогда не переключаем его сами
+function autoSort() {
+  if (userSort) return;
+  if (filters.q && filters.sort === "new") filters.sort = "relevance";          // со словом в поиске важнее всего подходящее
+  else if (!filters.q && filters.sort === "relevance") filters.sort = "new";
+}
+function reloadCatalog() { autoSort(); homeLoaded = false; updateFilterUi(); loadCatalog(); $("#scroll").scrollTop = 0; }
+
+let searchTimer = null;
+const HISTORY_KEY = "khSearchHistory";
+const loadHistory = () => { try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]"); } catch (e) { return []; } };
+function rememberSearch(q) {
+  if (!q || q.length < 2) return;
+  localStorage.setItem(HISTORY_KEY, JSON.stringify([q, ...loadHistory().filter((x) => x !== q)].slice(0, 8)));
+}
+const hideSuggest = () => { $("#suggestBox").hidden = true; };
+function runSearch(q) {
+  $("#search").value = q;
+  filters.q = q.trim();
+  rememberSearch(filters.q);
+  hideSuggest();
+  reloadCatalog();
+}
+let suggestTimer = null;
+async function showSuggest() {
+  const q = $("#search").value.trim();
+  const box = $("#suggestBox");
+  let rows = [];
+  if (!q) rows = loadHistory().map((t) => ({type: "history", text: t}));
+  else { try { rows = await api("/api/suggest?q=" + encodeURIComponent(q), {quiet: true}); } catch (e) { rows = []; } }
+  if (!rows.length) { hideSuggest(); return; }
+  box.innerHTML = rows.map((r) => `<button type="button" data-suggest="${esc(r.text)}">${r.type === "place" ? "📍" : r.type === "history" ? "🕘" : "🔎"} ${esc(r.text)}<small>${{place: "место", history: "недавно", title: ""}[r.type] || ""}</small></button>`).join("");
+  box.hidden = false;
+}
+$("#search").addEventListener("input", () => {
+  clearTimeout(searchTimer);
+  clearTimeout(suggestTimer);
+  suggestTimer = setTimeout(showSuggest, 200);
+  searchTimer = setTimeout(() => { filters.q = $("#search").value.trim(); rememberSearch(filters.q); reloadCatalog(); }, 600);
+});
+$("#search").addEventListener("focus", showSuggest);
+$("#suggestBox").addEventListener("pointerdown", (e) => {
+  const b = e.target.closest("[data-suggest]");
+  if (b) { e.preventDefault(); clearTimeout(searchTimer); runSearch(b.dataset.suggest); }
+});
+document.addEventListener("pointerdown", (e) => { if (!e.target.closest(".searchbar")) hideSuggest(); });
+$("#search").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") { clearTimeout(searchTimer); filters.q = $("#search").value.trim(); reloadCatalog(); e.target.blur(); }
+});
+document.querySelectorAll("#chips .chip").forEach((chip) => chip.addEventListener("click", () => {
+  filters.category = chip.dataset.cat;
+  // Особые фильтры подходят только одному разделу
+  for (const k of SECTION_FILTERS) filters[k] = DEFAULT_FILTERS[k];
+  reloadCatalog();
+}));
+document.querySelectorAll("[data-tile]").forEach((t) => t.addEventListener("click", () => {
+  filters.category = t.dataset.tile;
+  for (const k of SECTION_FILTERS) filters[k] = DEFAULT_FILTERS[k];
+  if (t.dataset.goods) filters.goods_category = t.dataset.goods;
+  reloadCatalog();
+}));
+$("#sortSelect").onchange = () => { filters.sort = $("#sortSelect").value; userSort = true; reloadCatalog(); };
+$("#moreBtn").onclick = () => loadCatalog(true);
+
+// ---------- города и районы Южной Кореи ----------
+let geoData = null;
+async function loadGeo() {
+  if (!geoData) geoData = (await api("/api/geo", {quiet: true})).regions;
+  return geoData;
+}
+function regionOptions(selected, anyText) {
+  return `<option value="">${anyText || "Выберите регион"}</option>` + (geoData || []).map((r) =>
+    `<option value="${r.code}" ${r.code === selected ? "selected" : ""}>${esc(r.name)} (${esc(r.name_ko)})</option>`).join("");
+}
+function districtOptions(regionCode, selectedId, anyText) {
+  const r = (geoData || []).find((x) => x.code === regionCode);
+  if (!r) return `<option value="">${anyText || "Сначала выберите регион"}</option>`;
+  return `<option value="">${anyText || "Выберите город / район"}</option>` + r.districts.map((d) =>
+    `<option value="${d.id}" ${d.id === Number(selectedId) ? "selected" : ""}>${esc(d.name)} (${esc(d.name_ko)})</option>`).join("");
+}
+// Два связанных списка: регион → город или район
+async function setGeo(container, regionCode, districtId, anyRegion, anyDistrict) {
+  await loadGeo();
+  const region = document.querySelector(`${container} [data-geo-region]`);
+  const district = document.querySelector(`${container} [data-geo-district]`);
+  region.innerHTML = regionOptions(regionCode, anyRegion);
+  district.innerHTML = districtOptions(regionCode, districtId, anyDistrict);
+  region.onchange = () => { district.innerHTML = districtOptions(region.value, null, anyDistrict); };
+}
+function showBlocks(formSelector, category) {
+  document.querySelectorAll(`${formSelector} [data-for]`).forEach((el) => { el.hidden = el.dataset.for !== category; });
+}
+function syncCarFilters() {
+  const f = $("#filterForm");
+  $("#carFilters").hidden = f.goods_category.value !== "auto";
+}
+document.addEventListener("change", (e) => { if (e.target.matches('#filterForm [name="goods_category"]')) syncCarFilters(); });
+async function openFilters() {
+  const f = $("#filterForm");
+  await loadFields();
+  await setGeo("#filterGeo", filters.region_code, filters.district_id, "Вся Корея", "Любой район");
+  f.price_min.value = filters.price_min; f.price_max.value = filters.price_max;
+  for (const k of SECTION_FILTERS) {
+    const el = f.elements[k];
+    if (!el) continue;
+    if (el.type === "checkbox") el.checked = Boolean(filters[k]); else el.value = filters[k] || "";
+  }
+  showBlocks("#filterForm", filters.category);
+  syncCarFilters();
+  $("#filterHint").hidden = Boolean(filters.category);
+  $("#filters").classList.remove("hidden");
+}
+$("#filterBtn").onclick = openFilters;
+$("#closeFilters").onclick = () => $("#filters").classList.add("hidden");
+function applyFormToFilters(f) {
+  filters.region_code = f.region_code.value; filters.district_id = f.district_id.value;
+  filters.price_min = f.price_min.value; filters.price_max = f.price_max.value;
+  for (const k of SECTION_FILTERS) {
+    const el = f.elements[k];
+    // Скрытые поля других разделов не учитываются
+    const visible = el && !el.closest("[data-for]")?.hidden && !el.closest("#carFilters")?.hidden;
+    filters[k] = visible ? (el.type === "checkbox" ? el.checked : el.value) : DEFAULT_FILTERS[k];
+  }
+}
+$("#filterForm").onsubmit = (e) => {
+  e.preventDefault();
+  applyFormToFilters(e.target);
+  $("#filters").classList.add("hidden");
+  reloadCatalog();
+};
+$("#watchBtn").onclick = async () => {
+  const body = {};
+  applyFormToFilters($("#filterForm"));
+  for (const [k, v] of Object.entries(filters)) {
+    if (k === "sort" || v === "" || v === false || v == null) continue;
+    body[k === "region_code" ? "region" : k] = v;
+  }
+  try {
+    if (!(await requireConsent())) return;
+    await api("/api/me/searches", {method: "POST", body: JSON.stringify(body)});
+    toast("Готово: пришлём уведомление о новых объявлениях");
+  } catch (err) { toast(err.message); }
+};
+$("#resetFilters").onclick = () => {
+  filters = {...DEFAULT_FILTERS, category: filters.category, q: filters.q, sort: filters.sort};
+  $("#filters").classList.add("hidden");
+  reloadCatalog();
+};
+
+// ---------- страница объявления ----------
+function contactLinks(contact) {
+  const c = (contact || "").trim();
+  const digits = c.replace(/\D/g, "");
+  const phone = /^[+\d][\d\s().-]*$/.test(c) && digits.length >= 9 ? (c.startsWith("+") ? "+" : "") + digits : "";
+  const user = /^@?[A-Za-z][A-Za-z0-9_]{3,31}$/.test(c) ? c.replace(/^@/, "") : "";
+  return {phone, user};
+}
+function authorBlock(x) {
+  const a = x.author || {};
+  if (a.is_company) {          // объявление компании: только компания, ничего о сотруднике
+    const c = [`<b class="badge-ok">🏢 ${esc(a.company)}${a.verified ? " ✔ Проверенная компания" : ""}</b>`];
+    c.push(`<button class="alink" data-company="${a.company_id}">Страница компании${a.active ? ": объявлений " + a.active : ""}</button>`);
+    if (a.since) c.push(`На сайте с ${a.since}`);
+    return `<p class="author">${c.join(" · ")}</p>`;
+  }
+  const parts = [];
+  if (a.verified) parts.push(`<b class="badge-ok">✔ Проверенный работодатель${a.company ? ": " + esc(a.company) : ""}</b>`);
+  else if (a.trusted) parts.push('<b class="badge-ok">✔ Проверенный автор</b>');
+  else if (a.since) parts.push("<b>Автор</b>");
+  if (a.active) parts.push(`<button class="alink" data-author="${x.id}">Все объявления автора: ${a.active}</button>`);
+  if (a.reviews) parts.push(`<b class="rating">★ ${a.rating}</b> (${a.reviews} отзыв.)`);
+  if (a.since) parts.push(`На сайте с ${a.since}`);
+  return parts.length ? `<p class="author">${parts.join(" · ")}</p>` : "";
+}
+const APP_STATUS = {new: "Отправлен", viewed: "Просмотрен", invited: "Приглашение", rejected: "Отказ", withdrawn: "Отозван"};
+// Окно с коротким текстом (ответ работодателя): системное prompt() в Telegram может не открыться
+function askText(title, placeholder = "") {
+  return new Promise((resolve) => {
+    $("#textTitle").textContent = title;
+    $("#textInput").value = "";
+    $("#textInput").placeholder = placeholder;
+    $("#textSheet").classList.remove("hidden");
+    const done = (value) => { $("#textSheet").classList.add("hidden"); resolve(value); };
+    $("#textOk").onclick = () => done($("#textInput").value.trim());
+    $("#closeText").onclick = () => done(null);
+  });
+}
+let applyListingId = null;
+$("#applyResume").onclick = () => {
+  const cv = window.__cv; if (!cv) return;
+  const parts = [`Меня зовут по резюме: ${cv.position}.`, cv.experience ? `Опыт: ${cv.experience}.` : "", cv.visa ? `Виза: ${cv.visa}.` : "", cv.about || ""].filter(Boolean);
+  $("#applyForm").message.value = parts.join(" ").slice(0, 1000);
+};
+$("#closeApply").onclick = () => $("#applyModal").classList.add("hidden");
+$("#applyForm").onsubmit = async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  try {
+    await api(`/api/listings/${applyListingId}/apply`, {method: "POST",
+      body: JSON.stringify({contact: f.contact.value.trim(), message: f.message.value.trim()})});
+    $("#applyModal").classList.add("hidden");
+    f.reset();
+    toast("Отклик отправлен");
+  } catch (err) { toast(err.message); }
+};
+// ---------- просмотр фото на весь экран ----------
+let lbList = [], lbIndex = 0;
+function lbShow() {
+  $("#lbImg").src = lbList[lbIndex];
+  $("#lbCount").textContent = lbList.length > 1 ? `${lbIndex + 1} / ${lbList.length}` : "";
+  $("#lbPrev").hidden = $("#lbNext").hidden = lbList.length < 2;
+}
+function openLightbox(urls, i) { lbList = urls; lbIndex = i; lbShow(); $("#lightbox").classList.remove("hidden"); }
+const lbMove = (d) => { if (lbList.length > 1) { lbIndex = (lbIndex + d + lbList.length) % lbList.length; lbShow(); } };
+$("#lbClose").onclick = () => $("#lightbox").classList.add("hidden");
+$("#lbPrev").onclick = () => lbMove(-1);
+$("#lbNext").onclick = () => lbMove(1);
+{
+  let x0 = null;
+  $("#lightbox").addEventListener("touchstart", (e) => { x0 = e.touches.length === 1 ? e.touches[0].clientX : null; }, {passive: true});
+  $("#lightbox").addEventListener("touchend", (e) => { if (x0 === null) return; const dx = e.changedTouches[0].clientX - x0; if (Math.abs(dx) > 50) lbMove(dx < 0 ? 1 : -1); x0 = null; }, {passive: true});
+  document.addEventListener("keydown", (e) => { if ($("#lightbox").classList.contains("hidden")) return; if (e.key === "Escape") $("#lbClose").click(); if (e.key === "ArrowLeft") lbMove(-1); if (e.key === "ArrowRight") lbMove(1); });
+}
+document.addEventListener("click", (e) => {
+  const img = e.target.closest(".gallery img");
+  if (!img) return;
+  const all = [...img.closest(".gallery").querySelectorAll("img")];
+  openLightbox(all.map((x) => x.src), all.indexOf(img));
+});
+// ---------- недавно смотрел ----------
+function rememberViewed(id) {
+  try { const l = JSON.parse(localStorage.getItem("recent") || "[]").filter((x) => x !== id); l.unshift(id); localStorage.setItem("recent", JSON.stringify(l.slice(0, 20))); } catch (e) { /* не критично */ }
+}
+async function openDetail(id, push = true) {
+  try {
+    await Promise.all([loadFields(), ensureConfig()]);
+    const x = await api(`/api/listings/${id}`, {quiet: true});
+    const {phone, user} = contactLinks(x.contact);
+    const fav = favIds.has(x.id);
+    const photos = x.photos || [];
+    const top = photos.length
+      ? `<div class="gallery">${photos.map((p) => `<img src="${esc(p.url)}" alt="" loading="lazy">`).join("")}</div>`
+      : `<div class="nophoto">${CAT_ICON[x.category] || "📄"}</div>`;
+    $("#detailBody").innerHTML = `<article class="detail" data-id="${x.id}" data-cat="${x.category}">
+      <div class="dphoto">${top}
+        <div class="dtools"><button data-act="fav" class="rnd" aria-label="В избранное">${fav ? "♥" : "♡"}</button>
+        <button data-act="share" class="rnd" aria-label="Поделиться">⤴</button></div></div>
+      <div class="dhead"><h1>${esc(x.title)}</h1>${promoBadge(x)}</div>
+      <div class="price big">${esc(priceText(x))}</div>${approxPrice(x)}
+      <div class="meta">📍 ${esc(x.city)} · ${esc(CAT[x.category] || x.category)}</div>
+      ${specs(x)}
+      <h3 class="dsub">Описание</h3>
+      <p class="desc">${esc(x.description || "Подробности уточняйте у автора")}</p>
+      ${authorBlock(x)}
+      <p class="muted">Опубликовано: ${esc(fmtDate(x.created_at).split(",")[0] || "")}${x.contact && !phone && !user ? " · Контакт: " + esc(x.contact) : ""}</p>
+      <div class="cta col">
+        ${x.category === "job" ? '<button class="primary apply" data-act="apply">Откликнуться</button>' : ""}
+        <button class="primary" data-act="chat">💬 Написать</button>
+        ${phone ? `<a class="btn call" href="tel:${esc(phone)}">📞 Позвонить</a>` : ""}
+        ${user ? `<a class="btn call" data-tglink href="https://t.me/${esc(user)}" target="_blank" rel="noopener">Telegram автора</a>` : ""}
+      </div>
+      <button class="linkbtn" data-act="report">⚑ Пожаловаться</button>
+    </article>`;
+    showView("detail", {push});
+    rememberViewed(x.id);
+    loadReviewButton(x.id);
+    loadSimilar(x.id);
+  } catch (e) { toast(e.message); }
+}
+// Кнопка «Оставить отзыв» только тем, кто переписывался с автором по этому объявлению
+async function loadReviewButton(id) {
+  try {
+    const st = await api(`/api/listings/${id}/review-state`, {quiet: true});
+    const art = $("#detailBody").querySelector("article");
+    if (!art || art.dataset.id !== String(id)) return;
+    if (st.can) art.querySelector(".cta")?.insertAdjacentHTML("afterend", `<button class="linkbtn" data-review="${id}">★ Оставить отзыв об авторе</button>`);
+    else if (st.mine) art.querySelector(".cta")?.insertAdjacentHTML("afterend", `<p class="muted">Ваш отзыв: ${"★".repeat(st.mine.rating)} <button class="linkbtn" data-delreview="${st.mine.id}">Удалить</button></p>`);
+  } catch (e) { /* гость или без права — кнопки не будет */ }
+}
+let reviewFor = null, reviewRating = 0, reviewTags = new Set();
+const REVIEW_TAGS = {polite: "Вежливый", punctual: "Пунктуальный", as_described: "Всё как в описании", fair_price: "Честная цена", fast: "Быстро отвечает", unreliable: "Не пришёл/не ответил", rude: "Грубый"};
+function drawTags() {
+  $("#reviewTags").innerHTML = Object.entries(REVIEW_TAGS).map(([k, t]) => `<button type="button" class="chip ${reviewTags.has(k) ? "on" : ""}" data-tag="${k}">${esc(t)}</button>`).join("");
+}
+$("#reviewTags").onclick = (e) => { const b = e.target.closest("[data-tag]"); if (!b) return; if (reviewTags.has(b.dataset.tag)) reviewTags.delete(b.dataset.tag); else if (reviewTags.size < 4) reviewTags.add(b.dataset.tag); drawTags(); };
+function drawStars() {
+  $("#reviewStars").innerHTML = [1, 2, 3, 4, 5].map((n) => `<button type="button" role="radio" aria-checked="${n === reviewRating}" class="${n <= reviewRating ? "on" : ""}" data-star="${n}">★</button>`).join("");
+}
+$("#reviewStars").onclick = (e) => { const b = e.target.closest("[data-star]"); if (b) { reviewRating = +b.dataset.star; drawStars(); } };
+$("#closeReview").onclick = () => $("#reviewSheet").classList.add("hidden");
+$("#reviewOk").onclick = async () => {
+  if (!reviewRating) { toast("Поставьте оценку"); return; }
+  try {
+    await api("/api/reviews", {method: "POST", body: JSON.stringify({listing_id: reviewFor, rating: reviewRating, text: $("#reviewText").value.trim(), tags: [...reviewTags]})});
+    $("#reviewSheet").classList.add("hidden");
+    toast("Спасибо за отзыв!");
+    openDetail(reviewFor, false);
+  } catch (err) { toast(err.message); }
+};
+// «Похожие объявления»: подгружаются после основной карточки, ошибка не мешает читать объявление
+async function loadSimilar(id) {
+  try {
+    const rows = await api(`/api/listings/${id}/similar`, {quiet: true});
+    const body = $("#detailBody");
+    if (!rows.length || body.querySelector("article")?.dataset.id !== String(id)) return;
+    body.insertAdjacentHTML("beforeend", `<section class="similar"><h3 class="dsub">Похожие объявления</h3>${rows.map(listingCard).join("")}</section>`);
+  } catch (e) { /* не критично */ }
+}
+let botName = null;
+// Номер версии: видно, что открыта свежая; если на экране один номер, а у сервера другой, надо обновить страницу
+function showBuild(serverBuild) {
+  const mine = document.querySelector('meta[name="build"]')?.content || "";
+  document.querySelectorAll(".buildinfo").forEach((el) => { el.textContent = "Версия " + (serverBuild || mine) + (serverBuild && mine && serverBuild !== mine ? " (обновите страницу)" : ""); });
+  if (serverBuild && mine && serverBuild !== mine && !sessionStorage.getItem("reloaded")) { sessionStorage.setItem("reloaded", "1"); location.reload(); }
+}
+async function ensureConfig() {
+  if (botName !== null) return;
+  try { const cfg = await api("/api/config", {quiet: true}); botName = cfg.bot || ""; ratesCfg = cfg.rates || {}; showBuild(cfg.build); } catch (e) { botName = ""; }
+}
+async function shareListing(id, title) {
+  await ensureConfig();
+  // Ссылка ведёт в чат с ботом: он покажет карточку и кнопку «Открыть в приложении»
+  const url = botName ? `https://t.me/${botName}?start=l_${id}` : `${location.origin}/?listing=${id}`;
+  if (tg?.openTelegramLink) tg.openTelegramLink("https://t.me/share/url?url=" + encodeURIComponent(url) + "&text=" + encodeURIComponent(title));
+  else if (navigator.share) navigator.share({title, url}).catch(() => {});
+  else { try { await navigator.clipboard.writeText(url); toast("Ссылка скопирована"); } catch (e) { toast(url); } }
+}
+
+// ---------- избранное ----------
+async function loadFavIds() {
+  try { favIds = new Set((await api("/api/favorites", {quiet: true})).map((x) => x.id)); } catch (e) { favIds = new Set(); }
+}
+let cmpItems = {};
+document.addEventListener("change", (e) => {
+  if (!e.target.matches("[data-cmp]")) return;
+  const picked = [...document.querySelectorAll("[data-cmp]:checked")];
+  if (picked.length > 3) { e.target.checked = false; toast("Сравнить можно до трёх объявлений"); return; }
+  const go = document.getElementById("cmpGo");
+  if (go) { go.hidden = picked.length < 2; document.getElementById("cmpN").textContent = picked.length; }
+});
+document.addEventListener("click", (e) => {
+  if (!e.target.closest("#cmpGo")) return;
+  const xs = [...document.querySelectorAll("[data-cmp]:checked")].map((c) => cmpItems[c.dataset.cmp]).filter(Boolean);
+  const yes = (v) => (v ? "да" : "");
+  const rows = [["Название", (x) => x.title], ["Цена", priceText], ["Город", (x) => x.city], ["Раздел", (x) => CAT[x.category] || ""],
+    ["Занятость", (x) => labelOf("employment", x.employment) || ""], ["График", (x) => labelOf("schedule", x.schedule) || ""], ["Жильё от работодателя", (x) => yes(x.housing_provided)],
+    ["Тип жилья", (x) => labelOf("housing_type", x.housing_type) || ""], ["Залог", (x) => (x.deposit ? fmtKRW(x.deposit) : "")], ["Площадь", (x) => (x.area_m2 ? x.area_m2 + " м²" : "")],
+    ["Комнат", (x) => x.rooms || ""], ["Состояние", (x) => labelOf("condition", x.condition) || ""], ["Год", (x) => x.year || ""]]
+    .filter(([, f]) => xs.some((x) => f(x)));
+  openSub("compare");
+  $("#subBody").innerHTML = `<article class="listing"><table class="cmptable">${rows.map(([n, f]) => `<tr><th>${esc(n)}</th>${xs.map((x) => `<td>${esc(String(f(x) ?? ""))}</td>`).join("")}</tr>`).join("")}</table></article>`;
+});
+let favTab = "";
+document.addEventListener("click", (e) => {
+  const t = e.target.closest("[data-ftab]");
+  if (!t) return;
+  favTab = t.dataset.ftab;
+  document.querySelectorAll("#favTabs .chip").forEach((c) => c.classList.toggle("active", c === t));
+  loadFavorites();
+});
+async function loadFavorites() {
+  const box = $("#favorites");
+  try {
+    const all = await api("/api/favorites");
+    const items = favTab ? all.filter((x) => x.category === favTab) : all;
+    favIds = new Set(all.map((x) => x.id));
+    cmpItems = Object.fromEntries(items.map((x) => [x.id, x]));
+    box.innerHTML = items.length ? items.map(listingCard).join("") + (items.length > 1 ? '<div class="cmpbar"><button id="cmpGo" hidden>⚖ Сравнить (<span id="cmpN">0</span>)</button></div>' : "")
+      : `<div class="empty">${favTab ? "В этом разделе ничего не сохранено" : "Здесь будут объявления, которые вы сохранили ♡"}</div>`;
+    if (items.length > 1) box.querySelectorAll("article.listing").forEach((a) => a.insertAdjacentHTML("beforeend", `<label class="cmp"><input type="checkbox" data-cmp="${a.dataset.id}"> сравнить</label>`));
+  } catch (e) { box.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+
+// ---------- чаты ----------
+function relTime(iso) {
+  if (!iso) return "";
+  const d = new Date(iso.endsWith("Z") || iso.includes("+") ? iso : iso + "Z");
+  const days = Math.floor((new Date().setHours(0, 0, 0, 0) - new Date(d).setHours(0, 0, 0, 0)) / 86400000);
+  if (days <= 0) return d.toLocaleTimeString("ru-RU", {hour: "2-digit", minute: "2-digit"});
+  if (days === 1) return "Вчера";
+  if (days < 7) return d.toLocaleDateString("ru-RU", {weekday: "short"});
+  return d.toLocaleDateString("ru-RU", {day: "2-digit", month: "2-digit"});
+}
+let convTab = "all", convItems = [];
+function drawConversations() {
+  const box = $("#conversations");
+  const q = ($("#chatSearch")?.value || "").trim().toLowerCase();
+  const rows = convItems.filter((c) => !q || [c.other_name, c.listing_title, c.last_text].some((t) => (t || "").toLowerCase().includes(q)))
+    .filter((c) => convTab === "all" ? true : convTab === "unread" ? c.unread > 0 : convTab === "match" ? c.kind === "mutual" : c.kind === "listing" && c.role === convTab);
+  document.querySelectorAll("#chatTabs [data-ctab]").forEach((b) => b.classList.toggle("active", b.dataset.ctab === convTab));
+  box.innerHTML = rows.length ? rows.map((c) => `
+    <article class="convrow ${c.unread ? "unread" : ""}" data-chat="${c.id}" data-title="${esc(c.other_name)}">
+      <div class="thumb2 ${c.listing_status && c.listing_status !== "approved" ? "cdead" : ""}">${c.listing_cover ? `<img src="${esc(c.listing_cover)}" alt="" loading="lazy">` : c.kind === "mutual" ? "💗" : (CAT_ICON[c.listing_category] || "📄")}<span class="mini">${esc(c.other_initial)}</span></div>
+      <div class="cbody"><span class="cname">${c.pinned ? "📌 " : ""}${esc(c.other_name)}</span>
+        <span class="cad">${c.kind === "mutual" ? "Знакомство" : esc(c.listing_title)}${c.listing_price ? ` <span class="cprice">· ${esc(c.listing_price)}</span>` : ""}${c.listing_status && c.listing_status !== "approved" && c.kind === "listing" ? ' <span class="cprice">· снято</span>' : ""}</span>
+        <span class="clast">${c.last_mine ? "Вы: " : ""}${esc(c.last_text || "Нет сообщений")}</span></div>
+      <div class="cside"><span class="ctime">${esc(relTime(c.last_at))}</span>${c.unread ? `<span class="cbadge">${c.unread}</span>` : ""}</div>
+    </article>`).join("")
+    : `<div class="empty">${convItems.length ? "В этой вкладке пока пусто." : "Переписок пока нет. Откройте объявление и нажмите «Написать»."}</div>`;
+}
+document.addEventListener("click", (e) => { const t = e.target.closest("#chatTabs [data-ctab]"); if (t) { convTab = t.dataset.ctab; drawConversations(); } });
+$("#chatSearch").addEventListener("input", drawConversations);
+async function loadConversations() {
+  const box = $("#conversations");
+  try {
+    convItems = await api("/api/conversations");
+    drawConversations();
+  } catch (e) { box.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+async function openChat(id, title) {
+  currentChat = id;
+  lastMessageKey = ""; olderMessages = []; hasOlder = false;
+  $("#chatTitle").textContent = title || "Чат";
+  $("#chatSub").textContent = "";
+  showView("chat", {push: true});
+  fillChatHeader(id);
+  await loadMessages();
+  loadChatStatus();
+  clearInterval(chatTimer); clearInterval(chatStatusTimer);
+  chatTimer = setInterval(loadMessages, 5000);
+  chatStatusTimer = setInterval(loadChatStatus, 3500);
+  syncSendButtons();
+  drawQuickReplies("mutual", "buyer");   // пока не пришли данные чата: без подсказок
+}
+let chatStatusTimer = null, lastTypingPing = 0;
+// Кто пишет и по какому объявлению: имя, карточка объявления с фото и ценой (как на Авито)
+async function fillChatHeader(id) {
+  $("#chatAd").hidden = true; $("#chatMenu").hidden = true;
+  try {
+    const c = await api(`/api/conversations/${id}/info`, {quiet: true});
+    if (currentChat !== id) return;
+    $("#chatTitle").textContent = c.other_name;
+    $("#chatAvatar").textContent = c.other_initial;
+    chatCompanyId = c.role === "seller" ? c.company_id : null;
+    lastQuickArgs = [c.kind, c.role]; drawQuickReplies(c.kind, c.role);
+    chatPinned = Boolean(c.pinned); $("#chatPin").textContent = chatPinned ? "📌 Открепить" : "📌 Закрепить";
+    if (c.kind === "listing" && c.listing_id) {
+      const ad = $("#chatAd");
+      ad.hidden = false; ad.dataset.open = c.listing_id;
+      $("#chatAdTitle").textContent = c.listing_title;
+      $("#chatAdPrice").textContent = (c.role === "seller" ? "Ваше объявление · " : "") + (c.listing_status && c.listing_status !== "approved" ? "снято с публикации" : c.listing_price);
+      $("#chatAdImg").hidden = !c.listing_cover; $("#chatAdPh").hidden = !!c.listing_cover;
+      if (c.listing_cover) $("#chatAdImg").src = c.listing_cover; else $("#chatAdPh").textContent = CAT_ICON[c.listing_category] || "📄";
+    } else if (c.kind === "mutual") { $("#chatSub").dataset.kind = "mutual"; }
+  } catch (e) { /* шапка не критична */ }
+}
+$("#chatAd").addEventListener("click", (e) => { e.preventDefault(); const id = $("#chatAd").dataset.open; if (id) openDetail(+id); });
+let chatPinned = false;
+$("#chatPin").onclick = async () => {
+  $("#chatMenu").hidden = true;
+  try { await api(`/api/conversations/${currentChat}/pin`, {method: chatPinned ? "DELETE" : "POST"}); chatPinned = !chatPinned; toast(chatPinned ? "Диалог закреплён вверху списка" : "Диалог откреплён"); }
+  catch (err) { toast(err.message); }
+};
+$("#chatMenuBtn").onclick = (e) => { e.stopPropagation(); $("#chatMenu").hidden = !$("#chatMenu").hidden; };
+document.addEventListener("click", (e) => { if (!e.target.closest("#chatMenu, #chatMenuBtn")) $("#chatMenu").hidden = true; });
+$("#chatHide").onclick = async () => {
+  $("#chatMenu").hidden = true;
+  if (!(await confirmDialog("Скрыть чат из списка? Он вернётся, если вам напишут снова."))) return;
+  try { await api(`/api/conversations/${currentChat}/hide`, {method: "POST"}); toast("Чат скрыт"); goBack(); } catch (err) { toast(err.message); }
+};
+// Пустое поле: справа микрофон, есть текст: кнопка «отправить»
+let micSupported = false;
+function syncSendButtons() {
+  const has = $("#chatInput").value.trim().length > 0;
+  $("#chatSend").hidden = micSupported && !has;
+  $("#chatMic").hidden = !(micSupported && !has);
+}
+$("#chatInput").addEventListener("input", syncSendButtons);
+const QUICK_BUYER = ["Здравствуйте! Ещё актуально?", "Когда можно посмотреть?", "Можно ли снизить цену?", "Спасибо, я подумаю", "Где вы находитесь?"];
+const QUICK_SELLER = ["Да, актуально", "Здравствуйте! Чем помочь?", "Приезжайте, адрес пришлю", "Цена окончательная", "Уже продано, извините"];
+let quickSet = QUICK_BUYER;
+let ownReplies = [], chatCompanyId = null;
+async function drawQuickReplies(kind = "listing", role = "buyer") {
+  quickSet = kind === "mutual" ? [] : role === "seller" ? QUICK_SELLER : QUICK_BUYER;
+  if (kind !== "mutual") { try { ownReplies = await api("/api/me/quick-replies", {quiet: true}); } catch (e) { ownReplies = []; } }
+  let teamReplies = [];
+  if (chatCompanyId) { try { teamReplies = (await api(`/api/company/${chatCompanyId}/reply-templates`, {quiet: true})).filter((r) => r.kind === "chat").map((r) => ({id: 0, text: r.text})); } catch (e) { teamReplies = []; } }
+  $("#quickReplies").hidden = kind === "mutual";
+  $("#quickReplies").innerHTML = teamReplies.map((r) => `<button type="button" data-quick="${esc(r.text)}">🏢 ${esc(r.text)}</button>`).join("") + ownReplies.map((r) => `<span class="qown"><button type="button" data-quick="${esc(r.text)}">${esc(r.text)}</button><button type="button" class="qdel" data-qdel="${r.id}" aria-label="Удалить">×</button></span>`).join("")
+    + quickSet.map((t) => `<button type="button" data-quick="${esc(t)}">${esc(t)}</button>`).join("") + '<button type="button" class="qadd" data-qadd>＋ свой ответ</button>';
+}
+$("#quickReplies").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-quick]"), del = e.target.closest("[data-qdel]"), add = e.target.closest("[data-qadd]");
+  if (b) { $("#chatInput").value = b.dataset.quick; $("#chatInput").focus(); syncSendButtons(); return; }
+  try {
+    if (del) { await api(`/api/me/quick-replies/${del.dataset.qdel}`, {method: "DELETE"}); drawQuickReplies(...lastQuickArgs); }
+    if (add) {
+      const text = $("#chatInput").value.trim() || (await askText("Свой быстрый ответ", "Например: Адрес и время работы пришлю в чате"));
+      if (!text) return;
+      await api("/api/me/quick-replies", {method: "POST", body: JSON.stringify({text})});
+      toast("Ответ сохранён: он будет здесь в любом чате"); drawQuickReplies(...lastQuickArgs);
+    }
+  } catch (err) { toast(err.message); }
+});
+let lastQuickArgs = ["listing", "buyer"];
+$("#chatInput").addEventListener("input", () => {
+  const t = Date.now();
+  if (!currentChat || t - lastTypingPing < 3000) return;
+  lastTypingPing = t;
+  api(`/api/conversations/${currentChat}/typing`, {method: "POST", quiet: true}).catch(() => {});
+});
+async function sendAttachment(file) {
+  if (!file || !currentChat) return;
+  const form = new FormData(); form.append("file", file, file.name || "voice");
+  try {
+    await api(`/api/conversations/${currentChat}/attachment`, {method: "POST", body: form});
+    lastMessageKey = ""; olderMessages = []; hasOlder = false;
+    await loadMessages();
+  } catch (err) { toast(err.message); }
+}
+$("#chatFile").onchange = (e) => { const f = e.target.files[0]; e.target.value = ""; sendAttachment(f); };
+// Голосовое: кнопка видна, только если браузер умеет записывать звук
+if (window.MediaRecorder && navigator.mediaDevices?.getUserMedia) {
+  micSupported = true; syncSendButtons();
+  let rec = null, chunks = [], stopTimer = null;
+  $("#chatMic").onclick = async () => {
+    if (rec) { rec.stop(); return; }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({audio: true});
+      rec = new MediaRecorder(stream); chunks = [];
+      rec.ondataavailable = (e) => chunks.push(e.data);
+      rec.onstop = () => {
+        clearTimeout(stopTimer); stream.getTracks().forEach((t) => t.stop());
+        const blob = new Blob(chunks, {type: rec.mimeType || "audio/webm"});
+        rec = null; $("#chatMic").textContent = "🎤"; $("#chatMic").classList.remove("rec");
+        if (blob.size > 800) sendAttachment(new File([blob], "Голосовое сообщение." + (blob.type.includes("mp4") ? "m4a" : "webm"), {type: blob.type}));
+      };
+      rec.start(); $("#chatMic").textContent = "⏹"; $("#chatMic").classList.add("rec");
+      stopTimer = setTimeout(() => rec && rec.stop(), 60000);   // не длиннее минуты
+    } catch (err) { toast("Нет доступа к микрофону"); }
+  };
+}
+async function fetchAttachment(url) {
+  const r = await fetch(url, {headers: authHeaders()});
+  if (!r.ok) throw new Error("Не удалось открыть файл");
+  return URL.createObjectURL(await r.blob());
+}
+document.addEventListener("click", async (e) => {
+  const pv = e.target.closest("[data-playvoice]");
+  if (pv) {
+    try { const a = new Audio(await fetchAttachment(pv.dataset.playvoice)); await a.play(); pv.textContent = "🔊 Играет…"; a.onended = () => { pv.textContent = "▶ Воспроизвести ещё раз"; }; }
+    catch (err) { toast(err.message || "Не удалось воспроизвести"); }
+    return;
+  }
+  const gf = e.target.closest("[data-getfile]");
+  if (gf) {
+    try {
+      const href = await fetchAttachment(gf.dataset.getfile);
+      const a = document.createElement("a"); a.href = href; a.download = gf.dataset.fname || "document.pdf"; document.body.appendChild(a); a.click(); a.remove();
+    } catch (err) { toast(err.message); }
+  }
+});
+const fileHtml = (m) => !m.file ? "" : m.file.kind === "audio"
+  ? `<button type="button" class="chatfile" data-playvoice="${esc(m.file.url)}">▶ ${esc(m.file.name)}</button>`
+  : `<button type="button" class="chatfile" data-getfile="${esc(m.file.url)}" data-fname="${esc(m.file.name)}">📄 ${esc(m.file.name)}</button>`;
+const msgHtml = (m) => `
+      <div class="bubble ${m.mine ? "mine" : ""}">${fileHtml(m)}${m.photo ? `<a href="${esc(m.photo)}" target="_blank" rel="noopener"><img class="chatpic" src="${esc(m.photo)}" alt="" loading="lazy"></a>` : ""}${linkMsg(m.text)}<small>${new Date(m.created_at).toLocaleTimeString("ru-RU", {hour: "2-digit", minute: "2-digit"})}${m.mine ? `<span class="ticks ${m.read ? "read" : ""}">${m.read ? "✓✓" : "✓"}</span>` : ""}</small></div>`;
+function linkMsg(text) {          // «🔗 Объявление #12: Название» открывается по нажатию
+  return esc(text).replace(/🔗 Объявление #(\d+)([^\n]*)/g, (m, id, rest) => `<a href="#" class="msglink" data-open="${id}">🔗 Объявление #${id}${rest}</a>`);
+}
+function renderMessages(items, stick) {
+  const all = [...olderMessages, ...items];
+  const box = $("#messages");
+  const before = box.scrollHeight;
+  let lastDay = "";
+  const dayLabel = (iso) => {
+    const d = new Date(iso.endsWith("Z") || iso.includes("+") ? iso : iso + "Z");
+    const diff = Math.floor((new Date().setHours(0, 0, 0, 0) - new Date(d).setHours(0, 0, 0, 0)) / 86400000);
+    return diff <= 0 ? "Сегодня" : diff === 1 ? "Вчера" : d.toLocaleDateString("ru-RU", {day: "numeric", month: "long"});
+  };
+  box.innerHTML = (hasOlder ? '<button class="link older" data-older>Ранее</button>' : "") +
+    (all.length ? all.map((m) => { const lab = dayLabel(m.created_at); const sep = lab !== lastDay ? `<div class="dayline">${lab}</div>` : ""; lastDay = lab; return sep + msgHtml(m); }).join("")
+      : '<div class="empty">Напишите первое сообщение</div>');
+  box.scrollTop = stick ? box.scrollHeight : box.scrollHeight - before;
+}
+async function loadMessages() {
+  if (!currentChat) return;
+  try {
+    const items = await api(`/api/conversations/${currentChat}/messages?limit=50`);
+    const key = items.length + ":" + (items[items.length - 1]?.id || 0) + ":" + items.filter((m) => m.read).length;
+    if (key === lastMessageKey) return;  // ничего нового: не перерисовываем, экран не дёргается
+    if (lastMessageKey === "") hasOlder = items.length === 50;
+    lastMessageKey = key;
+    renderMessages(items, true);
+    window.__latest = items;
+  } catch (e) { toast(e.message); }
+}
+async function loadOlder() {
+  const oldest = (olderMessages[0] || window.__latest?.[0])?.id;
+  if (!oldest) return;
+  try {
+    const older = await api(`/api/conversations/${currentChat}/messages?limit=50&before_id=${oldest}`);
+    hasOlder = older.length === 50;
+    olderMessages = [...older, ...olderMessages];
+    renderMessages(window.__latest || [], false);
+  } catch (e) { toast(e.message); }
+}
+document.addEventListener("click", (e) => { if (e.target.closest("[data-older]")) loadOlder(); });
+$("#chatBack").onclick = goBack;
+$("#chatBlock").onclick = async () => {
+  if (!currentChat || !(await confirmDialog("Заблокировать собеседника? Он больше не сможет вам писать."))) return;
+  try { await api(`/api/conversations/${currentChat}/block`, {method: "POST"}); toast("Собеседник заблокирован"); goBack(); }
+  catch (err) { toast(err.message); }
+};
+$("#chatReport").onclick = async () => {
+  if (!currentChat) return;
+  const reason = await askReason();
+  if (!reason) return;
+  try {
+    await api(`/api/conversations/${currentChat}/report`, {method: "POST", body: JSON.stringify({reason})});
+    toast("Жалоба отправлена. Спасибо!");
+  } catch (err) { toast(err.message); }
+};
+$("#chatPhoto").onchange = async (e) => {
+  const file = e.target.files[0];
+  e.target.value = "";
+  if (!file || !currentChat) return;
+  const form = new FormData(); form.append("file", file);
+  try {
+    await api(`/api/conversations/${currentChat}/photo`, {method: "POST", body: form});
+    lastMessageKey = ""; olderMessages = []; hasOlder = false;
+    await loadMessages();
+  } catch (err) { toast(err.message); }
+};
+async function loadChatStatus() {
+  if (!currentChat) return;
+  try {
+    const r = await api(`/api/conversations/${currentChat}/status`, {quiet: true});
+    const el = $("#chatSub");
+    el.textContent = r.typing ? "печатает…" : r.status === "online" ? "в сети" : r.status === "recently" ? "был(а) недавно" : "";
+    el.className = "chat-sub " + r.status;
+  } catch (e) { /* статус не обязателен */ }
+}
+$("#chatForm").onsubmit = async (e) => {
+  e.preventDefault();
+  const input = $("#chatInput");
+  const text = input.value.trim();
+  if (!text || !currentChat) return;
+  try {
+    await api(`/api/conversations/${currentChat}/messages`, {method: "POST", body: JSON.stringify({text})});
+    input.value = ""; syncSendButtons();
+    lastMessageKey = ""; olderMessages = []; hasOlder = false;
+    await loadMessages();
+  } catch (err) { toast(err.message); }
+};
+
+// ---------- профиль ----------
+const STATUS_BADGE = (x) => `<span class="status ${STATUS[x.status]?.[1] || ""}">${STATUS[x.status]?.[0] || esc(x.status)}</span>`;
+// ---------- «Мои объявления»: в списке только суть, всё управление на странице объявления ----------
+function ownUntil(x) {
+  if (x.status !== "approved" || !x.expires_at) return "";
+  const days = Math.max(0, Math.ceil((new Date(x.expires_at) - Date.now()) / 864e5));
+  return `до ${fmtDate(x.expires_at).split(",")[0]} · ${days} дн.`;
+}
+function ownCard(x) {
+  const until = ownUntil(x);
+  const stats = x.status === "approved" ? `<span>👁 ${x.views || 0}</span>${x.applications?.total ? `<span>📨 ${x.applications.total}${x.applications.new ? ` (+${x.applications.new})` : ""}</span>` : ""}` : "";
+  const flag = x.has_edit ? '<span class="chipnote">правка на проверке</span>' : "";
+  return `<article class="listing ocard" data-id="${x.id}" data-cat="${x.category}" data-ownopen="${x.id}">${bulkMode ? `<label class="bulkck"><input type="checkbox" data-bulk="${x.id}"> выбрать</label>` : ""}
+    <div class="ocard-row">${x.cover ? `<img class="othumb" src="${esc(x.cover)}" alt="" loading="lazy">` : `<div class="othumb ph">${{job: "💼", housing: "🏠"}[x.category] || "🛍️"}</div>`}
+      <div class="obody"><h3>${esc(x.title)}</h3>
+        <div class="meta">📍 ${esc(x.city)}</div><div class="price">${esc(priceText(x))}</div>
+        <div class="ometa">${STATUS_BADGE(x)}${until ? `<span>⏳ ${esc(until)}</span>` : ""}${stats}${flag}</div></div><span class="ochev">›</span></div></article>`;
+}
+function ownActions(x) {
+  const groups = [], add = (g, html) => { (groups[g] = groups[g] || []).push(html); };
+  if (x.status === "draft") add(0, '<button data-own="submit">Отправить на проверку</button>');
+  if (["draft", "pending", "approved", "rejected", "needs_fix"].includes(x.status)) add(0, '<button data-own="edit">✏️ Изменить</button>');
+  if (x.status === "approved") add(0, '<button data-own="promo" class="promo-btn">🚀 Продвинуть</button>');
+  if (x.category === "job" && x.applications?.total) add(0, `<button data-own="applicants" class="secondary">📨 Отклики (${x.applications.total}${x.applications.new ? ", новых " + x.applications.new : ""})</button>`);
+  if (x.status === "approved" && x.price_amount) add(1, '<button data-own="price" class="secondary">⚡ Цена</button>');
+  if (["approved", "expired"].includes(x.status)) add(1, '<button data-own="renew" class="secondary">🔄 Продлить</button>');
+  if (x.status === "approved" && x.category === "marketplace") add(1, `<button data-own="reserve" class="secondary">${x.reserved ? "Снять резерв" : "Зарезервировано"}</button>`);
+  if (x.status !== "archived") add(2, '<button data-own="dup" class="secondary">⧉ Копия</button>');
+  if (["draft", "pending", "approved", "rejected", "needs_fix"].includes(x.status)) add(2, '<button data-own="move" class="secondary">🔀 Перенести</button>');
+  if (x.status === "approved") add(3, '<button data-own="close" class="secondary">Закрыть</button>');
+  if (x.status === "approved" && x.category === "marketplace") add(3, '<button data-own="sold" class="secondary">Продано</button>');
+  if (["closed", "sold"].includes(x.status)) add(3, '<button data-own="reopen" class="secondary">Вернуть</button>');
+  if (["rejected", "needs_fix", "hidden"].includes(x.status)) add(3, '<button data-own="appeal" class="secondary">Оспорить решение</button>');
+  if (x.status !== "archived") add(3, '<button data-own="archive" class="secondary danger-btn">Удалить</button>');
+  const titles = ["Главное", "Цена и срок", "Копии", "Статус"];
+  return groups.map((g, i) => g ? `<div class="ogroup"><h4 class="grp">${titles[i]}</h4><div class="actions">${g.join("")}</div></div>` : "").join("");
+}
+let ownPageId = null;
+async function showOwnPage(id, refresh) {
+  const x = ownItems[id];
+  if (!x) return;
+  ownPageId = id;
+  SUB_TITLES.own = "Объявление";
+  if (!refresh) openSub("own");
+  const body = $("#subBody");
+  const until = ownUntil(x);
+  const runs = (x.placements || []).map((p) => `${PROMO[p.kind] || p.kind} до ${fmtDate(p.ends_at).split(",")[0]}`).join(" · ");
+  const note = x.note ? `<p class="note">Комментарий модератора: ${esc(x.note)}</p>` : "";
+  const edit = x.has_edit ? '<p class="muted">Правка на проверке — пока видна прежняя версия</p>' : "";
+  body.innerHTML = `<div class="ownpage" data-id="${x.id}" data-cat="${x.category}">
+    <article class="dcard2 ohead">${x.cover ? `<img class="ocover" src="${esc(x.cover)}" alt="">` : ""}
+      <div class="listing-top"><h3>${esc(x.title)}</h3>${STATUS_BADGE(x)}</div>
+      <div class="meta">📍 ${esc(x.city)}</div><div class="price">${esc(priceText(x))}</div>
+      ${until ? `<p class="meta-line">⏳ Показывается ${esc(until)}</p>` : ""}${runs ? `<p class="meta-line">🚀 ${esc(runs)}</p>` : ""}${edit}${note}
+      <div class="actions"><button class="secondary" data-open="${x.id}">👁 Как видят люди</button></div></article>
+    <div id="ownStats">${x.status === "approved" ? '<div class="skeleton"></div>' : ""}</div>${ownActions(x)}
+    <div class="ogroup"><h4 class="grp">История</h4><div id="ownHist" class="menu-list"><div class="skeleton"></div></div></div></div>`;
+  if (x.status === "approved") {
+    try { $("#ownStats").innerHTML = ownStatsHtml(await api(`/api/listings/${id}/stats`), x); } catch (e) { $("#ownStats").innerHTML = ""; }
+  }
+  if (x.status === "draft") { $("#ownHist").parentElement.remove(); return; }
+  try {
+    const rows = await api(`/api/listings/${id}/history`);
+    $("#ownHist").innerHTML = rows.map((r) => `<div class="hist"><b>${esc(r.what)}</b><small class="muted">${esc(fmtDate(r.at))}${r.details ? " · " + esc(r.details) : ""}${r.preview ? "<br>" + esc(r.preview) : ""}</small>${r.version_id ? `<button class="secondary" data-restore="${r.version_id}">↩ Вернуть эту версию</button>` : ""}</div>`).join("");
+  } catch (e) { $("#ownHist").innerHTML = ""; }
+}
+function ownStatsHtml(st, x) {
+  const d = st.daily || [], peak = Math.max(1, ...d.map((v) => v.views)), total = d.reduce((n, v) => n + v.views, 0);
+  const best = d.reduce((m, v) => (v.views > m.views ? v : m), {views: 0, day: ""});
+  const reply = x.category === "job" ? st.applications + st.chats : st.chats;
+  const pct = (n) => (st.views ? Math.round(1000 * n / st.views) / 10 : 0);
+  const day = (iso) => new Date(iso).toLocaleDateString("ru-RU", {day: "numeric", month: "short"});
+  return `<div class="kpis"><div><b>${st.views}</b><small>Просмотров</small></div><div><b>${st.favorites}</b><small>В избранном</small></div>
+      <div><b>${reply}</b><small>${x.category === "job" ? "Откликов и чатов" : "Чатов"}</small></div><div><b>${st.conversion}%</b><small>Конверсия</small></div></div>
+    <article class="dcard2"><div class="dcard2-head"><h3>Просмотры за 14 дней</h3><span class="muted">${total}</span></div>
+      ${total ? "" : '<p class="muted">Пока никто не смотрел: просмотры появятся здесь по дням.</p>'}
+      <div class="chart">${d.map((v) => `<div class="bar" title="${esc(day(v.day))}: ${v.views}"><i style="height:${Math.max(3, Math.round(100 * v.views / peak))}%"></i>${v.views ? `<em>${v.views}</em>` : ""}</div>`).join("")}</div>
+      <div class="chart-axis"><span>${d.length ? esc(day(d[0].day)) : ""}</span><span>${d.length ? esc(day(d[d.length - 1].day)) : ""}</span></div>
+      <p class="muted">${best.views ? `Лучший день: ${esc(day(best.day))} (${best.views}) · ` : ""}в среднем ${(total / Math.max(1, d.length)).toFixed(1)} в день</p></article>
+    <article class="dcard2"><h3>Путь человека</h3>
+      ${[["👁 Просмотры", st.views, 100], ["♥ Сохранили", st.favorites, pct(st.favorites)], [x.category === "job" ? "📨 Откликнулись или написали" : "💬 Написали", reply, pct(reply)]]
+        .map(([t, n, p]) => `<div class="fun"><span>${t}</span><b>${n}${st.views && p !== 100 ? ` · ${p}%` : ""}</b><div class="fw-bar"><i style="width:${Math.min(100, p)}%"></i></div></div>`).join("")}</article>
+    ${st.advice.map((t) => `<p class="note">💡 ${esc(t)}</p>`).join("")}`;
+}
+const OWN_GROUPS = {active: ["approved"], review: ["pending", "needs_fix", "rejected"], draft: ["draft"],
+                    closed: ["closed", "sold", "expired", "hidden"]};
+function renderOwn() {
+  const visible = mineAll.filter((x) => x.status !== "archived" && (ownFilter === "all" || OWN_GROUPS[ownFilter].includes(x.status)));
+  $("#myListings").innerHTML = visible.length ? visible.map(ownCard).join("")
+    : `<div class="empty">${mineAll.length ? "В этом разделе пока пусто" : "Вы ещё не публиковали объявления. Нажмите «+» внизу."}</div>`;
+  if (currentView === "sub" && currentSubKey === "own" && ownPageId) {          // страница объявления обновляется после действий
+    if (!ownItems[ownPageId] || ownItems[ownPageId].status === "archived") goBack(); else showOwnPage(ownPageId, true);
+  }
+}
+document.querySelectorAll("[data-own-filter]").forEach((b) => b.onclick = () => {
+  ownFilter = b.dataset.ownFilter;
+  document.querySelectorAll("[data-own-filter]").forEach((c) => c.classList.toggle("active", c === b));
+  renderOwn();
+});
+async function showApplicants(id) {
+  const rows = await api(`/api/listings/${id}/applications`);
+  SUB_TITLES.applicants = "Отклики";
+  openSub("applicants");
+  $("#subBody").innerHTML = `<h3>${esc(ownItems[id]?.title || "")}</h3>` + (rows.map((a) => `<article class="listing" data-app="${a.id}">
+    <div class="listing-top"><div><b>${esc(a.contact)}</b><div class="meta">${a.city ? "📍 " + esc(a.city) : ""}${a.visa ? " · виза " + esc(a.visa) : ""}</div></div>
+    <span class="status ${a.status === "invited" ? "approved" : a.status === "rejected" ? "rejected" : "pending"}">${APP_STATUS[a.status] || a.status}</span></div>
+    ${a.message ? `<p>${esc(a.message)}</p>` : ""}${a.reply ? `<p class="muted">Ваш ответ: ${esc(a.reply)}</p>` : ""}<p class="muted">${esc(fmtDate(a.created_at))}</p>
+    <div class="actions"><button data-appstatus="invited" data-appid="${a.id}">Пригласить</button>
+    <button data-appstatus="rejected" data-appid="${a.id}" class="secondary">Отказать</button></div></article>`).join("")
+    || '<div class="empty">Откликов пока нет</div>');
+  loadProfile();
+}
+function fillProfileHead() {
+  const u = tg?.initDataUnsafe?.user;
+  const name = me?.display_name || [u?.first_name, u?.last_name].filter(Boolean).join(" ") || "Мой профиль";
+  $("#pName").textContent = name;
+  const initials = ((name || "?")[0] + ((name.split(" ")[1] || "")[0] || "")).toUpperCase();
+  const photo = me?.avatar || u?.photo_url;
+  $("#pAvatar").innerHTML = photo ? `<img src="${esc(photo)}" alt="">` : esc(initials);
+}
+function showProfileChips() {
+  fillProfileHead();
+  $("#pCity").textContent = me?.city || "Выберите город";
+  $("#pVisa").textContent = me?.visa ? "виза " + me.visa : "виза не указана";
+  $("#pEmployer").hidden = me?.employer_status !== "approved";
+  showCityChip();
+}
+// «Мои кабинеты»: личный, компания, знакомства: у каждого свой баланс и своя страница
+async function fillCabinets() {
+  try { const b = await api("/api/me/balance", {quiet: true}); $("#cabPersonSub").textContent = `Баланс: ${b.balance} KH`; } catch (e) { /* без баланса */ }
+  try {
+    const cos = await api("/api/company/mine", {quiet: true});
+    const c = cos[0];
+    $("#cabCompanySub").textContent = c ? `${c.name} · ${c.balance_stars ?? c.balance ?? 0} KH` : "Для работодателей";
+    document.querySelector("#cabCompany .cab-act").textContent = c ? "Открыть" : "Создать";
+  } catch (e) { /* без компании */ }
+}
+$("#cabDating").onclick = () => $("#myDatingBtn").onclick();
+$("#tilesMore").onclick = () => {
+  const t = document.querySelector(".tiles"), open = t.classList.toggle("open");
+  $("#tilesMore").querySelector("span").textContent = open ? "Меньше" : "Ещё";
+};
+async function loadProfile() {
+  fillProfileHead();
+  fillCabinets();
+  try {
+    const [user, mine, favs, convs, apps] = await Promise.all([api("/api/me"), api("/api/me/listings"), api("/api/favorites"), api("/api/conversations"), api("/api/me/applications")]);
+    me = user;
+    showBell(user.unread || 0);
+    showProfileChips();
+    favIds = new Set(favs.map((x) => x.id));
+    const alive = mine.filter((x) => x.status !== "archived");
+    $("#sApps").textContent = apps.length;
+    $("#sListings").textContent = alive.length;
+    $("#sFav").textContent = favs.length;
+    const unreadMsgs = convs.reduce((n, c) => n + (c.unread || 0), 0);         // красный счётчик только для непрочитанного
+    $("#sChats").textContent = unreadMsgs;
+    $("#sChats").hidden = unreadMsgs === 0;
+    const attention = alive.filter((x) => ["pending", "needs_fix", "rejected", "draft"].includes(x.status) || x.has_edit).length;
+    $("#sMineBadge").textContent = attention;
+    $("#sMineBadge").hidden = attention === 0;
+    ownItems = Object.fromEntries(mine.map((x) => [x.id, x]));
+    mineAll = mine;
+    renderOwn();
+  } catch (e) { $("#myListings").innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+function renderPayments(rows) {
+  const STATUS = {pending: "ожидает оплаты", paid: "оплачено", refunded: "возврат выполнен", failed: "ошибка", granted: "подарок"};
+  return rows.length ? rows.map((p) => `
+    <article class="listing"><h3>${esc(p.service)}${p.gift ? ' <span class="adlabel">🎁 бесплатно</span>' : ""}</h3>
+    <p>${p.gift ? "0" : p.stars} ⭐${p.from_balance ? ` + ${p.from_balance} KH с баланса` : ""}${p.promo ? " (промокод " + esc(p.promo) + ")" : ""} · ${esc(STATUS[p.status] || p.status)}${p.profile ? " · анкета знакомств" : p.listing_id ? " · объявление #" + p.listing_id : ""}</p>
+    ${p.note ? `<p class="muted">${esc(p.note)}</p>` : ""}
+    <p class="muted">${esc(p.number)} · ${fmtDate(p.paid_at || p.created_at)}</p>
+    ${["paid", "refunded", "granted"].includes(p.status) ? `<div class="actions"><button class="secondary" data-receipt="${p.id}">Квитанция</button>${p.status === "paid" && p.service !== "Пополнение баланса" ? `<button class="secondary" data-refundask="${p.id}">Вернуть</button>` : ""}</div>` : ""}</article>`).join("")
+    : '<div class="empty">Платежей пока нет.<br>Продвижение объявления покупается в «Мои объявления» → «Продвинуть».</div>';
+}
+async function showReceipt(id) {
+  const r = await api(`/api/me/payments/${id}/receipt`);
+  SUB_TITLES.receipt = "Квитанция " + r.number;
+  openSub("receipt");
+  const rows = [["Номер", r.number], ["Дата", fmtDate(r.date)], ["Услуга", r.service + (r.days > 1 ? ` (${r.days} дн.)` : "")],
+    [r.profile ? "Анкета" : "Объявление", r.profile ? "знакомства" : `#${r.listing_id} ${r.listing_title}`], ["Цена", r.list_stars + " KH"],
+    ...(r.discount ? [["Скидка", `−${r.discount} KH (промокод ${r.promo})`]] : []), ["Оплачено", r.stars + " ⭐"],
+    ["Статус", {paid: "оплачено", refunded: "возврат выполнен", pending: "ожидает оплаты", failed: "ошибка", granted: "подарок"}[r.status] || r.status],
+    ...(r.from_balance ? [["С баланса", r.from_balance + " KH"]] : []), ...(r.note ? [["Примечание", r.note]] : []),
+    ["Платёж Telegram", r.charge_id || "—"]];
+  $("#subBody").innerHTML = `<article class="listing receipt"><dl>${rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(String(v))}</dd>`).join("")}</dl>
+    <div class="actions"><button id="copyReceipt">Скопировать</button></div></article>`;
+  $("#copyReceipt").onclick = async () => {
+    try { await navigator.clipboard.writeText(rows.map(([k, v]) => `${k}: ${v}`).join("\n")); toast("Квитанция скопирована"); } catch (e) { toast("Не удалось скопировать"); }
+  };
+}
+const SUB_TITLES = {author: "Объявления автора", applications: "Мои отклики", searches: "Мои поиски", settings: "Настройки", employer: "Компания", company: "Компания",
+                    recent: "Недавно смотрел", myreviews: "Мои отзывы", compare: "Сравнение", support: "Поддержка", faq: "Вопросы и ответы", ticket: "Обращение", invite: "Пригласить друзей", resume: "Моё резюме", cvsearch: "Поиск сотрудников", payments: "История платежей", blocks: "Заблокированные", help: "Помощь и правила"};
+let currentSubKey = "";
+const TICKET_STATUS = {open: "Ждёт ответа", answered: "Есть ответ", closed: "Закрыто"};
+// ---------- поддержка внутри приложения: без ников, ответ приходит сюда ----------
+async function renderSupport(body) {
+  const [rows, texts] = await Promise.all([api("/api/tickets"), api("/api/app-texts", {quiet: true}).catch(() => ({}))]);
+  body.innerHTML = `<article class="listing"><p class="muted">${esc(texts.support_note || "")}</p>
+    <form id="ticketForm" class="form"><label>Ваш вопрос или проблема<textarea name="text" rows="4" minlength="5" maxlength="1500" required placeholder="Опишите, что случилось. Для платежей укажите, что и когда покупали"></textarea></label>
+    <button class="submit" type="submit">Отправить</button></form></article>` +
+    (rows.length ? "<h3 class=\"dsub\">Мои обращения</h3>" + rows.map((t) => `<article class="listing" data-ticket="${t.id}"><div class="listing-top"><div><h3>${t.kind === "appeal" ? "Оспаривание: " : ""}${esc(t.preview)}</h3>
+      <div class="meta">${esc(fmtDate(t.updated_at))}</div></div><span class="status ${t.status === "answered" ? "approved" : t.status === "closed" ? "rejected" : "pending"}">${TICKET_STATUS[t.status] || t.status}</span></div></article>`).join("") : "");
+  $("#ticketForm").onsubmit = async (e) => {
+    e.preventDefault();
+    if (!(await requireConsent())) return;
+    try { await api("/api/tickets", {method: "POST", body: JSON.stringify({text: e.target.text.value.trim()})}); toast("Отправлено. Ответ придёт сюда и в уведомления"); renderSupport(body); }
+    catch (err) { toast(err.message); }
+  };
+}
+async function openTicket(id) {
+  const t = await api(`/api/tickets/${id}`);
+  openSub("ticket");
+  $("#subBody").innerHTML = `<article class="listing"><div class="meta">${TICKET_STATUS[t.status] || t.status}</div>` +
+    t.messages.map((m) => `<div class="review"><b>${m.staff ? "Поддержка" : "Вы"}</b> · ${esc(fmtDate(m.at))}<p style="white-space:pre-wrap">${esc(m.text)}</p></div>`).join("") +
+    (t.status !== "closed" ? `<form id="ticketReply" class="form"><label>Ответить<textarea name="text" rows="3" maxlength="1500" required></textarea></label><button class="submit" type="submit">Отправить</button></form>` : "") + "</article>";
+  const f = $("#ticketReply");
+  if (f) f.onsubmit = async (e) => {
+    e.preventDefault();
+    try { await api(`/api/tickets/${id}/messages`, {method: "POST", body: JSON.stringify({text: f.text.value.trim()})}); openTicket(id); } catch (err) { toast(err.message); }
+  };
+}
+// ---------- приветствие при первом открытии: текст задаётся в админке ----------
+async function showWelcomeOnce() {
+  if (localStorage.getItem("welcomeSeen")) return;
+  try {
+    const t = await api("/api/app-texts", {quiet: true});
+    $("#welcomeTitle").textContent = t.welcome_title || "KOREA HUB";
+    $("#welcomeText").textContent = t.welcome_text || "";
+    $("#welcomeSheet").classList.remove("hidden");
+  } catch (e) { return; }
+  const close = () => { localStorage.setItem("welcomeSeen", "1"); $("#welcomeSheet").classList.add("hidden"); };
+  $("#welcomeOk").onclick = close; $("#closeWelcome").onclick = close;
+}
+const CV_STATUS = {pending: "На проверке у модератора", approved: "Опубликовано: работодатели могут найти", rejected: "Отклонено", hidden: "Скрыто"};
+// ---------- «Ищу работу»: своё резюме ----------
+async function renderMyResume(body) {
+  await loadFields();
+  const cv = await api("/api/me/resume");
+  const v = cv || {};
+  body.innerHTML = `<article class="listing">
+    <p class="muted">Имя и контакты не показываются. Работодатель может только пригласить вас в чат по своей вакансии, а отвечать или нет — решаете вы.</p>
+    ${cv ? `<p><b>${esc(CV_STATUS[cv.status] || cv.status)}</b>${cv.note ? ": " + esc(cv.note) : ""}</p>` : ""}
+    <form id="cvForm" class="form">
+      <label>Кем хотите работать<input name="position" required minlength="3" maxlength="80" value="${esc(v.position || "")}"></label>
+      <label>Город<input name="city" required minlength="2" maxlength="100" value="${esc(v.city || me?.city || "")}"></label>
+      <label>Виза<select name="visa"><option value="">Не указана</option>${fieldDefs.visas.map((x) => `<option value="${x.value}" ${v.visa === x.value ? "selected" : ""}>${x.label}</option>`).join("")}</select></label>
+      <label>Опыт<textarea name="experience" rows="2" maxlength="300">${esc(v.experience || "")}</textarea></label>
+      <label>О себе (без телефонов и ссылок)<textarea name="about" rows="3" maxlength="700">${esc(v.about || "")}</textarea></label>
+      <label>Зарплата от, ₩ в месяц<input name="salary_from" type="number" min="0" step="10000" value="${v.salary_from ?? ""}"></label>
+      <button class="submit" type="submit">${cv ? "Сохранить (уйдёт на проверку)" : "Отправить на проверку"}</button>
+    </form>
+    ${cv ? '<div class="actions"><button class="secondary" id="cvHide">Скрыть</button><button class="secondary" id="cvDel">Удалить</button></div>' : ""}</article>`;
+  $("#cvForm").onsubmit = async (e) => {
+    e.preventDefault();
+    const f = e.target;
+    const salary = f.salary_from.value;
+    try {
+      await api("/api/me/resume", {method: "PUT", body: JSON.stringify({position: f.position.value.trim(), city: f.city.value.trim(), visa: f.visa.value,
+        experience: f.experience.value.trim(), about: f.about.value.trim(), salary_from: salary === "" ? null : +salary})});
+      toast("Резюме отправлено на проверку");
+      renderMyResume(body);
+    } catch (err) { toast(err.message); }
+  };
+  $("#cvHide") && ($("#cvHide").onclick = async () => { try { await api("/api/me/resume/hide", {method: "POST"}); renderMyResume(body); } catch (err) { toast(err.message); } });
+  $("#cvDel") && ($("#cvDel").onclick = async () => {
+    if (!(await confirmDialog("Удалить резюме?"))) return;
+    try { await api("/api/me/resume", {method: "DELETE"}); renderMyResume(body); } catch (err) { toast(err.message); }
+  });
+}
+// ---------- поиск сотрудников (работодатель с опубликованной вакансией) ----------
+async function renderCvSearch(body) {
+  body.innerHTML = '<div class="empty">Проверяем, есть ли у вас опубликованная вакансия…</div>';
+  let mine;
+  try { mine = await api("/api/me/listings"); }
+  catch (err) { body.innerHTML = `<div class="empty">${esc(err.message)}</div>`; return; }
+  const hasVacancy = mine.some((x) => x.category === "job" && x.status === "approved");
+  if (!hasVacancy) {
+    body.innerHTML = `<div class="empty"><b>Поиск сотрудников доступен работодателям с опубликованной вакансией.</b><p>Сначала разместите вакансию и дождитесь её проверки. После публикации здесь появятся резюме кандидатов.</p><button class="submit" id="cvMyListings" type="button">Перейти к моим объявлениям</button></div>`;
+    $("#cvMyListings").onclick = () => openMenu("mine");
+    return;
+  }
+  body.innerHTML = `<form id="cvSearch" class="toolbar"><input name="q" placeholder="Профессия или слово" maxlength="60"><input name="city" placeholder="Город" maxlength="100"><button type="submit">Найти</button></form><div id="cvList"></div>`;
+  const run = async () => {
+    const f = $("#cvSearch");
+    const qs = new URLSearchParams({q: f.q.value.trim(), city: f.city.value.trim()});
+    try {
+      const rows = await api("/api/resumes?" + qs);
+      $("#cvList").innerHTML = rows.length ? rows.map((r) => `<article class="listing"><h3>${esc(r.position)}</h3>
+        <div class="meta">📍 ${esc(r.city)}${r.visa ? " · 🛂 " + esc(r.visa) : ""}${r.salary_from ? " · от " + r.salary_from.toLocaleString("ru-RU") + " ₩" : ""}</div>
+        ${r.experience ? `<p>${esc(r.experience)}</p>` : ""}${r.about ? `<p class="muted">${esc(r.about)}</p>` : ""}
+        <div class="actions"><button data-invite="${esc(r.id)}">Пригласить на вакансию</button></div></article>`).join("")
+        : '<div class="empty">Подходящих резюме пока нет.</div>';
+    } catch (err) { $("#cvList").innerHTML = `<div class="empty">${esc(err.message)}</div>`; }
+  };
+  $("#cvSearch").onsubmit = (e) => { e.preventDefault(); run(); };
+  run();
+}
+document.addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-invite]");
+  if (!b) return;
+  try {
+    const mine = (await api("/api/me/listings")).filter((x) => x.category === "job" && x.status === "approved");
+    if (!mine.length) { toast("Нужна опубликованная вакансия"); return; }
+    let pick = mine[0];
+    if (mine.length > 1) {
+      const n = await askText("Номер вакансии: " + mine.map((x, i) => `${i + 1} — ${x.title}`).join("; "), "1");
+      if (!n) return;
+      pick = mine[Math.max(0, Math.min(mine.length - 1, (parseInt(n, 10) || 1) - 1))];
+    }
+    const r = await api(`/api/resumes/${b.dataset.invite}/invite`, {method: "POST", body: JSON.stringify({listing_id: pick.id})});
+    toast("Приглашение отправлено");
+    b.disabled = true;
+  } catch (err) { toast(err.message); }
+});
+// Раздел кабинета открывается отдельной страницей со стрелкой «назад», а не под длинным списком
+function openSub(key) {
+  currentSubKey = key;
+  $("#subTitle").textContent = SUB_TITLES[key] || "";
+  if (currentView !== "sub") showView("sub", {push: true});
+}
+async function openMenu(key) {
+  if (key === "favorites") return showView("saved");
+  if (key === "chats") return showView("chats");
+  if (key === "mine") return showView("mine", {push: true});
+  if (key === "export") return exportMyData();
+  if (key === "delete") return deleteMyAccount();
+  if (key === "logout") {
+    await api("/api/auth/logout", {method: "POST", quiet: true});
+    localStorage.removeItem("webSession");
+    location.reload();
+    return;
+  }
+  if (!SUB_TITLES[key]) return;
+  openSub(key);
+  const body = $("#subBody");
+  body.innerHTML = '<div class="skeleton"></div>';
+  if (key === "payments") {
+    const [rows, bal] = await Promise.all([api("/api/me/payments"), api("/api/me/balance")]);
+    body.innerHTML = `<article class="dcard2"><div class="dcard2-head"><h3>Мой баланс</h3><b>${bal.balance} KH</b></div>
+      <p class="muted">KH — валюта сайта: ею платят за поднятие, VIP и услуги знакомств.</p>${topupHtml("me")}</article>` + renderPayments(rows);
+  }
+  if (key === "applications") {
+    const rows = await api("/api/me/applications");
+    body.innerHTML = rows.length ? rows.map((a) => `<article class="listing" data-open="${a.listing_id}">
+      <div class="listing-top"><div><h3>${esc(a.title)}</h3><div class="meta">📍 ${esc(a.city)}</div></div>
+      <span class="status ${a.status === "invited" ? "approved" : ["rejected", "withdrawn"].includes(a.status) ? "rejected" : "pending"}">${APP_STATUS[a.status] || a.status}</span></div>
+      ${a.reply ? `<p><b>Ответ работодателя:</b> ${esc(a.reply)}</p>` : ""}
+      ${a.listing_status !== "approved" ? '<p class="muted">Вакансия закрыта</p>' : ""}
+      <p class="muted">${esc(fmtDate(a.created_at))}</p>
+      ${a.can_withdraw ? `<div class="actions"><button class="secondary" data-withdraw="${a.id}">Отозвать отклик</button></div>` : ""}</article>`).join("")
+      : '<div class="empty">Вы пока не откликались на вакансии.<br>Откройте вакансию и нажмите «Откликнуться».</div>';
+  }
+  if (key === "searches") {
+    const rows = await api("/api/me/searches");
+    window.__searches = Object.fromEntries(rows.map((x) => [x.id, x]));
+    body.innerHTML = rows.length ? rows.map((x) => `<article class="listing"><h3>${esc(x.name)}</h3>
+      <p class="muted">${x.paused ? "⏸ На паузе: уведомлений нет" : "Пришлём уведомление в Telegram, когда появится новое подходящее объявление"}</p>
+      <div class="actions"><button data-opensearch="${x.id}">Смотреть сейчас</button>
+        <button data-pausesearch="${x.id}" data-on="${x.paused ? "" : "1"}" class="secondary">${x.paused ? "▶ Включить" : "⏸ Пауза"}</button>
+        <button data-delsearch="${x.id}" class="secondary">Не следить</button></div></article>`).join("")
+      : '<div class="empty">Нет сохранённых поисков.<br>На главной откройте «Фильтры» и нажмите «Следить за этим поиском».</div>';
+  }
+  if (key === "settings") {
+    await loadFields();
+    let prefs = {master: true, kinds: []};
+    try { await loadMe(); prefs = await api("/api/me/notify-prefs"); } catch (e) { /* без входа api() сам покажет окно входа */ }
+    const initials = ((me?.display_name || "?")[0] || "?").toUpperCase();
+    body.innerHTML = `<article class="listing">
+      <div class="avatar-row"><div class="avatar" id="setAvatar">${me?.avatar ? `<img src="${esc(me.avatar)}" alt="">` : esc(initials)}</div>
+        <div style="flex:1;min-width:0"><input id="setName" type="text" maxlength="40" placeholder="Ваше имя" value="${esc(me?.display_name || "")}">
+        <small class="muted">Имя видит только работодатель, когда вы откликаетесь</small></div></div>
+      <div class="actions"><label class="btn secondary" style="flex:1;text-align:center;cursor:pointer;padding:10px;border-radius:10px">Загрузить фото<input type="file" id="setAvatarFile" accept="image/jpeg,image/png,image/webp" hidden></label>
+        <button class="secondary" id="setAvatarDel">Убрать</button><button id="setNameSave">Сохранить имя</button></div>
+      <div class="set-row"><div><b>Вход на сайт</b><small>${me?.account?.email ? esc(me.account.email) + (me.account.email_verified ? " ✔ подтверждён" : "") + (me.account.has_password ? " · пароль задан" : " · пароль не задан") : "E-mail и пароль не заданы"}</small></div><button class="secondary" id="setLogin">${me?.account?.has_password ? "Изменить" : "Задать"}</button></div>
+      ${mailOn && me?.account?.email && !me.account.email_verified ? '<div class="set-row"><div><b>Подтвердить e-mail</b><small>Пришлём письмо со ссылкой: подтверждённый e-mail нужен, чтобы восстановить пароль</small></div><button class="secondary" id="setConfirmMail">Отправить</button></div>' : ""}
+      <div class="set-row"><div><b>Тема</b><small>Светлая, тёмная или как в Telegram</small></div><select id="setTheme"><option value="light">Светлая</option><option value="dark">Тёмная</option><option value="tg">Как в Telegram</option></select></div>
+      <div class="set-row"><div><b>Город</b><small>${esc(me?.city || "не выбран")}</small></div><button class="secondary" id="setCity">Изменить</button></div>
+      <div class="set-row"><div><b>Виза</b><small>Видна только вам: подставляется в отклики и фильтры</small></div>
+        <select id="myVisa"><option value="">Не указана</option>${fieldDefs.visas.map((v) => `<option value="${v.value}">${v.label}</option>`).join("")}</select></div>
+      <div class="set-row"><div><b>Уведомления в Telegram</b><small>Главный выключатель</small></div>
+        <label class="check" style="margin:0"><input type="checkbox" id="setNotify"></label></div>
+      ${prefs.kinds.map((k) => `<div class="set-row" style="padding-left:14px"><div>${esc(k.label)}</div>
+        <label class="check" style="margin:0"><input type="checkbox" data-kind="${k.key}" ${k.on ? "checked" : ""}></label></div>`).join("")}
+      <div class="set-row" style="padding-left:14px"><div>Новое по поискам — раз в сутки одним сообщением<small>Вместо уведомления о каждом объявлении</small></div>
+        <label class="check" style="margin:0"><input type="checkbox" id="setDigest" ${prefs.digest ? "checked" : ""}></label></div>
+      <div class="set-row" style="padding-left:14px"><div>Как часто присылать в Telegram<small>Ночью (22:00–09:00 по Корее) тоже ждём, кроме платежей, модерации и поддержки</small></div>
+        <select id="setMode">${(prefs.modes || []).map((m) => `<option value="${m.key}" ${m.key === prefs.mode ? "selected" : ""}>${esc(m.label)}</option>`).join("")}</select></div>
+      <p class="muted">Все уведомления всегда видны в приложении (колокольчик), даже если в Telegram они выключены.</p>
+      <div class="set-row"><div><b>Размер текста</b><small>Если мелко читать</small></div>
+        <span><button class="secondary" data-fs="">A</button> <button class="secondary" data-fs="1">A+</button> <button class="secondary" data-fs="2">A++</button></span></div>
+      <div class="set-row"><div><b>Язык</b><small>Сейчас доступен только русский</small></div><span class="muted">RU</span></div></article>`;
+    $("#myVisa").value = me?.visa || "";
+    $("#setNotify").checked = Boolean(prefs.master);
+    body.querySelectorAll("[data-fs]").forEach((b) => { b.onclick = () => { if (b.dataset.fs) localStorage.setItem("fs", b.dataset.fs); else localStorage.removeItem("fs"); applyTextSize(); }; });
+    $("#setDigest").onchange = async (e) => {
+      try { await api("/api/me/notify-prefs", {method: "PUT", body: JSON.stringify({digest: e.target.checked})}); toast("Сохранено"); }
+      catch (err) { toast(err.message); e.target.checked = !e.target.checked; }
+    };
+    if ($("#setMode")) $("#setMode").onchange = async (e) => {
+      try { await api("/api/me/notify-prefs", {method: "PUT", body: JSON.stringify({mode: e.target.value})}); toast("Сохранено"); }
+      catch (err) { toast(err.message); }
+    };
+    $("#setCity").onclick = openCity;
+    $("#setTheme").value = localStorage.getItem(THEME_KEY) || "light";
+    $("#setTheme").onchange = (e) => { localStorage.setItem(THEME_KEY, e.target.value); applyTheme(); toast("Тема изменена"); };
+    $("#setLogin").onclick = () => openSignup("edit");
+    if ($("#setConfirmMail")) $("#setConfirmMail").onclick = async () => {
+      try { await api("/api/me/account/email-confirm/send", {method: "POST"}); toast("Письмо отправлено: проверьте почту (и «Спам»)"); } catch (err) { toast(err.message); }
+    };
+    $("#myVisa").onchange = async () => {
+      try { const r = await api("/api/me/settings", {method: "PUT", body: JSON.stringify({visa: $("#myVisa").value})}); me.visa = r.visa; showProfileChips(); toast("Сохранено"); }
+      catch (err) { toast(err.message); }
+    };
+    $("#setNotify").onchange = async (e) => {
+      try { await api("/api/me/notify-prefs", {method: "PUT", body: JSON.stringify({master: e.target.checked})}); me.notify_messages = e.target.checked; toast("Сохранено"); }
+      catch (err) { toast(err.message); e.target.checked = !e.target.checked; }
+    };
+    document.querySelectorAll("[data-kind]").forEach((c) => c.onchange = async () => {
+      try { await api("/api/me/notify-prefs", {method: "PUT", body: JSON.stringify({kinds: {[c.dataset.kind]: c.checked}})}); toast("Сохранено"); }
+      catch (err) { toast(err.message); c.checked = !c.checked; }
+    });
+    $("#setNameSave").onclick = async () => {
+      try { const r = await api("/api/me/profile", {method: "PUT", body: JSON.stringify({display_name: $("#setName").value})}); me.display_name = r.display_name; showProfileChips(); toast("Имя сохранено"); }
+      catch (err) { toast(err.message); }
+    };
+    $("#setAvatarFile").onchange = async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const form = new FormData(); form.append("file", file);
+      try { const r = await api("/api/me/avatar", {method: "POST", body: form}); me.avatar = r.avatar; showProfileChips(); openMenu("settings"); toast("Фото сохранено"); }
+      catch (err) { toast(err.message); }
+    };
+    $("#setAvatarDel").onclick = async () => {
+      try { await api("/api/me/avatar", {method: "DELETE"}); me.avatar = null; showProfileChips(); openMenu("settings"); }
+      catch (err) { toast(err.message); }
+    };
+  }
+  if (key === "employer") return showCompany();
+  if (key === "employer-old") {
+    const st = me?.employer_status;
+    const text = {none: "Работодателям с подтверждённым статусом доверяют больше: у их вакансий появляется значок «Проверенный работодатель». Нужны название и номер регистрации компании.",
+                  pending: "Заявка на проверке модератора. Мы сообщим в Telegram о решении.",
+                  approved: `Статус подтверждён${me?.company_name ? ": " + me.company_name : ""}. На ваших вакансиях виден значок «Проверенный работодатель».`,
+                  rejected: "Заявка отклонена. Можно подать снова с верными данными."}[st] || "";
+    body.innerHTML = `<article class="listing"><p>${esc(text)}</p>
+      ${(st === "none" || st === "rejected") ? '<div class="actions"><button data-own="employer-apply">Подать заявку</button></div>' : ""}</article>`;
+  }
+  if (key === "recent") {
+    let ids = []; try { ids = JSON.parse(localStorage.getItem("recent") || "[]"); } catch (e) { ids = []; }
+    const rows = ids.length ? await api("/api/listings-batch?ids=" + ids.join(","), {quiet: true}) : [];
+    body.innerHTML = rows.length ? rows.map(listingCard).join("") : '<div class="empty">Вы пока ничего не открывали, или объявления уже сняты.</div>';
+  }
+  if (key === "myreviews") {
+    const r = await api("/api/me/reviews");
+    body.innerHTML = `<article class="listing"><h3>${r.reviews ? `<span class="rating">★ ${r.rating}</span> · отзывов: ${r.reviews}` : "Отзывов пока нет"}</h3>
+      <p class="muted">Отзыв можно оставить после переписки по объявлению. Вы вправе один раз публично ответить на каждый.</p></article>` +
+      r.items.map((v) => `<article class="listing review" data-rv="${v.id}"><b class="rating">${"★".repeat(v.rating)}</b> ${esc(v.name)} · ${esc(v.at)}
+        <div class="muted">${esc(v.listing)}</div>${v.tags.map((t) => `<span class="tagchip">${esc(t)}</span>`).join("")}${v.text ? `<p>${esc(v.text)}</p>` : ""}
+        ${v.reply ? `<p class="muted"><b>Ваш ответ:</b> ${esc(v.reply)}</p>` : `<button class="linkbtn" data-replyreview="${v.id}">Ответить</button>`}</article>`).join("");
+  }
+  if (key === "support") await renderSupport(body);
+  if (key === "faq") {
+    const rows = await api("/api/faq", {quiet: true});
+    body.innerHTML = rows.length ? rows.map((r) => `<article class="listing"><details><summary><b>${esc(r.question)}</b></summary><p style="white-space:pre-wrap">${esc(r.answer)}</p></details></article>`).join("")
+      : '<div class="empty">Ответы скоро появятся. Если вопрос срочный, напишите в поддержку.</div>';
+  }
+  if (key === "invite") {
+    await ensureConfig();
+    const r = await api("/api/me/referral");
+    const link = botName ? `https://t.me/${botName}?start=ref_${r.code}` : "";
+    body.innerHTML = `<article class="listing"><p>Отправьте ссылку друзьям: когда они зайдут в KOREA HUB, мы сообщим вам.</p>
+      <p><b>Приглашено: ${r.invited}</b></p>
+      ${link ? `<p class="muted" style="word-break:break-all">${esc(link)}</p><div class="actions"><button id="inviteShare">Поделиться ссылкой</button></div>` : '<p class="muted">Ссылка появится, когда бот будет доступен.</p>'}</article>`;
+    if (link) $("#inviteShare").onclick = () => {
+      if (tg?.openTelegramLink) tg.openTelegramLink("https://t.me/share/url?url=" + encodeURIComponent(link) + "&text=" + encodeURIComponent("KOREA HUB: работа, жильё и объявления в Корее"));
+      else if (navigator.share) navigator.share({url: link}).catch(() => {});
+      else navigator.clipboard?.writeText(link).then(() => toast("Ссылка скопирована"));
+    };
+  }
+  if (key === "resume") await renderMyResume(body);
+  if (key === "cvsearch") await renderCvSearch(body);
+  if (key === "blocks") {
+    const rows = await api("/api/me/blocks");
+    body.innerHTML = rows.length ? rows.map((r) => `
+      <article class="listing"><h3>${esc(r.label)}</h3>
+      <div class="actions"><button data-unblock="${r.id}" class="secondary">Разблокировать</button></div></article>`).join("")
+      : '<div class="empty">Вы никого не блокировали.<br>Заблокировать можно из чата.</div>';
+  }
+  if (key === "help") {
+    body.innerHTML = `<article class="listing"><h3>Как пользоваться</h3>
+      <p>1. Опубликуйте объявление: модератор проверит его обычно в течение суток.</p>
+      <p>2. Общение внутри приложения: телефон указывайте по желанию, только в поле «Контакт».</p>
+      <p>3. Услуги оплачиваются в KH — валюте сайта. KH покупаются за звёзды Telegram (⭐) в разделе «История платежей». Возврат — через поддержку.</p>
+      <p>4. Жалобы на объявления и людей — кнопка «Пожаловаться».</p>
+      <p>5. Объявление живёт 30 дней. За 3 дня и за день мы напомним, продлить можно в один шаг.</p>
+      <p>Вопросы: команда /help в боте.</p></article>`;
+  }
+}
+async function exportMyData() {
+  try {
+    const data = await api("/api/me/export");
+    const blob = new Blob([JSON.stringify(data, null, 2)], {type: "application/json"});
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url; link.download = "korea-hub-moi-dannye.json"; link.click();
+    URL.revokeObjectURL(url);
+  } catch (err) { toast(err.message); }
+}
+async function deleteMyAccount() {
+  if (!(await confirmDialog("Удалить аккаунт? Объявления будут скрыты, избранное удалено. Действие необратимо."))) return;
+  try { await api("/api/me/delete", {method: "POST"}); toast("Аккаунт удалён"); showView("home"); reloadCatalog(); }
+  catch (err) { toast(err.message); }
+}
+
+// ---------- создание и редактирование объявления ----------
+let formKind = "job";
+const KIND_CATEGORY = {job: "job", housing: "housing", goods: "marketplace", car: "marketplace", service: "marketplace"};
+const KIND_TITLE = {job: "Добавить вакансию", housing: "Добавить жильё", goods: "Добавить товар", car: "Добавить автомобиль", service: "Добавить услугу"};
+const KIND_HINT = {job: "Например: Работа на заводе", housing: "Например: Квартира 2 комнаты, Каннам", goods: "Например: iPhone 13, 128 ГБ",
+                   car: "Например: Hyundai Sonata 2018", service: "Например: Перевод документов"};
+const kindOfItem = (x) => x.category !== "marketplace" ? x.category
+  : x.goods_category === "auto" ? "car" : x.goods_category === "services" ? "service" : "goods";
+const needsPhoto = (kind) => ["housing", "goods", "car"].includes(kind);
+function updateFormBlocks() {
+  const category = KIND_CATEGORY[formKind];
+  $("#formCategory").value = category;
+  showBlocks("#listingForm", category);
+  document.querySelectorAll("#listingForm [data-showfor]").forEach((el) => { el.hidden = !el.dataset.showfor.split(",").includes(formKind); });
+  $("#listingForm [name=title]").placeholder = KIND_HINT[formKind];
+  $("#listingForm [name=d_brand]").placeholder = formKind === "car" ? "Например: Hyundai" : "Например: Samsung";
+  $("#photoHint").textContent = needsPhoto(formKind) ? "Нужно хотя бы одно фото: с ним объявлениям доверяют больше." : "Фото по желанию.";
+  $("#amountLabel").textContent = {job: "Зарплата от, ₩", housing: "Аренда в месяц, ₩", goods: "Цена, ₩", car: "Цена, ₩", service: "Стоимость от, ₩"}[formKind];
+}
+$("#priceNego").onchange = () => {
+  const f = $("#listingForm");
+  f.price_amount.disabled = $("#priceNego").checked;
+  if ($("#priceNego").checked) { f.price_amount.value = ""; f.price.value = "Договорная"; }
+  else if (f.price.value === "Договорная") f.price.value = "";
+};
+
+// ---- шаги мастера ----
+const STEP_NAMES = ["Основное", "Детали", "Фото и текст", "Проверка"];
+let wizStep = 1;
+function showStep(n) {
+  wizStep = n;
+  document.querySelectorAll("#listingForm .step").forEach((el) => { el.hidden = Number(el.dataset.step) !== n; });
+  $("#stepsBar").innerHTML = STEP_NAMES.map((t, i) => `<div class="${i + 1 === n ? "on" : i + 1 < n ? "done" : ""}"><i></i>${i + 1}. ${t}</div>`).join("");
+  $("#prevBtn").hidden = n === 1;
+  $("#editSave").hidden = !currentEditId;
+  $("#nextBtn").hidden = n === 4;
+  if (n === 4) renderPreview();
+  $("#scroll").scrollTop = 0;
+  $("#modal .sheet").scrollTop = 0;
+}
+function validateStep(n) {
+  const f = $("#listingForm");
+  if (n === 1) {
+    if (f.title.value.trim().length < 3) { toast("Напишите заголовок (не короче 3 букв)"); return false; }
+    if (!f.region_code.value || !f.district_id.value) { toast("Выберите регион и город или район"); return false; }
+  }
+  if (n === 3 && needsPhoto(formKind) && !formPhotos.length && !formFiles.length) { toast("Добавьте хотя бы одно фото"); return false; }
+  return true;
+}
+$("#nextBtn").onclick = () => { if (validateStep(wizStep)) showStep(wizStep + 1); };
+$("#prevBtn").onclick = () => showStep(wizStep - 1);
+function renderPreview() {
+  const f = $("#listingForm");
+  const data = listingPayload(f);
+  const place = f.district_id.selectedOptions[0]?.text || "";
+  const first = formPhotos[0]?.thumb || formFiles[0]?.preview || null;
+  const item = {...data, id: 0, city: place, cover: first, visas: data.visas || [], details: data.details || {}, promo: null};
+  $("#listingPreview").innerHTML = listingCard(item);
+  renderScore(data);
+}
+// «Насколько хорошее объявление»: полные объявления получают больше откликов; подсказки, что добавить
+function renderScore(data) {
+  const photos = formPhotos.length + formFiles.length;
+  const checks = [
+    [data.title && data.title.length >= 10, 15, "Сделайте заголовок подробнее (от 10 символов)"],
+    [data.description && data.description.length >= 80, 25, "Опишите подробнее (от 80 символов): условия, требования, детали"],
+    [data.price_amount != null, 15, "Укажите цену: объявления без цены открывают реже"],
+    [photos >= 1, 20, "Добавьте фото"],
+    [photos >= 3, 10, "Три и больше фото повышают доверие"],
+    [Boolean(data.contact) || Boolean(data.details && Object.keys(data.details).length), 15, "Заполните дополнительные поля раздела"],
+  ];
+  const score = checks.reduce((a, [ok, w]) => a + (ok ? w : 0), 0);
+  const tips = checks.filter(([ok]) => !ok).map(([, , t]) => `<li>${esc(t)}</li>`).join("");
+  $("#listingScore").innerHTML = `<div class="sc-head"><b>Качество объявления: ${score}%</b></div><div class="fw-bar"><i style="width:${score}%"></i></div>` +
+    (tips ? `<ul>${tips}</ul>` : '<p class="muted">Отлично: такое объявление находят и открывают чаще.</p>');
+}
+
+// ---- черновик на устройстве: форма не пропадает, если закрыть окно ----
+const draftKey = () => "khDraft:" + formKind;
+let draftTimer = null;
+function saveLocalDraft() {
+  if (currentEditId) return;
+  clearTimeout(draftTimer);
+  draftTimer = setTimeout(() => {
+    try {
+      const data = listingPayload($("#listingForm"));
+      if (data.title || data.description) {
+        localStorage.setItem(draftKey(), JSON.stringify({data, step: wizStep}));
+        clearTimeout(saveLocalDraft.srv);   // и на сервер: черновик переживёт смену телефона
+        saveLocalDraft.srv = setTimeout(() => api("/api/me/wizard-draft", {method: "PUT", body: JSON.stringify({data, step: wizStep}), quiet: true}).catch(() => {}), 1500);
+      }
+    } catch (e) { /* форма ещё не готова */ }
+  }, 400);
+}
+$("#listingForm").addEventListener("input", saveLocalDraft);
+$("#listingForm").addEventListener("change", saveLocalDraft);
+function renderPhotos() {
+  const cells = formPhotos.map((p, i) => `<div class="ph" data-ph="${p.id}"><img src="${esc(p.thumb)}" alt="">
+      ${p.status === "pending" ? '<small>на проверке</small>' : ""}${i === 0 ? "<small>обложка</small>" : ""}
+      <button type="button" data-ph-del="${p.id}" aria-label="Удалить">×</button></div>`)
+    .concat(formFiles.map((f, i) => `<div class="ph"><img src="${esc(f.preview)}" alt="">
+      <button type="button" data-file-del="${i}" aria-label="Убрать">×</button></div>`));
+  if (formPhotos.length + formFiles.length < 10) cells.push('<label class="ph add">＋<input type="file" id="photoInput" accept="image/jpeg,image/png,image/webp" multiple hidden></label>');
+  $("#photoPreview").innerHTML = cells.join("");
+  const input = $("#photoInput");
+  if (input) input.onchange = () => {
+    for (const file of input.files) {
+      if (formPhotos.length + formFiles.length >= 10) break;
+      formFiles.push({file, preview: URL.createObjectURL(file)});
+    }
+    renderPhotos();
+  };
+  document.querySelectorAll("[data-file-del]").forEach((b) => b.onclick = () => { formFiles.splice(Number(b.dataset.fileDel), 1); renderPhotos(); });
+  document.querySelectorAll("[data-ph-del]").forEach((b) => b.onclick = () => {
+    const id = Number(b.dataset.phDel);
+    removedPhotos.push(id);
+    formPhotos = formPhotos.filter((p) => p.id !== id);
+    renderPhotos();
+  });
+}
+async function uploadPhotos(listingId) {
+  for (const id of removedPhotos) await api(`/api/listings/${listingId}/photos/${id}`, {method: "DELETE"});
+  for (const f of formFiles) {
+    const body = new FormData();
+    body.append("file", f.file);
+    await api(`/api/listings/${listingId}/photos`, {method: "POST", body});
+  }
+}
+function resetPhotos(list) {
+  formPhotos = list || []; formFiles = []; removedPhotos = [];
+  renderPhotos();
+}
+// От чьего имени подаётся объявление: «+» на главной — от человека; кнопка в кабинете компании — от компании.
+// Никакого выбора в форме нет: откуда пришли, от того и подаём.
+let postAsCompany = null;
+function showPostAs() {
+  const box = $("#postAsBox");
+  box.hidden = !postAsCompany;
+  box.innerHTML = postAsCompany ? `<b>🏢 От компании «${esc(postAsCompany.name)}»</b><span>Объявление появится на странице компании, а не в вашем личном профиле. Откликам и сообщениям ответит команда.</span>` : "";
+}
+let pendingTemplate = null;
+async function openAdd(kind) {
+  if (kind === "dating") return $("#myDatingBtn").onclick();
+  if (me?.blocked) { toast("Аккаунт ограничен" + (me.block_reason ? ": " + me.block_reason : "")); return; }
+  await loadFields();
+  currentEditId = null;
+  formKind = kind;
+  const f = $("#listingForm");
+  f.reset();
+  f.category.disabled = false;
+  f.price_amount.disabled = false;
+  await setGeo("#formGeo", me?.region_code || "", me?.district_id || "");
+  $("#modalTitle").textContent = KIND_TITLE[kind];
+  showPostAs();
+  resetPhotos([]);
+  updateFormBlocks();
+  // Незаконченный черновик на этом устройстве
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(draftKey()) || "null"); } catch (e) { saved = null; }
+  if (pendingTemplate) saved = null;
+  if (postAsCompany) saved = null;
+  else if (!saved) {
+    try { const sd = await api("/api/me/wizard-draft", {quiet: true}); if (sd?.data && (sd.data.title || sd.data.description)) saved = sd; } catch (e) { /* без черновика */ }
+  }
+  $("#addSheet").classList.add("hidden");
+  $("#modal").classList.remove("hidden");
+  showStep(1);
+  if (pendingTemplate) { fillForm(pendingTemplate); updateFormBlocks(); pendingTemplate = null; toast("Шаблон подставлен: проверьте и дополните. Фото добавьте заново"); return; }
+  if (saved?.data && (await confirmDialog("Продолжить незаконченное объявление?"))) {
+    fillForm(saved.data);
+    updateFormBlocks();
+    toast("Фото нужно добавить заново");
+  } else if (saved) { localStorage.removeItem(draftKey()); api("/api/me/wizard-draft", {method: "DELETE", quiet: true}).catch(() => {}); }
+}
+function fillForm(item) {
+  const f = $("#listingForm");
+  const d = item.details || {};
+  for (const k of ["title", "price", "description", "contact"]) f[k].value = item[k] || "";
+  f.price_amount.value = item.price_amount ?? "";
+  for (const k of ["salary_period", "employment", "schedule", "housing_type", "goods_category", "condition"]) f[k].value = item[k] || "";
+  for (const k of ["deposit", "area_m2", "rooms"]) f[k].value = item[k] ?? "";
+  for (const k of ["housing_provided", "meals_provided", "pets_allowed", "furnished", "negotiable"]) f[k].checked = Boolean(item[k]);
+  for (const k of ["company", "position", "salary_max", "vacancies", "start_date", "maintenance_fee", "floor",
+                   "available_from", "contract_term", "station", "brand", "model", "year", "mileage_km", "service_area",
+                   "experience_years"]) f["d_" + k].value = d[k] ?? "";
+  for (const k of ["transport", "experience", "delivery"]) f["d_" + k].checked = Boolean(d[k]);
+  document.querySelectorAll("#listingForm [data-visas] input").forEach((c) => { c.checked = (item.visas || []).includes(c.value); });
+  $("#priceNego").checked = item.price === "Договорная" && item.price_amount == null;
+  f.price_amount.disabled = $("#priceNego").checked;
+}
+async function openEdit(item) {
+  await loadFields();
+  currentEditId = item.id;
+  const f = $("#listingForm");
+  f.reset();
+  formKind = kindOfItem(item);
+  f.category.value = item.category;
+  f.category.disabled = true;  // раздел менять нельзя
+  await setGeo("#formGeo", item.region_code || "", item.district_id || "");
+  fillForm(item);
+  $("#modalTitle").textContent = "Изменить объявление";
+  resetPhotos((item.photos || []).filter((p) => p.status !== "removal"));
+  updateFormBlocks();
+  $("#modal").classList.remove("hidden");
+  showStep(1);
+}
+function listingPayload(f) {
+  const v = (n) => f[n].value.trim();
+  const num = (n) => (v(n) === "" ? undefined : Number(v(n)));
+  const category = KIND_CATEGORY[formKind] || f.category.value;
+  const data = {category, title: v("title"), region_code: f.region_code.value, price: v("price"),
+                description: v("description"), contact: v("contact"), price_amount: $("#priceNego").checked ? undefined : num("price_amount")};
+  if (f.district_id.value) data.district_id = Number(f.district_id.value);
+  let details = {};
+  if (category === "job") {
+    Object.assign(data, {salary_period: v("salary_period") || undefined, employment: v("employment") || undefined,
+      schedule: v("schedule") || undefined, housing_provided: f.housing_provided.checked, meals_provided: f.meals_provided.checked,
+      visas: [...document.querySelectorAll("#listingForm [data-visas] input:checked")].map((c) => c.value)});
+    details = {company: v("d_company"), position: v("d_position"), salary_max: num("d_salary_max"), vacancies: num("d_vacancies"),
+               start_date: v("d_start_date"), transport: f.d_transport.checked, experience: f.d_experience.checked};
+  } else if (category === "housing") {
+    Object.assign(data, {housing_type: v("housing_type") || undefined, deposit: num("deposit"), area_m2: num("area_m2"),
+      rooms: num("rooms"), pets_allowed: f.pets_allowed.checked, furnished: f.furnished.checked});
+    details = {maintenance_fee: num("d_maintenance_fee"), floor: num("d_floor"), available_from: v("d_available_from"),
+               contract_term: v("d_contract_term"), station: v("d_station")};
+  } else {
+    const goodsCategory = formKind === "car" ? "auto" : formKind === "service" ? "services" : (v("goods_category") || undefined);
+    Object.assign(data, {goods_category: goodsCategory, negotiable: f.negotiable.checked});
+    if (formKind !== "service") data.condition = v("condition") || undefined;
+    details = formKind === "service"
+      ? {service_area: v("d_service_area"), experience_years: num("d_experience_years")}
+      : {brand: v("d_brand"), delivery: f.d_delivery.checked, ...(formKind === "car"
+          ? {model: v("d_model"), year: num("d_year"), mileage_km: num("d_mileage_km")} : {})};
+  }
+  data.details = Object.fromEntries(Object.entries(details).filter(([, x]) => x !== undefined && x !== ""));
+  if (!currentEditId && postAsCompany) data.company_id = postAsCompany.id;
+  return Object.fromEntries(Object.entries(data).filter(([, x]) => x !== undefined));
+}
+async function saveListing(send) {
+  const f = $("#listingForm");
+  const data = listingPayload(f);
+  if (send) {
+    for (const n of [1, 3]) if (!validateStep(n)) { showStep(n); return; }
+    if (!$("#rulesOk").checked) { toast("Отметьте, что объявление правдивое и без предоплат"); return; }
+  } else if (data.title.length < 3 || !data.district_id) { toast("Для черновика укажите заголовок и город"); return; }
+  try {
+    let id = currentEditId;
+    const wasDraft = id ? ownItems[id]?.status === "draft" : true;
+    const wasLive = id ? ownItems[id]?.status === "approved" : false;
+    if (id) {
+      delete data.category;
+      await api(`/api/listings/${id}`, {method: "PUT", body: JSON.stringify(data)});
+    } else {
+      data.draft = true;  // сначала черновик, чтобы загрузить фото; потом отправим на проверку
+      id = (await api("/api/listings", {method: "POST", body: JSON.stringify(data)})).id;
+    }
+    await uploadPhotos(id);
+    if (send && wasDraft) await api(`/api/listings/${id}/submit`, {method: "POST"});
+    const wasEdit = Boolean(currentEditId);
+    if (!wasEdit) { localStorage.removeItem(draftKey()); api("/api/me/wizard-draft", {method: "DELETE", quiet: true}).catch(() => {}); }
+    currentEditId = null;
+    postAsCompany = null;
+    $("#modal").classList.add("hidden");
+    homeLoaded = false;
+    if (send) {
+      $("#doneTitle").textContent = wasLive ? "Изменения отправлены" : "Отправлено на проверку";
+      $("#doneText").textContent = wasLive ? "Пока модератор проверяет, остаётся прежняя версия."
+        : "Мы сообщим в Telegram, когда модератор примет решение. Объявление будет показано 30 дней.";
+      $("#doneSheet").classList.remove("hidden");
+    } else { toast("Черновик сохранён: Профиль → Мои объявления → Черновики"); showView("profile"); showView("mine", {push: true}); }
+    loadProfile();
+  } catch (err) { toast(err.message); }
+}
+$("#listingForm").onsubmit = (e) => { e.preventDefault(); if (wizStep < 4) { $("#nextBtn").onclick(); return; } saveListing(true); };
+$("#draftBtn").onclick = () => saveListing(false);
+$("#doneMine").onclick = () => { $("#doneSheet").classList.add("hidden"); showView("profile"); showView("mine", {push: true}); };
+$("#doneMore").onclick = () => { postAsCompany = null; $("#doneSheet").classList.add("hidden"); $("#addSheet").classList.remove("hidden"); };
+$("#closeModal").onclick = () => { postAsCompany = null; $("#modal").classList.add("hidden"); };
+$("#addBtn").onclick = async () => { postAsCompany = null; if (await requireConsent()) { $("#addSheet").classList.remove("hidden"); loadTemplates(); } };
+$("#closeAdd").onclick = () => { postAsCompany = null; $("#addSheet").classList.add("hidden"); };
+document.querySelectorAll("[data-add]").forEach((b) => b.onclick = () => openAdd(b.dataset.add));
+
+// ---------- сообщество и гид ----------
+let groupKind = "nation";
+let groupItems = [];
+function renderGroups() {
+  const items = groupItems.filter((g) => (g.kind || "nation") === groupKind);
+  $("#groups").innerHTML = items.length ? items.map((g) => {
+    const members = g.members_count ? `<span class="members">${new Intl.NumberFormat("ru-RU").format(g.members_count)} участников</span>` : "";
+    const inner = `<span class="gflag">${esc(g.flag)}</span><span class="gtext"><b>${esc(g.name)}</b><small>${esc(g.description)}</small>${members ? "<br>" + members : ""}</span><span class="chev">›</span>`;
+    return g.telegram_link
+      ? `<a class="grow" data-tglink href="${esc(g.telegram_link)}" target="_blank" rel="noopener">${inner}</a>`
+      : `<div class="grow off">${inner}</div>`;
+  }).join("") : '<div class="empty">Групп пока нет. Скоро добавим.</div>';
+}
+document.querySelectorAll("#groupTabs .chip").forEach((chip) => chip.addEventListener("click", () => {
+  groupKind = chip.dataset.kind;
+  document.querySelectorAll("#groupTabs .chip").forEach((c) => c.classList.toggle("active", c === chip));
+  renderGroups();
+}));
+async function loadGroups() {
+  try { groupItems = await api("/api/groups"); renderGroups(); }
+  catch (e) { $("#groups").innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+let guideTimer = null;
+let guideSearchRequest = 0;
+const articleRow = (a) => `<article class="listing convo" data-article="${a.id}"><h3>${esc(a.title)}</h3>
+  <p class="muted">${esc(SECTIONS[a.section] || "")}${a.saved ? " · ★ в закладках" : ""}</p></article>`;
+async function loadGuide() {
+  try {
+    const items = await api("/api/articles");
+    $("#guideSections").innerHTML = Object.entries(SECTIONS).map(([key, title]) => {
+      const count = items.filter((a) => a.section === key).length;
+      return `<article class="listing convo" data-section="${key}"><h3>${esc(title)}</h3>
+        <p>${count ? count + " статей" : "Материалы готовятся: статьи появятся после проверки по официальным источникам"}</p></article>`;
+    }).join("");
+    let marks = [];
+    try { marks = await api("/api/me/bookmarks", {quiet: true}); } catch (e) { /* без входа закладок нет */ }
+    $("#guideMarks").innerHTML = marks.length ? `<h4 class="grp">Мои закладки</h4><div class="listings">${marks.map(articleRow).join("")}</div>` : "";
+  } catch (e) { $("#guideSections").innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+$("#guideSearch").addEventListener("input", () => {
+  clearTimeout(guideTimer);
+  const requestId = ++guideSearchRequest;
+  const q = $("#guideSearch").value.trim();
+  const box = $("#guideFound");
+  if (!q) { box.innerHTML = ""; $("#guideSections").hidden = false; return; }
+  $("#guideSections").hidden = true;
+  guideTimer = setTimeout(async () => {
+    try {
+      const rows = await api("/api/articles?q=" + encodeURIComponent(q), {quiet: true});
+      if (requestId !== guideSearchRequest || q !== $("#guideSearch").value.trim()) return;
+      box.innerHTML = rows.length ? rows.map(articleRow).join("") : '<div class="empty">Ничего не найдено в проверенных статьях</div>';
+    } catch (e) {
+      if (requestId !== guideSearchRequest || q !== $("#guideSearch").value.trim()) return;
+      box.innerHTML = `<div class="empty">${esc(e.message)}</div>`;
+    }
+  }, 300);
+});
+async function openSection(key) {
+  const items = (await api("/api/articles")).filter((a) => a.section === key);
+  $("#articleTitle").textContent = SECTIONS[key] || "Раздел";
+  $("#articleBody").innerHTML = items.length ? items.map((a) => `
+    <article class="listing convo" data-article="${a.id}"><h3>${esc(a.title)}</h3>
+    <p class="muted">Проверено: ${esc(a.checked_at ? a.checked_at.slice(0, 10) : "—")}</p></article>`).join("")
+    : '<div class="empty">Статьи в этом разделе пока готовятся.</div>';
+  showView("article", {push: true});
+}
+let currentArticle = null;
+async function openArticle(id) {
+  const a = await api(`/api/articles/${id}`);
+  currentArticle = a.id;
+  let saved = false;
+  try { saved = (await api("/api/me/bookmarks", {quiet: true})).some((x) => x.id === a.id); } catch (e) { /* без входа закладок нет */ }
+  $("#articleTitle").innerHTML = `${esc(a.title)} <button class="mark" id="markBtn" aria-label="В закладки">${saved ? "★" : "☆"}</button>`;
+  $("#markBtn").onclick = async () => {
+    try { const r = await api(`/api/articles/${currentArticle}/bookmark`, {method: "POST"}); $("#markBtn").textContent = r.saved ? "★" : "☆"; toast(r.saved ? "Добавлено в закладки" : "Убрано из закладок"); }
+    catch (err) { toast(err.message); }
+  };
+  $("#articleBody").innerHTML = `<article class="listing"><p class="muted">Источник: <a href="${esc(a.source_url)}" target="_blank" rel="noopener">${esc(a.source_url)}</a></p>
+    <p>${esc(a.body).replace(/\n/g, "<br>")}</p><p class="muted">Дата проверки: ${esc((a.checked_at || "").slice(0, 10))}</p>${a.stale ? '<p class="muted">⚠️ Материал проверялся больше полугода назад: правила могли измениться, сверьтесь с источником.</p>' : ""}</article>`;
+  $("#scroll").scrollTop = 0;
+}
+$("#articleBack").onclick = goBack;
+$("#detailBack").onclick = goBack;
+
+// ---------- продвижение (ТЗ № 2): оплата Telegram Stars ----------
+let servicesFor = null;     // объявление, для которого открыта витрина
+let promoCode = "";        // применённый промокод
+let promoPrices = {};      // service code -> цена со скидкой
+const SAMPLE = {bump: ["⬆ Поднято", ""], vip: ["VIP", ""], pin: ["📌 Закреплено", ""], highlight: ["★ Выделено", "hl"], autobump: ["🔁 Автоподнятие", ""], pack: ["📦 Максимум: VIP, закрепление, выделение, автоподнятие", "hl"]};
+function renderServices(data) {
+  $("#serviceFor").textContent = "Для объявления: " + data.title;
+  const balNote = data.balance ? `<p class="muted">Баланс ${data.balance_of === "company" ? "компании" : "личный"}: ${data.balance} KH</p>` : "";
+  const gifts = balNote + (data.promos || []).map((x) => `<article class="listing hl"><h3>🎁 ${esc(x.title)}</h3><p>${esc(x.service)}, ${x.days} дн. бесплатно</p>
+    <div class="actions"><button data-lclaim="${x.id}">Получить бесплатно</button></div></article>`).join("");
+  $("#serviceList").innerHTML = gifts + data.options.map((o) => {
+    const price = promoPrices[o.code] != null && promoPrices[o.code] !== o.stars
+      ? `<s>${o.stars}</s>${promoPrices[o.code]} KH` : `${o.stars} KH`;
+    const [badge, cls] = SAMPLE[o.kind] || ["", ""];
+    const until = o.active_until ? ` до ${fmtDate(o.active_until).split(",")[0]}` : "";
+    return `<article class="listing svc"><div class="svc-head"><h3>${esc(o.kind === "pack" ? "Пакет «Максимум»" : o.title)}</h3><span class="svc-price">${price}</span></div>
+      <p>${esc(o.what)}${o.days > 1 ? " · " + o.days + " дн." : ""}</p>
+      <div class="sample ${cls}"><span class="promo ${o.kind}" style="margin:0">${badge}</span> так выглядит в ленте</div>
+      ${o.available ? `<div class="actions"><button data-buy="${esc(o.code)}" data-listing="${servicesFor}">Оплатить ${promoPrices[o.code] ?? o.stars} KH</button>${data.balance > 0 && data.can_pay !== false ? `<button class="secondary" data-buy="${esc(o.code)}" data-listing="${servicesFor}" data-bal="1">С баланса</button>` : ""}</div>`
+        : `<p class="why">${esc(o.reason)}${until}</p>`}</article>`;
+  }).join("") || '<div class="empty">Для этого раздела услуг пока нет</div>';
+}
+let servicesData = null;
+async function openServices(listingId, category) {
+  servicesFor = listingId;
+  promoCode = ""; promoPrices = {};
+  $("#promoInput").value = ""; $("#promoNote").textContent = "";
+  servicesData = await api(`/api/listings/${listingId}/services`);
+  servicesData.promos = (await api("/api/promos", {quiet: true}).catch(() => [])).filter((x) => x.needs_listing && x.can_claim
+    && servicesData.options.some((o) => o.code === x.service_code));
+  renderServices(servicesData);
+  $("#services").classList.remove("hidden");
+}
+$("#promoApply").onclick = async () => {
+  const code = $("#promoInput").value.trim();
+  if (!code || !servicesData) return;
+  promoPrices = {};
+  let applied = "";
+  for (const o of servicesData.options.filter((x) => x.available)) {
+    try { const r = await api(`/api/promo/check?code=${encodeURIComponent(code)}&service_code=${encodeURIComponent(o.code)}`, {quiet: true}); promoPrices[o.code] = r.stars; applied = r.code; }
+    catch (e) { $("#promoNote").textContent = e.message; promoCode = ""; renderServices(servicesData); return; }
+  }
+  promoCode = applied;
+  $("#promoNote").textContent = applied ? `✔ Промокод ${applied} применён: цены ниже уже со скидкой` : "";
+  renderServices(servicesData);
+};
+// Оплата Stars. Внутри Telegram с версией 6.1+ счёт открывается окном; на сайте и в старом Telegram метод openInvoice
+// бросает WebAppMethodUnsupported, поэтому там счёт открывается ссылкой в приложении Telegram, а страница ждёт оплату сама.
+let payPoll = null;
+async function openPay(url, paymentId, done) {
+  clearInterval(payPoll);
+  const native = Boolean(tg?.initData) && typeof tg?.openInvoice === "function" && (tg.isVersionAtLeast ? tg.isVersionAtLeast("6.1") : false);
+  if (native) {
+    try {
+      tg.openInvoice(url, (st) => { toast(st === "paid" ? "Оплата прошла" : st === "failed" ? "Оплата не прошла" : "Оплата отменена"); done(st); });
+      return;
+    } catch (e) { /* ниже: откроем ссылкой */ }
+  }
+  window.open(url, "_blank");
+  toast("Оплатите в Telegram и вернитесь сюда: страница обновится сама");
+  const started = Date.now();
+  payPoll = setInterval(async () => {
+    if (Date.now() - started > 180000) { clearInterval(payPoll); return; }
+    try {
+      const rows = await api("/api/me/payments", {quiet: true});
+      const p = rows.find((x) => x.id === paymentId);
+      if (p && p.status !== "pending") { clearInterval(payPoll); toast(p.status === "paid" ? "Оплата прошла" : "Оплата не прошла"); done(p.status); }
+    } catch (e) { /* подождём ещё */ }
+  }, 3000);
+}
+async function buy(listingId, code, useBalance = false) {
+  const r = await api("/api/payments/invoice", {method: "POST", body: JSON.stringify({listing_id: Number(listingId), service_code: code, promo_code: promoCode, use_balance: useBalance})});
+  if (r.paid) { toast("Готово: услуга включена"); $("#services").classList.add("hidden"); loadProfile(); return; }
+  openPay(r.invoice_url, r.payment_id, () => { $("#services").classList.add("hidden"); loadProfile(); });
+}
+$("#closeServices").onclick = () => $("#services").classList.add("hidden");
+
+// ---------- знакомства ----------
+let datingTab = "all";
+let pendingSelfie = null;
+let datingActive = false, dsCurrent = null;
+function openDatingSheet(id, opts = {}) {
+  const p = window.__dating?.[id];
+  if (!p) return;
+  dsCurrent = p;
+  $("#dsTags").innerHTML = dTags(p);
+  $("#dsActions").hidden = Boolean(opts.preview);
+  $("#dsPreviewNote").hidden = !opts.preview;
+  $("#dsName").textContent = (p.name ? p.name + ", " : "") + p.age + (p.verified ? " ✔" : "");
+  $("#dsPhoto").src = p.photo_url;
+  $("#dsMeta").textContent = "📍 " + p.city + (p.verified ? " · анкета подтверждена" : "");
+  $("#dsBio").textContent = p.bio || "О себе ничего не написано";
+  $("#dsheet").classList.remove("hidden");
+}
+$("#dsClose").onclick = () => $("#dsheet").classList.add("hidden");
+$("#dsheet").addEventListener("click", (e) => { if (e.target.id === "dsheet") $("#dsheet").classList.add("hidden"); });
+$("#dsLike").onclick = async () => {
+  if (!dsCurrent || !(await requireConsent())) return;
+  try {
+    const r = await api(`/api/dating/${dsCurrent.id}/like`, {method: "POST"});
+    $("#dsheet").classList.add("hidden");
+    if (r.mutual) { toast("Взаимная симпатия! Можно писать"); openChat(r.conversation_id, dsCurrent.name || "Знакомство"); }
+    else { toast("Отправлено"); document.querySelector(`[data-profile="${dsCurrent.id}"]`)?.remove(); }
+  } catch (err) { toast(err.message); }
+};
+$("#dsReport").onclick = async () => {
+  if (!dsCurrent || !(await requireConsent())) return;
+  const reason = await askReason();
+  if (!reason) return;
+  try { await api("/api/reports", {method: "POST", body: JSON.stringify({target_type: "dating", target_id: String(dsCurrent.id), reason})}); toast("Жалоба отправлена. Спасибо!"); $("#dsheet").classList.add("hidden"); }
+  catch (err) { toast(err.message); }
+};
+document.addEventListener("click", (e) => {
+  const card = e.target.closest("#datingList .dcard");
+  if (card && !e.target.closest("button")) openDatingSheet(card.dataset.profile);
+});
+$("#dActive").onclick = () => { datingActive = !datingActive; $("#dActive").classList.toggle("on", datingActive); loadDating(); };
+let datingFilters = {};
+async function loadDating() {
+  const box = $("#datingList");
+  box.innerHTML = '<div class="skeleton"></div>';
+  await loadGeo();
+  const reg = $("#dRegion");
+  if (!reg.options.length) reg.innerHTML = '<option value="">Вся Корея</option>' + (geoData || []).map((r) => `<option value="${r.code}">${esc(r.name)}</option>`).join("");
+  const guest = isGuest();                      // гость может смотреть ленту, остальное закрыто
+  $("#dTabs").hidden = guest; $("#myDatingBtn").hidden = guest;
+  if (guest) datingTab = "all";
+  const params = new URLSearchParams({mode: datingTab});
+  if (datingGender) params.set("gender", datingGender);
+  const age = $("#dAge").value;
+  if (age) { const [lo, hi] = age.split("-"); params.set("age_min", lo); params.set("age_max", hi); }
+  if (reg.value) params.set("region", reg.value);
+  if (datingActive) params.set("active", "true");
+  for (const [k, v] of Object.entries(datingFilters)) if (v) params.set(k, v);
+  document.querySelectorAll("#dTabs [data-dtab]").forEach((b) => b.classList.toggle("active", b.dataset.dtab === datingTab));
+  const n = Object.values(datingFilters).filter(Boolean).length;
+  $("#dMoreN").textContent = n ? `(${n})` : "";
+  if (!guest) api("/api/dating/counts", {quiet: true}).then((c) => { $("#dnToMe").textContent = c.to_me ? `(${c.to_me})` : ""; $("#dnFromMe").textContent = c.from_me ? `(${c.from_me})` : ""; $("#dnMutual").textContent = c.mutual ? `(${c.mutual})` : ""; }).catch(() => {});
+  try {
+    const items = await api("/api/dating?" + params, {quiet: true});
+    window.__dating = Object.fromEntries(items.map((p) => [p.id, p]));
+    const empty = {to_me: "Пока никто не поставил симпатию. Заполните анкету и загрузите фото: так вас найдут быстрее.",
+      from_me: "Вы пока никому не симпатизировали. Откройте «Все» и нажмите ♡.", mutual: "Взаимных симпатий пока нет. Они появятся, когда человек ответит вам тем же.",
+      all: "Анкет по этим условиям нет. Измените возраст, регион или фильтры."}[datingTab];
+    box.innerHTML = items.length ? items.map((p) => `
+      <article class="dcard" data-profile="${p.id}"${p.conversation_id ? ` data-conv="${p.conversation_id}"` : ""}>
+        <img src="${esc(p.photo_url)}" alt="" loading="lazy">
+        ${datingTab === "mutual" ? '<button class="dh" data-act="dchat" aria-label="Написать">💬</button>' : datingTab === "from_me" ? (p.can_cancel ? '<button class="dh" data-act="unlike" aria-label="Отменить симпатию">↩</button>' : "") : '<button class="dh" data-act="like" aria-label="Симпатизировать">♡</button>'}
+        <div class="dbadges">${p.vip ? `<span>${p.vip_free ? "🎁 VIP" : "VIP"}</span>` : ""}${p.super ? "<span>⭐</span>" : ""}${p.private_photos ? `<span>🔒${p.private_photos}</span>` : ""}</div>
+        <div class="dinfo"><b>${p.name ? esc(p.name) + ", " : ""}${p.age}${p.name ? "" : " лет"}${p.verified ? " ✔" : ""}</b><span>📍 ${esc(p.city)}${p.age_confirmed ? "" : " · возраст не подтверждён"}</span></div>
+      </article>`).join("")
+      : `<div class="empty">${empty}${datingTab === "all" && (datingActive || n || datingGender) ? '<br><button class="link" id="dReset">Сбросить фильтры</button>' : ""}</div>`;
+    if (guest && items.length) box.insertAdjacentHTML("afterbegin", '<div class="guestnote">Анкеты можно смотреть без входа. Чтобы поставить симпатию, написать и создать свою анкету, <button class="link" data-guest-login>войдите через Telegram</button>.</div>');
+  } catch (e) { box.innerHTML = `<div class="empty">${esc(e.message)}<br><button class="link" id="dRetry">Повторить</button></div>`; }
+}
+document.addEventListener("click", (e) => {
+  if (e.target.id === "dRetry") loadDating();
+  if (e.target.id === "dReset") { datingFilters = {}; datingActive = false; datingGender = ""; $("#dActive").classList.remove("on"); loadDating(); }
+  const tab = e.target.closest("#dTabs [data-dtab]");
+  if (tab) { datingTab = tab.dataset.dtab; loadDating(); }
+});
+$("#dAge").onchange = () => { datingTab = "all"; loadDating(); };
+$("#dRegion").onchange = () => { datingTab = "all"; loadDating(); };
+$("#dMore").onclick = () => {
+  const f = $("#dfForm");
+  for (const el of f.elements) if (el.name) { if (el.type === "checkbox") el.checked = Boolean(datingFilters[el.name]); else el.value = datingFilters[el.name] || ""; }
+  if (fieldDefs?.visas && $("#dfVisa").options.length < 2) $("#dfVisa").insertAdjacentHTML("beforeend", fieldDefs.visas.map((v) => `<option value="${v.value}">${v.label}</option>`).join(""));
+  $("#dfSheet").classList.remove("hidden");
+};
+$("#dfClose").onclick = () => $("#dfSheet").classList.add("hidden");
+$("#dfReset").onclick = () => { datingFilters = {}; $("#dfSheet").classList.add("hidden"); loadDating(); };
+$("#dfForm").onsubmit = (e) => {
+  e.preventDefault();
+  datingFilters = {};
+  for (const el of e.target.elements) if (el.name) { const v = el.type === "checkbox" ? (el.checked ? "true" : "") : el.value; if (v) datingFilters[el.name] = v; }
+  $("#dfSheet").classList.add("hidden"); datingTab = "all"; loadDating();
+};
+document.querySelectorAll("#datingChips .chip").forEach((chip) => chip.addEventListener("click", () => {
+  datingGender = chip.dataset.gender;
+  datingTab = "all";
+  document.querySelectorAll("#datingChips .chip").forEach((c) => c.classList.toggle("active", c === chip));
+  loadDating();
+}));
+async function openMyDating() {
+  if (!(await requireConsent())) return;
+  const f = $("#datingForm");
+  await setGeo("#datingGeo", me?.region_code || "", me?.district_id || "");
+  await loadFields();
+  if (fieldDefs?.visas && $("#dpVisa").options.length < 2) $("#dpVisa").insertAdjacentHTML("beforeend", fieldDefs.visas.map((v) => `<option value="${v.value}">${v.label}</option>`).join(""));
+  try {
+    const mine = await api("/api/dating/me");
+    if (mine) {
+      f.birth_date.value = mine.birth_date || "";
+      $("#ageNote").textContent = mine.age_confirmed ? "Возраст подтверждён селфи." : "Возраст не подтверждён: в анкете будет пометка. Пройдите подтверждение селфи.";
+      f.gender.value = mine.gender; f.seeking.value = mine.seeking || ""; f.goal.value = mine.goal || ""; f.height.value = mine.height || ""; f.visa.value = mine.visa || "";
+      f.first_name.value = mine.name || ""; f.bio.value = mine.bio || "";
+      await setGeo("#datingGeo", mine.region_code || "", mine.district_id || "");
+    }
+  } catch (e) { toast(e.message); }
+  $("#addSheet").classList.add("hidden");
+  $("#datingModal").classList.remove("hidden");
+}
+$("#myDatingBtn").onclick = async () => {
+  if (!(await requireConsent())) return;
+  const mine = await api("/api/dating/me", {quiet: true}).catch(() => null);
+  if (mine) { $("#addSheet")?.classList.add("hidden"); return showDatingCabinet(); }
+  openMyDating();
+};
+$("#datingPause").onclick = async () => {
+  try { const r = await api("/api/dating/pause", {method: "POST", body: JSON.stringify({on: $("#datingPause").dataset.on === "1"})}); toast(r.paused ? "Анкета на паузе: её никто не видит" : "Анкета снова в поиске"); $("#datingModal").classList.add("hidden"); loadDating(); }
+  catch (err) { toast(err.message); }
+};
+$("#closeDating").onclick = () => $("#datingModal").classList.add("hidden");
+$("#datingForm").onsubmit = async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  try {
+    await api("/api/dating/profile", {method: "PUT", body: JSON.stringify({
+      birth_date: f.birth_date.value, gender: f.gender.value, seeking: f.seeking.value, goal: f.goal.value,
+      height: f.height.value ? Number(f.height.value) : null, visa: f.visa.value, region_code: f.region_code.value,
+      district_id: f.district_id.value ? Number(f.district_id.value) : null, bio: f.bio.value.trim(),
+      first_name: f.first_name.value.trim()})});
+    if (f.selfie.files[0]) pendingSelfie = f.selfie.files[0];
+    if (f.photo.files[0]) {
+      const data = new FormData();
+      data.append("file", f.photo.files[0]);
+      const headers = inTelegram ? {"X-Telegram-Init-Data": tg.initData}
+        : {"X-Web-Session": localStorage.getItem("webSession") || ""};
+      const r = await fetch("/api/dating/photo", {method: "POST", body: data, headers});
+      if (!r.ok) throw new Error((await r.json()).detail || "Не удалось загрузить фото");
+    }
+    if (pendingSelfie) {
+      const data = new FormData();
+      data.append("file", pendingSelfie);
+      const headers = inTelegram ? {"X-Telegram-Init-Data": tg.initData} : {"X-Web-Session": localStorage.getItem("webSession") || ""};
+      const r = await fetch("/api/dating/selfie", {method: "POST", body: data, headers});
+      pendingSelfie = null;
+      if (!r.ok) throw new Error((await r.json()).detail || "Не удалось загрузить фото-подтверждение");
+    }
+    $("#datingModal").classList.add("hidden");
+    toast("Анкета отправлена на проверку");
+    showDatingCabinet();
+  } catch (err) { toast(err.message); }
+};
+
+// ---------- кабинет знакомств ----------
+const D_GOAL = {friendship: "Дружба", relationship: "Отношения", marriage: "Брак", chat: "Общение"};
+const D_SEEK = {f: "Ищет женщину", m: "Ищет мужчину", any: "Ищет: не важно"};
+const D_ICON = {bump: "🚀", vip: "👑", super: "⭐", invisible: "👻", viewers: "👀"};
+const D_SHORT = {bump: "Поднять", vip: "VIP", super: "Супер-симпатия", invisible: "Невидимка", viewers: "Кто смотрел"};
+const untilText = (iso) => (iso ? "до " + fmtDate(iso).slice(0, 10) : "");
+let dcabTab = "overview";
+function dTags(p) {
+  const visa = (fieldDefs?.visas || []).find((v) => v.value === p.visa)?.label;
+  return [p.vip ? (p.vip_free ? "🎁 VIP" : "👑 VIP") : "", D_GOAL[p.goal] ? "🎯 " + D_GOAL[p.goal] : "", D_SEEK[p.seeking] || "",
+    p.height ? "📏 " + p.height + " см" : "", visa ? "🛂 " + visa : "", p.private_photos ? "🔒 приватных фото: " + p.private_photos : ""]
+    .filter(Boolean).map((t) => `<span class="dtag">${esc(t)}</span>`).join("");
+}
+function dCompleteness(m) {
+  const items = [["Фото в анкете", m.has_photo], ["Подтверждение селфи", m.selfie_status === "approved"], ["Рост", Boolean(m.height)],
+    ["Цель знакомства", Boolean(m.goal)], ["Кого ищу", Boolean(m.seeking)], ["О себе (от 40 знаков)", (m.bio || "").length >= 40],
+    ["Визовый статус", Boolean(m.visa)]];
+  return {items, pct: Math.round(100 * items.filter(([, ok]) => ok).length / items.length)};
+}
+// «Как меня видят»: та же карточка, что у других людей, но без кнопок «нравится» и «пожаловаться»
+function previewMyProfile(m) {
+  // Не окно поверх экрана, а страница с большой кнопкой «Назад»: из неё всегда можно выйти
+  const body = $("#subBody");
+  SUB_TITLES.dpreview = "Как меня видят";
+  $("#subTitle").textContent = SUB_TITLES.dpreview;
+  body.innerHTML = `<div class="dprev">
+    <button class="dprev-back" id="dPrevBack" type="button">← Назад к моей анкете</button>
+    <p class="dsnote">👁 Так вашу анкету видят другие люди. Контактов в ней нет.</p>
+    <article class="dprev-card">
+      ${m.has_photo ? `<img src="${esc(m.photo_url)}?v=${Date.now() % 100000}" alt="">` : '<div class="dprev-nophoto">👤</div>'}
+      <div class="dprev-body"><h2>${esc(m.name || "Без имени")}, ${m.age}${m.age_confirmed ? " ✔" : ""}</h2>
+        <p class="muted">📍 ${esc(m.city || "—")}${m.age_confirmed ? " · анкета подтверждена" : ""}</p>
+        <div class="dtags">${dTags(m)}</div>
+        <p class="dsbio">${esc(m.bio || "О себе ничего не написано")}</p>
+        <div class="actions"><button type="button" disabled>♡ Нравится</button><button type="button" class="secondary" disabled>⚑ Пожаловаться</button></div>
+      </div></article></div>`;
+  $("#dPrevBack").onclick = () => showDatingCabinet();
+  $("#scroll").scrollTo({top: 0});
+}
+async function showDatingCabinet() {
+  SUB_TITLES.dcabinet = "Моя анкета";
+  openSub("dcabinet");
+  $("#datingModal")?.classList.add("hidden");
+  const body = $("#subBody");
+  body.innerHTML = '<div class="skeleton"></div>';
+  const mine = await api("/api/dating/me").catch(() => null);
+  if (!mine) { body.innerHTML = '<div class="empty">Анкеты пока нет.<br><button id="dCreate">Создать анкету</button></div>'; $("#dCreate").onclick = openMyDating; return; }
+  let svc = {options: [], balance: 0}, promos = [], st = {};
+  try {
+    [svc, promos, st] = await Promise.all([api("/api/dating/services"), api("/api/promos", {quiet: true}).catch(() => []), api("/api/dating/me/stats", {quiet: true}).catch(() => ({}))]);
+  } catch (err) { body.innerHTML = `<div class="empty">${esc(err.message)}</div>`; return; }
+  const live = mine.status === "published" && !mine.paused && !mine.suspect;
+  const comp = dCompleteness(mine);
+  const opt = (kind) => svc.options.find((o) => o.kind === kind);
+  const pills = [];
+  if (mine.paused) pills.push('<span class="dpill warn">⏸ На паузе</span>');
+  else if (mine.status === "pending") pills.push('<span class="dpill warn">⏳ На проверке</span>');
+  else if (mine.status === "rejected") pills.push('<span class="dpill bad">❌ Отклонена</span>');
+  else if (mine.suspect) pills.push('<span class="dpill warn">⚠ Проверка после жалобы</span>');
+  else pills.push('<span class="dpill ok">✅ В ленте</span>');
+  if (mine.invisible) pills.push('<span class="dpill">👻 Невидимка</span>');
+  if (mine.vip) pills.push(`<span class="dpill gold">${mine.vip_free ? "🎁 VIP" : "👑 VIP"}</span>`);
+  if (mine.bumped_until) pills.push('<span class="dpill gold">🚀 Наверху</span>');
+  const alert = mine.status === "rejected" ? `<div class="dalert bad"><b>Анкета отклонена</b><span>${esc(mine.note || "Исправьте анкету и отправьте снова.")}</span></div>`
+    : mine.status === "pending" ? '<div class="dalert"><b>Идёт проверка</b><span>Обычно это быстро. До проверки анкету никто не видит, но вы можете её дополнить.</span></div>'
+    : mine.suspect ? '<div class="dalert"><b>Анкета временно скрыта</b><span>На неё поступила жалоба. Модератор проверит и вернёт её в ленту.</span></div>'
+    : mine.paused ? '<div class="dalert"><b>Анкета на паузе</b><span>Её никто не видит. Симпатии и чаты сохраняются. Вернуть можно во вкладке «Приватность».</span></div>' : "";
+  const tile = (n, label, go) => `<${go ? "button" : "div"} class="dcab-tile" ${go ? `data-dgo="${go}"` : ""}><b>${n ?? 0}</b><span>${label}</span></${go ? "button" : "div"}>`;
+  const todo = comp.items.map(([n, ok]) => `<div class="dtodo ${ok ? "done" : ""}"><span>${ok ? "✔" : "○"}</span><span>${esc(n)}</span>${ok ? "" : '<button class="link" data-dedit>Добавить</button>'}</div>`).join("");
+  const running = [];
+  if (mine.vip) running.push(`👑 ${mine.vip_free ? "VIP по акции" : "VIP"} ${untilText(mine.vip_until)}`);
+  if (mine.bumped_until) running.push(`🚀 Наверху ленты ${untilText(mine.bumped_until)}`);
+  if (mine.invisible_available) running.push(`👻 Невидимка ${untilText(mine.invisible_until)}`);
+  if (mine.viewers_until) running.push(`👀 «Кто смотрел» ${untilText(mine.viewers_until)}`);
+  if (mine.super_credits) running.push(`⭐ Супер-симпатий в запасе: ${mine.super_credits}`);
+  const svcTile = (kind) => {
+    const o = opt(kind);
+    if (!o) return "";
+    return `<div class="dsvc"><div class="dsvc-head"><span class="dsvc-ic">${D_ICON[kind] || "✨"}</span><div><b>${esc(D_SHORT[kind] || o.title)}</b><small>${o.stars} KH${o.days > 1 ? " · " + o.days + " дн." : o.days === 1 ? " · 24 часа" : ""}</small></div></div>
+      <p>${esc(o.what)}</p>${o.active_until ? `<p class="dok">✔ Действует ${untilText(o.active_until)}</p>` : ""}
+      ${o.available ? `<div class="actions"><button data-dbuy="${esc(o.code)}">${o.active_until ? "Продлить" : "Включить"}</button>${svc.balance >= o.stars ? `<button class="secondary" data-dbuy="${esc(o.code)}" data-bal="1">С баланса</button>` : ""}</div>` : `<p class="muted">${esc(o.reason)}</p>`}</div>`;
+  };
+  const gifts = promos.filter((x) => !x.needs_listing).map((x) => `<div class="dgift"><b>🎁 ${esc(x.title)}</b><span>${esc(x.service)}, ${x.days} дн. бесплатно</span>
+    ${x.can_claim ? `<button data-dclaim="${x.id}">Получить</button>` : `<small class="muted">${esc(x.reason || "Выдаётся автоматически")}</small>`}</div>`).join("");
+  const photoStyle = mine.has_photo ? `style="background-image:url('${esc(mine.photo_url)}?v=${Date.now() % 100000}')"` : "";
+  body.innerHTML = `<div class="dcab">
+    <div class="dcab-hero ${mine.has_photo ? "" : "nophoto"}" ${photoStyle}>
+      <div class="dcab-pills">${pills.join("")}</div>
+      <div class="dcab-info"><b>${esc(mine.name || "Без имени")}, ${mine.age}${mine.age_confirmed ? " ✔" : ""}</b><span>📍 ${esc(mine.city || "—")}</span></div>
+    </div>
+    <div class="dtags">${dTags(mine)}</div>
+    <div class="dcab-actions"><button id="dEdit">✏️ Редактировать</button><button class="secondary" id="dPreview">👁 Как меня видят</button></div>
+    ${alert}
+    <div class="dcab-tiles">${tile(st.views_7d, "просмотров за 7 дней")}${tile(st.likes_to_me, "мне симпатизируют", "to_me")}${tile(st.likes_from_me, "я симпатизирую", "from_me")}${tile(st.mutual, "взаимные", "mutual")}</div>
+    <div class="dcab-tabs">${[["overview", "Обзор"], ["boost", "Продвижение"], ["privacy", "Приватность"], ["more", "Ещё"]].map(([k, n]) => `<button class="${dcabTab === k ? "active" : ""}" data-dtab2="${k}">${n}</button>`).join("")}</div>
+
+    <section class="dpanel" data-dpanel="overview" ${dcabTab === "overview" ? "" : "hidden"}>
+      <article class="dcard2"><div class="dcard2-head"><h3>Заполненность</h3><b>${comp.pct}%</b></div>
+        <div class="dbar"><i style="width:${comp.pct}%"></i></div>${todo}
+        <p class="muted">Полные анкеты получают заметно больше симпатий.</p></article>
+      <article class="dcard2"><h3>Кто смотрел анкету</h3><div id="dViewers" class="muted">…</div></article>
+      <article class="dcard2"><h3>Как попасть выше в ленте</h3>
+        <p class="muted">Лента сортируется по новизне. Выше всех встают анкеты с VIP, затем поднятые на сутки. Платных в пяти местах подряд не больше двух, чтобы лента оставалась честной.</p>
+        <div class="actions"><button data-dtab2="boost">Продвинуть анкету</button></div></article>
+    </section>
+
+    <section class="dpanel" data-dpanel="boost" ${dcabTab === "boost" ? "" : "hidden"}>
+      <article class="dcard2"><h3>Сейчас действует</h3>${running.length ? running.map((t) => `<div class="drun">${esc(t)}</div>`).join("") : '<p class="muted">Ничего не включено: анкета в обычной ленте.</p>'}</article>
+      ${gifts}
+      <div class="dsvc-grid">${["bump", "vip", "super", "invisible", "viewers"].map(svcTile).join("")}</div>
+      <article class="dcard2"><div class="dcard2-head"><h3>Баланс</h3><b>${svc.balance} KH</b></div>
+        <p class="muted">Сюда возвращается неиспользованная часть услуг. Баланс можно потратить на любую услугу.</p>
+        <p class="muted">Это ваш личный баланс: один на знакомства и ваши личные объявления. У компании баланс отдельный.</p>${topupHtml("me")}</article>
+    </section>
+
+    <section class="dpanel" data-dpanel="privacy" ${dcabTab === "privacy" ? "" : "hidden"}>
+      <article class="dcard2"><h3>Видимость</h3>
+        <div class="set-row"><div><b>Пауза</b><small>Анкета скрыта из лент и поиска. Симпатии и чаты остаются, повторная проверка не нужна.</small></div>
+          <label class="check" style="margin:0"><input type="checkbox" id="dPause" ${mine.paused ? "checked" : ""}></label></div>
+        <div class="set-row"><div><b>Невидимка</b><small>${mine.invisible_available ? "Вас нет в лентах, но анкета открывается по ссылке. Время VIP на это время стоит." : "Платная услуга: включите её во вкладке «Продвижение»."}</small></div>
+          <label class="check" style="margin:0"><input type="checkbox" id="dInvisible" ${mine.invisible ? "checked" : ""} ${mine.invisible_available ? "" : "disabled"}></label></div></article>
+      <article class="dcard2"><h3>Что видят другие</h3>
+        <p class="muted">Имя, возраст, город, фото и «о себе». Контакты (ник, телефон) в анкете не показываются никогда: писать можно только после взаимной симпатии.</p></article>
+      <article class="dcard2"><h3>Приватные фото 🔒</h3>
+        <p class="muted">Видят VIP-зрители и те, с кем у вас взаимная симпатия. Каждое фото проходит проверку. Не больше 6.</p>
+        <div id="dPrivList"></div>
+        <div class="actions"><label class="btn secondary dfile">Добавить фото<input type="file" id="dPrivFile" accept="image/jpeg,image/png,image/webp" hidden></label></div></article>
+    </section>
+
+    <section class="dpanel" data-dpanel="more" ${dcabTab === "more" ? "" : "hidden"}>
+      <article class="dcard2"><h3>Платежи</h3><p class="muted">Покупки, подарки, возвраты и оплата с баланса.</p>
+        <div class="actions"><button class="secondary" id="dPayments">История платежей</button></div></article>
+      <article class="dcard2"><h3>Удаление анкеты</h3><p class="muted">Анкета, симпатии, просмотры и приватные фото удаляются навсегда. Купленные услуги не возвращаются: используйте их заранее или запросите возврат у поддержки.</p>
+        <div class="actions"><button class="secondary" id="dDelete" style="color:var(--bad)">Удалить анкету</button></div></article>
+    </section></div>`;
+  $("#dEdit").onclick = openMyDating;
+  $("#dPreview").onclick = () => previewMyProfile(mine);
+  $("#dPayments").onclick = () => openMenu("payments");
+  body.querySelectorAll("[data-dedit]").forEach((b) => { b.onclick = openMyDating; });
+  body.querySelectorAll("[data-dtab2]").forEach((b) => { b.onclick = () => {
+    dcabTab = b.dataset.dtab2;
+    body.querySelectorAll("[data-dpanel]").forEach((x) => { x.hidden = x.dataset.dpanel !== dcabTab; });
+    body.querySelectorAll(".dcab-tabs button").forEach((x) => x.classList.toggle("active", x.dataset.dtab2 === dcabTab));
+    $("#scroll").scrollTo({top: body.querySelector(".dcab-tabs").offsetTop - 8, behavior: "smooth"});
+  }; });
+  $("#dPause").onchange = async (e) => {
+    try { const r = await api("/api/dating/pause", {method: "POST", body: JSON.stringify({on: e.target.checked})}); toast(r.paused ? "Анкета на паузе: её никто не видит" : "Анкета снова в поиске"); showDatingCabinet(); }
+    catch (err) { toast(err.message); e.target.checked = !e.target.checked; }
+  };
+  if ($("#dInvisible")) $("#dInvisible").onchange = async (e) => {
+    try { await api("/api/dating/invisible", {method: "POST", body: JSON.stringify({on: e.target.checked})}); toast(e.target.checked ? "Вы невидимка" : "Анкета снова в лентах"); showDatingCabinet(); }
+    catch (err) { toast(err.message); e.target.checked = !e.target.checked; }
+  };
+  $("#dDelete").onclick = async () => {
+    if (!confirm("Удалить анкету навсегда? Это нельзя отменить.")) return;
+    try { await api("/api/dating/profile", {method: "DELETE"}); toast("Анкета удалена"); showView("dating"); loadDating(); }
+    catch (err) { toast(err.message); }
+  };
+  api("/api/dating/viewers", {quiet: true}).then((v) => {
+    $("#dViewers").innerHTML = v.locked ? `За 30 дней вас открывали: <b>${v.count}</b>. Кто именно — в услуге «Кто смотрел» (вкладка «Продвижение»).`
+      : (v.items.length ? v.items.map((x) => `<div class="drun">${x.id ? "👤 " + esc(x.name || "Аноним") : "👤 Анкета закрыта"} <small class="muted">${fmtDate(x.at)}</small></div>`).join("") : "Пока никто");
+  }).catch(() => {});
+  api("/api/dating/private-photos/mine", {quiet: true}).then((rows) => {
+    $("#dPrivList").innerHTML = rows.length ? rows.map((r) => `<div class="drun">🔒 ${esc(({pending: "на проверке", live: "опубликовано", rejected: "отклонено"})[r.status] || r.status)} <button class="link" data-dprivdel="${r.id}">удалить</button></div>`).join("") : '<p class="muted">Фото пока нет</p>';
+  }).catch(() => {});
+  $("#dPrivFile").onchange = async (e) => {
+    const data = new FormData(); data.append("file", e.target.files[0]);
+    const headers = inTelegram ? {"X-Telegram-Init-Data": tg.initData} : {"X-Web-Session": localStorage.getItem("webSession") || ""};
+    const r = await fetch("/api/dating/private-photo", {method: "POST", body: data, headers});
+    if (!r.ok) toast((await r.json()).detail || "Не удалось загрузить"); else { toast("Фото отправлено на проверку"); dcabTab = "privacy"; showDatingCabinet(); }
+  };
+}
+const showDatingServices = showDatingCabinet;
+document.addEventListener("click", async (e) => {
+  const buy = e.target.closest("[data-dbuy]"), claim = e.target.closest("[data-dclaim]"), del = e.target.closest("[data-dprivdel]"), go = e.target.closest("[data-dgo]");
+  try {
+    if (go) { datingTab = go.dataset.dgo; showView("dating"); loadDating(); }
+    if (buy) {
+      const r = await api("/api/dating/invoice", {method: "POST", body: JSON.stringify({service_code: buy.dataset.dbuy, use_balance: Boolean(buy.dataset.bal)})});
+      if (r.paid) { toast("Готово: услуга включена"); return showDatingCabinet(); }
+      openPay(r.invoice_url, r.payment_id, () => showDatingCabinet());
+    }
+    const lclaim = e.target.closest("[data-lclaim]");
+    if (lclaim) {
+      await api(`/api/promos/${lclaim.dataset.lclaim}/claim`, {method: "POST", body: JSON.stringify({listing_id: Number(servicesFor)})});
+      toast("Подарок включён"); return openServices(servicesFor);
+    }
+    if (claim) { await api(`/api/promos/${claim.dataset.dclaim}/claim`, {method: "POST", body: "{}"}); toast("Подарок включён"); showDatingCabinet(); }
+    if (del) { await api(`/api/dating/private-photo/${del.dataset.dprivdel}`, {method: "DELETE"}); showDatingCabinet(); }
+  } catch (err) { toast(err.message); }
+});
+$("#datingServices").onclick = showDatingCabinet;
+
+// ---------- кабинет компании ----------
+const CO_STATUS = {pending: ["⏳", "На проверке", "warn"], verified: ["✔", "Проверена", "ok"], rejected: ["❌", "Отклонена", "bad"], suspended: ["⏸", "Приостановлена", "bad"]};
+const CO_APP = {new: "Новый", viewed: "Просмотрен", invited: "Приглашён", rejected: "Отказ"};
+const coState = {id: null, tab: "overview"};
+function coAvatar(c) {
+  return c.logo ? `<img class="co-ava" src="${esc(c.logo)}" alt="">` : `<div class="co-ava">${coInitial(c.name)}</div>`;
+}
+function coInitial(name) { return esc((name || "?").trim().slice(0, 1).toUpperCase()); }
+async function showCompany(id) {
+  openSub("company");
+  const body = $("#subBody");
+  body.innerHTML = '<div class="skeleton"></div>';
+  let mine;
+  try { mine = await api("/api/company/mine"); } catch (e) { body.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
+  if (!mine.length) return renderCompanyIntro(body);
+  coState.id = id || (mine.some((c) => c.id === coState.id) ? coState.id : mine[0].id);
+  const cur = mine.find((c) => c.id === coState.id);
+  let ov;
+  try { ov = await api(`/api/company/${coState.id}`); } catch (e) { body.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
+  const [icon, stTitle, cls] = CO_STATUS[ov.status] || ["", ov.status, ""];
+  const alert = ov.status === "pending" ? '<div class="dalert"><b>Компания на проверке</b><span>Пока её проверяют, вы можете заполнить профиль и приготовить вакансии. Публиковать от имени компании можно после проверки; от себя — уже сейчас.</span></div>'
+    : ov.status === "rejected" ? `<div class="dalert bad"><b>Компанию не подтвердили</b><span>${esc(ov.note || "Проверьте данные во вкладке «Профиль» и сохраните: заявка уйдёт на проверку снова.")}</span></div>`
+    : ov.status === "suspended" ? `<div class="dalert bad"><b>Компания приостановлена</b><span>${esc(ov.note || "Объявления скрыты.")} Напишите в поддержку.</span></div>` : "";
+  const tabs = [["overview", "Обзор"], ["listings", "Объявления"], ["apps", `Отклики${ov.applications.new ? " (" + ov.applications.new + ")" : ""}`], ["team", "Команда"], ["profile", "Профиль"]];
+  tabs.splice(4, 0, ["stats", "Аналитика"]);
+  if (ov.status === "verified") tabs.splice(5, 0, ["reviews", "Отзывы"]);
+  if (ov.role === "owner" || ov.role === "admin") tabs.push(["log", "История"]);
+  if (ov.balance !== undefined) tabs.push(["money", "Баланс"]);
+  body.innerHTML = `<div class="dcab">
+    ${mine.length > 1 ? `<div class="chips">${mine.map((c) => `<button class="chip ${c.id === coState.id ? "active" : ""}" data-cosw="${c.id}">${esc(c.name)}</button>`).join("")}</div>` : ""}
+    <article class="dcard2 co-head">${coAvatar(ov)}
+      <div style="flex:1;min-width:0"><h3 style="margin:0">${esc(ov.name)}</h3><p class="muted">${esc(ov.city || "")} · ваша роль: ${esc(ov.role_title)}</p>
+      <span class="dpill ${cls}">${icon} ${stTitle}</span></div>
+      ${ov.role === "owner" || ov.role === "admin" ? '<button class="secondary co-edit" data-cotab-go="profile" aria-label="Изменить">✏️</button>' : ""}</article>
+    ${alert}
+    <div class="dcab-tiles"><div class="dcab-tile"><b>${ov.listings.active}</b><span>активных</span></div>
+      <div class="dcab-tile"><b>${ov.applications.new}</b><span>новых откликов</span></div>
+      <div class="dcab-tile"><b>${ov.views}</b><span>просмотров</span></div>
+      <div class="dcab-tile"><b>${ov.members}</b><span>в команде</span></div></div>
+    <div class="dcab-tabs">${tabs.map(([k, n]) => `<button class="${coState.tab === k ? "active" : ""}" data-cotab="${k}">${n}</button>`).join("")}</div>
+    <div id="coPane"></div></div>`;
+  body.querySelectorAll("[data-cosw]").forEach((b) => { b.onclick = () => { coState.tab = "overview"; showCompany(Number(b.dataset.cosw)); }; });
+  body.querySelectorAll("[data-cotab]").forEach((b) => { b.onclick = () => {
+    coState.tab = b.dataset.cotab;
+    body.querySelectorAll(".dcab-tabs button").forEach((x) => x.classList.toggle("active", x === b));
+    b.scrollIntoView({inline: "center", block: "nearest", behavior: "smooth"});
+    renderCoPane(ov);
+  }; });
+  renderCoPane(ov);
+  body.querySelector(".dcab-tabs button.active")?.scrollIntoView({inline: "center", block: "nearest"});
+}
+function renderCompanyIntro(body) {
+  body.innerHTML = `<div class="dcab"><article class="dcard2"><h3>🏢 Кабинет компании</h3>
+    <p>Публикуйте вакансии и объявления от имени компании, принимайте отклики всей командой и платите за продвижение с отдельного баланса компании.</p>
+    <p class="muted">Личный аккаунт остаётся отдельным: можно публиковать и от компании, и от себя.</p>
+    <div class="actions"><button id="coNew">Создать компанию</button></div></article>
+    <article class="dcard2"><h3>Есть приглашение?</h3><div class="actions"><input id="coCode" placeholder="Код приглашения" style="flex:1"><button class="secondary" id="coJoin">Войти в команду</button></div></article></div>`;
+  $("#coNew").onclick = () => renderCompanyForm(body, null);
+  $("#coJoin").onclick = () => joinCompany($("#coCode").value.trim());
+}
+async function joinCompany(code) {
+  if (!code) { toast("Введите код"); return; }
+  try { const c = await api("/api/company/join", {method: "POST", body: JSON.stringify({code})}); toast("Вы в команде: " + c.name); coState.id = c.id; coState.tab = "overview"; showCompany(); }
+  catch (err) { toast(err.message); }
+}
+function renderCompanyForm(body, ov) {
+  body.innerHTML = `<div class="dcab"><form id="coForm" class="dform"><fieldset class="fsec"><legend>🏢 ${ov ? "Профиль компании" : "Новая компания"}</legend>
+    <label>Название<input name="name" required minlength="2" maxlength="120" value="${esc(ov?.name || "")}"></label>
+    <label>Регистрационный номер (사업자등록번호)<small class="muted"> видят только модераторы и админы компании</small><input name="reg_no" required minlength="3" maxlength="80" value="${esc(ov?.reg_no || "")}"></label>
+    <label>Город<input name="city" maxlength="100" value="${esc(ov?.city || "")}"></label>
+    <label>Сайт<input name="website" maxlength="200" placeholder="https://" value="${esc(ov?.website || "")}"></label>
+    <label>О компании<textarea name="description" rows="4" maxlength="1500">${esc(ov?.description || "")}</textarea></label></fieldset>
+    <p class="muted">${ov ? "Если изменить регистрационный номер у проверенной компании, она вернётся на проверку." : "После создания компанию проверит модератор. Пока идёт проверка, публиковать можно от себя."}</p>
+    <div class="actions"><button class="submit" type="submit">Сохранить</button><button class="secondary" type="button" id="coCancel">Отмена</button></div></form></div>`;
+  $("#coCancel").onclick = () => showCompany();
+  $("#coForm").onsubmit = async (e) => {
+    e.preventDefault();
+    const data = Object.fromEntries(new FormData(e.target));
+    try {
+      if (ov) await api(`/api/company/${ov.id}`, {method: "PUT", body: JSON.stringify(data)});
+      else { const c = await api("/api/company", {method: "POST", body: JSON.stringify(data)}); coState.id = c.id; coState.tab = "overview"; }
+      toast(ov ? "Сохранено" : "Компания создана и отправлена на проверку"); showCompany();
+    } catch (err) { toast(err.message); }
+  };
+}
+// пополнение баланса звёздами Telegram: пресеты и своя сумма; для компании или для личного баланса
+function topupHtml(prefix) {
+  const k = khInfo.kh_per_star || 1;
+  return `<div class="chips">${[50, 100, 300, 500, 1000].map((n) => `<button class="chip" data-topup-pick="${n}" data-for="${prefix}">${n} KH · ${starsFor(n)} ⭐</button>`).join("")}</div>
+    <div class="actions"><input id="${prefix}TopupN" type="number" min="${khInfo.min}" max="${khInfo.max}" placeholder="Сколько KH" style="flex:1"><button data-topup-go="${prefix}">Пополнить</button></div>
+    <p class="muted">Курс обменника: 1 ⭐ = ${k % 1 ? k.toFixed(2) : k} KH. Оплата звёздами Telegram. От ${khInfo.min} до ${khInfo.max} KH за раз.</p>`;
+}
+document.addEventListener("click", async (e) => {
+  const pick = e.target.closest("[data-topup-pick]"), go = e.target.closest("[data-topup-go]");
+  if (pick) { $(`#${pick.dataset.for}TopupN`).value = pick.dataset.topupPick; return; }
+  if (!go) return;
+  const kh = Number($(`#${go.dataset.topupGo}TopupN`).value);
+  if (!kh) { toast("Выберите сумму"); return; }
+  try {
+    if (go.dataset.topupGo === "co") {
+      const r = await api(`/api/company/${coState.id}/topup`, {method: "POST", body: JSON.stringify({kh})});
+      openPay(r.invoice_url, r.payment_id, () => { coState.tab = "money"; showCompany(coState.id); });
+    } else {
+      const r = await api("/api/me/balance/topup", {method: "POST", body: JSON.stringify({kh})});
+      openPay(r.invoice_url, r.payment_id, () => (currentSubKey === "payments" ? openMenu("payments") : showDatingCabinet()));
+    }
+  } catch (err) { toast(err.message); }
+});
+async function renderCoPane(ov) {
+  const pane = $("#coPane");
+  const canWrite = ov.role !== "viewer", team = ov.role === "owner" || ov.role === "admin";
+  pane.innerHTML = '<div class="skeleton"></div>';
+  try {
+    if (coState.tab === "overview") {
+      pane.innerHTML = `<article class="dcard2"><h3>Что дальше</h3>
+        ${ov.status === "verified" && canWrite ? '<div class="actions"><button id="coPost">➕ Подать объявление от компании</button></div>' : '<p class="muted">Публикация от компании откроется после проверки.</p>'}
+        ${ov.status === "verified" ? '<div class="actions"><button class="secondary" id="coPublic">Публичная страница компании</button></div>' : ""}</article>
+        <article class="dcard2"><h3>Объявления</h3><p>Активных: <b>${ov.listings.active}</b> · на проверке: <b>${ov.listings.pending}</b> · остальные: <b>${ov.listings.other}</b></p>
+        <p class="muted">Откликов всего: ${ov.applications.total}. В команде ${ov.members} из ${ov.limits.members}.</p>
+        <div class="actions"><button class="secondary" data-cotab-go="listings">Все объявления</button><button class="secondary" data-cotab-go="apps">Отклики</button></div></article>`;
+      if (ov.pro && ov.balance !== undefined) {
+        pane.insertAdjacentHTML("beforeend", `<article class="dcard2"><div class="dcard2-head"><h3>Подписка «Про»</h3><b>${ov.pro.active ? "до " + esc(fmtDate(ov.pro.until).split(",")[0]) : "не подключена"}</b></div>
+          <ul class="perks">${ov.pro.perks.map((t) => `<li>${esc(t)}</li>`).join("")}</ul>
+          <div class="actions"><button id="coPro">${ov.pro.active ? "Продлить" : "Подключить"} на ${ov.pro.days} дн. · ${ov.pro.price} KH</button></div>
+          <p class="muted">Оплата с баланса компании (${ov.balance} KH). Пополнить: вкладка «Баланс».</p></article>`);
+        $("#coPro").onclick = async () => {
+          try {
+            if (!(await confirmDialog(`Списать ${ov.pro.price} KH с баланса компании за ${ov.pro.days} дней «Про»?`))) return;
+            await api(`/api/company/${ov.id}/pro`, {method: "POST"}); toast("Подписка «Про» подключена"); showCompany(ov.id);
+          } catch (err) { toast(err.message); }
+        };
+      }
+      if ($("#coPost")) $("#coPost").onclick = async () => { postAsCompany = {id: ov.id, name: ov.name}; $("#addSheet").classList.remove("hidden"); loadTemplates(); };
+      if ($("#coPublic")) $("#coPublic").onclick = () => showPublicCompany(ov.id);
+    }
+    if (coState.tab === "listings") {
+      const rows = await api(`/api/company/${ov.id}/listings`);
+      const ST = {approved: "опубликовано", pending: "на проверке", draft: "черновик", rejected: "отклонено", needs_fix: "на доработке", hidden: "скрыто", expired: "срок вышел", closed: "закрыто", sold: "закрыто"};
+      pane.innerHTML = rows.length ? rows.map((x) => `<article class="dcard2"><div class="dcard2-head"><h3 style="margin:0">${esc(x.title)}</h3><span class="muted">${esc(ST[x.status] || x.status)}</span></div>
+        <p class="muted">📍 ${esc(x.city)} · 👁 ${x.views || 0}${x.applications ? ` · ✉ ${x.applications.total}${x.applications.new ? " (новых " + x.applications.new + ")" : ""}` : ""} · ${esc(x.posted_by)}</p>
+        <div class="actions"><button class="secondary" data-open="${x.id}">Открыть</button>${x.category === "job" ? `<button class="secondary" data-coapps="${x.id}" data-title="${esc(x.title)}">Отклики</button>` : ""}
+        ${canWrite && x.status === "approved" && ov.role !== "recruiter" ? `<button data-coboost="${x.id}">Продвинуть</button>` : ""}
+        ${canWrite && ["approved", "expired"].includes(x.status) ? `<button class="secondary" data-corenew="${x.id}">Продлить</button>` : ""}
+        ${canWrite ? `<button class="secondary" data-codup="${x.id}">⧉ Копия</button><button class="secondary" data-comove="${x.id}">🔀 В личные</button>` : ""}</div></article>`).join("")
+        : '<div class="empty">Объявлений от компании пока нет.</div>';
+    }
+    if (coState.tab === "stats") pane.innerHTML = await coAnalyticsHtml(ov);
+    if (coState.tab === "reviews") { const c = await api(`/api/companies/${ov.id}`, {quiet: true}); pane.innerHTML = companyReviewsHtml(c.reviews, team); }
+    if (coState.tab === "log") pane.innerHTML = await coActivityHtml(ov);
+    if (coState.tab === "apps") {
+      const rows = await api(`/api/company/${ov.id}/applications`);
+      const ST = {new: "Новые", contact: "Связались", interview: "Собеседование", offer: "Оффер", hired: "Приняты", declined: "Не подошли"};
+      const flt = coState.stage || "all";
+      const cnt = (k) => rows.filter((a) => a.stage === k).length;
+      const shown = rows.filter((a) => flt === "all" || a.stage === flt);
+      pane.innerHTML = `<div class="chips wrapchips">${[["all", "Все", rows.length], ...Object.entries(ST).map(([k, t]) => [k, t, cnt(k)])].map(([k, t, n]) => `<button class="chip ${k === flt ? "active" : ""}" data-costage-f="${k}">${t} ${n}</button>`).join("")}</div>
+        <div class="actions"><button class="secondary" data-cocsv>⬇ Выгрузить в CSV</button></div>` + (shown.length ? shown.map((a) => `<article class="dcard2" data-coapp="${a.id}"><div class="dcard2-head"><h3 style="margin:0">${esc(a.name || "Соискатель")}</h3><span class="muted">${esc(CO_APP[a.status] || a.status)}</span></div>
+        <p class="muted">на «${esc(a.listing_title)}» · ${esc(fmtDate(a.created_at))}</p><p><b>${esc(a.contact)}</b>${a.visa ? " · виза " + esc(a.visa) : ""}${a.city ? " · " + esc(a.city) : ""}</p>
+        ${a.message ? `<p>${esc(a.message)}</p>` : ""}${a.reply ? `<p class="muted">Ответ: ${esc(a.reply)}</p>` : ""}
+        ${a.can_answer ? `<label class="muted">Этап<select data-costage="${a.id}">${Object.entries(ST).map(([k, t]) => `<option value="${k}" ${k === a.stage ? "selected" : ""}>${t}</option>`).join("")}</select></label>
+          <textarea data-conote="${a.id}" rows="2" maxlength="1000" placeholder="Заметка (её видит только команда)">${esc(a.note)}</textarea>
+          <div class="actions"><button class="secondary" data-conote-save="${a.id}">💾 Заметка</button><button data-costatus="invited" data-id="${a.id}">Пригласить</button><button class="secondary" data-costatus="rejected" data-id="${a.id}">Отказать</button></div>` : ""}</article>`).join("")
+        : '<div class="empty">В этом этапе пока никого.</div>') + (ov.role !== "viewer" ? await coReplyTemplatesHtml() : "");
+    }
+    if (coState.tab === "team") {
+      const t = await api(`/api/company/${ov.id}/team`);
+      pane.innerHTML = `<article class="dcard2"><h3>Команда</h3>${t.members.map((m) => `<div class="drun"><span>${esc(m.name)}${m.me ? " (вы)" : ""} · <b>${esc(m.role_title)}</b></span>
+        <span>${t.can_edit && m.role !== "owner" ? `<select data-corole="${esc(m.tg_id)}">${t.roles.map((r) => `<option value="${r.key}" ${r.key === m.role ? "selected" : ""}>${esc(r.title)}</option>`).join("")}</select>
+          <button class="link" data-coremove="${esc(m.tg_id)}">убрать</button>` : m.me && m.role !== "owner" ? `<button class="link" data-coremove="${esc(m.tg_id)}">выйти</button>` : ""}</span></div>`).join("")}</article>
+        ${t.can_edit ? `<article class="dcard2"><h3>Пригласить</h3><p class="muted">Ссылка действует 7 дней и подходит одному человеку.</p>
+          <div class="actions"><select id="coInvRole">${t.roles.map((r) => `<option value="${r.key}" ${r.key === "recruiter" ? "selected" : ""}>${esc(r.title)}</option>`).join("")}</select><button id="coInv">Создать приглашение</button></div><div id="coInvOut"></div></article>` : ""}
+        <article class="dcard2"><h3>Роли</h3><p class="muted"><b>Владелец</b> — всё. <b>Админ</b> — команда, профиль, деньги. <b>Рекрутёр</b> — объявления и отклики. <b>Наблюдатель</b> — только смотрит.</p></article>`;
+      if ($("#coInv")) $("#coInv").onclick = async () => {
+        try {
+          const r = await api(`/api/company/${ov.id}/invite`, {method: "POST", body: JSON.stringify({role: $("#coInvRole").value})});
+          $("#coInvOut").innerHTML = `<p>Код: <b>${esc(r.code)}</b></p><p class="muted">${esc(r.link)}</p><div class="actions"><button class="secondary" id="coCopy">Скопировать ссылку</button></div>`;
+          $("#coCopy").onclick = async () => { try { await navigator.clipboard.writeText(r.link); toast("Скопировано"); } catch (e) { toast(r.link); } };
+        } catch (err) { toast(err.message); }
+      };
+    }
+    if (coState.tab === "profile") {
+      if (!team) { pane.innerHTML = `<article class="dcard2"><h3>${esc(ov.name)}</h3><p>${esc(ov.description || "Описания нет")}</p><p class="muted">${esc(ov.city || "")} ${esc(ov.website || "")}</p><p class="muted">Менять профиль могут владелец и админы.</p></article>`; return; }
+      renderCompanyForm($("#coPane"), ov);
+      $("#coPane").insertAdjacentHTML("beforeend", await coPageFormHtml(ov));
+      $("#coPane").insertAdjacentHTML("afterbegin", `<article class="dcard2"><h3>Логотип</h3><div class="co-head">${coAvatar(ov)}<div class="actions">
+        <label class="btn secondary dfile">Загрузить<input type="file" id="coLogo" accept="image/jpeg,image/png,image/webp" hidden></label>${ov.logo ? '<button class="secondary" id="coLogoDel">Убрать</button>' : ""}</div></div></article>`);
+      $("#coLogo").onchange = async (e) => {
+        const data = new FormData(); data.append("file", e.target.files[0]);
+        const headers = inTelegram ? {"X-Telegram-Init-Data": tg.initData} : {"X-Web-Session": localStorage.getItem("webSession") || ""};
+        const r = await fetch(`/api/company/${ov.id}/logo`, {method: "POST", body: data, headers});
+        if (!r.ok) toast((await r.json()).detail || "Не удалось загрузить"); else { toast("Логотип обновлён"); showCompany(ov.id); }
+      };
+      if ($("#coLogoDel")) $("#coLogoDel").onclick = async () => { await api(`/api/company/${ov.id}/logo`, {method: "DELETE"}); showCompany(ov.id); };
+      if (ov.role === "owner") {
+        $("#coPane").insertAdjacentHTML("beforeend", `<article class="dcard2"><h3>Закрыть компанию</h3><p class="muted">Объявления компании перестанут показываться, команда потеряет доступ. Перед закрытием на балансе должно быть 0 ⭐.</p>
+          <div class="actions"><button class="secondary" id="coClose" style="color:var(--bad)">Закрыть компанию</button></div></article>`);
+        $("#coClose").onclick = async () => {
+          if (!confirm("Закрыть компанию? Это нельзя отменить.")) return;
+          try { await api(`/api/company/${ov.id}/close`, {method: "POST"}); toast("Компания закрыта"); coState.id = null; showCompany(); } catch (err) { toast(err.message); }
+        };
+      }
+    }
+    if (coState.tab === "money") {
+      const b = await api(`/api/company/${ov.id}/balance`);
+      pane.innerHTML = `<article class="dcard2"><div class="dcard2-head"><h3>Баланс компании</h3><b>${b.balance} KH</b></div><p class="muted">${esc(b.note)}</p>
+        <p class="muted">Платить с баланса за продвижение объявлений компании могут владелец и админы. Личные балансы сотрудников сюда не попадают.</p></article>
+        <article class="dcard2"><h3>Пополнить баланс компании</h3>${topupHtml("co")}</article>
+        <article class="dcard2"><h3>Движение</h3>${b.history.length ? b.history.map((h) => `<div class="drun"><span><b>${esc(h.service)}</b>${h.listing ? " · «" + esc(h.listing) + "»" : ""}<br><small class="muted">${esc(fmtDate(h.at))}</small></span><span>${h.stars ? h.stars + " ⭐" : ""}${h.from_balance ? (h.stars ? " + " : "") + h.from_balance + " ⭐ с баланса" : ""}<br><small class="muted">${esc({pending: "ожидает оплаты", paid: "оплачено", refunded: "возврат выполнен", failed: "ошибка", granted: "подарок", abandoned: "не оплачено"}[h.status] || h.status)}</small></span></div>`).join("") : '<p class="muted">Платежей пока нет.</p>'}</article>`;
+    }
+  } catch (err) { pane.innerHTML = `<div class="empty">${esc(err.message)}</div>`; }
+}
+function companyReviewsHtml(r, canReply) {
+  const stars = (n) => "★".repeat(n) + "☆".repeat(5 - n);
+  return `<article class="dcard2"><div class="dcard2-head"><h3 style="margin:0">Отзывы</h3><b class="rating">${r.count ? "★ " + r.rating + " (" + r.count + ")" : "пока нет"}</b></div>
+    ${r.items.map((x) => `<div class="drun" style="display:block"><b class="rating">${stars(x.rating)}</b> <small class="muted">${esc(x.at)}</small>${x.text ? `<p>${esc(x.text)}</p>` : ""}
+      ${x.reply ? `<p class="muted"><b>Ответ компании:</b> ${esc(x.reply)}</p>` : canReply ? `<button class="secondary" data-coreply="${x.id}">Ответить</button>` : ""}</div>`).join("") || '<p class="muted">Отзыв может оставить тот, кто откликался на вакансию или писал компании.</p>'}</article>`;
+}
+async function showPublicCompany(id) {
+  SUB_TITLES.copublic = "Компания";
+  openSub("copublic");
+  const body = $("#subBody");
+  body.innerHTML = '<div class="skeleton"></div>';
+  try {
+    const c = await api(`/api/companies/${id}`, {quiet: true});
+    const pg = c.page || {}, links = [pg.telegram ? `<a href="https://t.me/${esc(pg.telegram)}" target="_blank" rel="noopener">Telegram</a>` : "", pg.instagram ? `<a href="https://instagram.com/${esc(pg.instagram)}" target="_blank" rel="noopener">Instagram</a>` : "",
+      pg.kakao ? `KakaoTalk: ${esc(pg.kakao)}` : "", c.website ? `<a href="${esc(c.website)}" target="_blank" rel="noopener">Сайт</a>` : ""].filter(Boolean);
+    let state = {can: false};
+    try { state = await api(`/api/companies/${id}/review-state`, {quiet: true}); } catch (e) { /* гость: отзыв не оставить */ }
+    body.innerHTML = `<div class="dcab">${pg.cover ? `<img class="cocover" src="${esc(pg.cover)}" alt="">` : ""}<article class="dcard2 co-head">${coAvatar(c)}<div style="flex:1"><h3 style="margin:0">${esc(c.name)} <span class="dpill ok">✔ Проверена</span>${c.pro ? ' <span class="dpill pro">PRO</span>' : ""}</h3>
+      ${pg.tagline ? `<p>${esc(pg.tagline)}</p>` : ""}<p class="muted">${esc(c.city || "")} · на сайте с ${esc(c.since)}${c.reviews?.count ? ` · ★ ${c.reviews.rating} (${c.reviews.count})` : ""}</p></div></article>
+      ${pg.benefits?.length ? `<div class="chips">${pg.benefits.map((k) => `<span class="chip">✔ ${esc(c.benefits_titles[k] || k)}</span>`).join("")}</div>` : ""}
+      ${c.description || links.length || pg.address || pg.hours ? `<article class="dcard2">${c.description ? `<p>${esc(c.description)}</p>` : ""}${pg.address ? `<p>📍 ${esc(pg.address)}</p>` : ""}${pg.hours ? `<p>🕘 ${esc(pg.hours)}</p>` : ""}${links.length ? `<p>${links.join(" · ")}</p>` : ""}</article>` : ""}
+      ${state.can ? `<div class="actions"><button data-coreview="${id}">⭐ Оставить отзыв</button></div>` : ""}
+      <h3 class="muted" style="margin:6px 4px">Объявления компании (${c.listings.length})</h3><div class="listings">${c.listings.map(listingCard).join("") || '<div class="empty">Сейчас открытых вакансий нет</div>'}</div>
+      ${companyReviewsHtml(c.reviews || {count: 0, rating: 0, items: []}, false)}</div>`;
+  } catch (err) { body.innerHTML = `<div class="empty">${esc(err.message)}</div>`; }
+}
+document.addEventListener("click", async (e) => {
+  const go = e.target.closest("[data-cotab-go]"), apps = e.target.closest("[data-coapps]"), boost = e.target.closest("[data-coboost]"),
+    renew = e.target.closest("[data-corenew]"), st = e.target.closest("[data-costatus]"), rm = e.target.closest("[data-coremove]"), pub = e.target.closest("[data-copage]");
+  try {
+    if (go) { coState.tab = go.dataset.cotabGo; showCompany(coState.id); }
+    if (apps) { ownItems[apps.dataset.coapps] = ownItems[apps.dataset.coapps] || {title: apps.dataset.title}; showApplicants(apps.dataset.coapps); }
+    if (boost) openServices(boost.dataset.coboost);
+    if (renew) { await api(`/api/listings/${renew.dataset.corenew}/renew`, {method: "POST"}); toast("Продлено"); renderCoPane(await api(`/api/company/${coState.id}`)); }
+    if (st) {
+      const reply = await pickReply(st.dataset.costatus === "invited" ? "invite" : "reject");
+      if (reply === null) return;
+      await api(`/api/applications/${st.dataset.id}`, {method: "PUT", body: JSON.stringify({status: st.dataset.costatus, reply})});
+      toast(st.dataset.costatus === "invited" ? "Соискатель приглашён" : "Отказ отправлен"); renderCoPane(await api(`/api/company/${coState.id}`));
+    }
+    if (rm) {
+      if (!confirm("Убрать участника из команды? Его доступ закроется сразу.")) return;
+      await api(`/api/company/${coState.id}/team/${rm.dataset.coremove}`, {method: "DELETE"});
+      toast("Готово"); showCompany(coState.id);
+    }
+  } catch (err) { toast(err.message); }
+});
+document.addEventListener("change", async (e) => {
+  const r = e.target.closest("[data-corole]");
+  if (!r) return;
+  try { await api(`/api/company/${coState.id}/team/${r.dataset.corole}`, {method: "PUT", body: JSON.stringify({role: r.value})}); toast("Роль изменена"); }
+  catch (err) { toast(err.message); showCompany(coState.id); }
+});
+
+// ---------- общий обработчик нажатий ----------
+document.addEventListener("click", async (e) => {
+  const tgLink = e.target.closest("[data-tglink]");
+  if (tgLink && tg?.openTelegramLink) { e.preventDefault(); tg.openTelegramLink(tgLink.href); return; }
+
+  const buyBtn = e.target.closest("[data-buy]");
+  if (buyBtn) { try { await buy(buyBtn.dataset.listing, buyBtn.dataset.buy, Boolean(buyBtn.dataset.bal)); } catch (err) { toast(err.message); if (/Недостаточно KH/.test(err.message)) openMenu("payments"); } return; }
+
+  const btn = e.target.closest("[data-act]");
+  if (btn) {
+    const owner = btn.closest("[data-id],[data-profile]");
+    const id = owner?.dataset.id;
+    try {
+      if (btn.dataset.act === "fav") {
+        if (!(await requireConsent())) return;
+        const r = await api(`/api/favorites/${id}`, {method: "POST"});
+        r.favorited ? favIds.add(Number(id)) : favIds.delete(Number(id));
+        document.querySelectorAll(`[data-id="${id}"] [data-act="fav"]`).forEach((b) => {
+          if (b.classList.contains("fav")) { b.textContent = r.favorited ? "♥" : "♡"; b.classList.toggle("on", r.favorited); }
+          else b.textContent = b.classList.contains("rnd") ? (r.favorited ? "♥" : "♡") : (r.favorited ? "♥ В избранном" : "♡ В избранное");
+        });
+        toast(r.favorited ? "Добавлено в избранное" : "Убрано из избранного");
+      }
+      if (btn.dataset.act === "chat") {
+        if (!(await requireConsent())) return;
+        const c = await api(`/api/listings/${id}/conversation`, {method: "POST"});
+        openChat(c.id, owner.querySelector("h1,h3")?.textContent);
+      }
+      if (btn.dataset.act === "apply") {
+        if (!(await requireConsent())) return;
+        applyListingId = id;
+        $("#applyForm").contact.value = me?.last_contact || "";
+        $("#applyResume").hidden = true;
+        api("/api/me/resume", {quiet: true}).then((cv) => { if (cv && cv.status === "approved") { window.__cv = cv; $("#applyResume").hidden = false; } }).catch(() => {});
+        $("#applyModal").classList.remove("hidden");
+      }
+      if (btn.dataset.act === "share") shareListing(id, owner.querySelector("h1,h3")?.textContent || "KOREA HUB");
+      if (btn.dataset.act === "like") {
+        if (!(await requireConsent())) return;
+        const r = await api(`/api/dating/${owner.dataset.profile}/like`, {method: "POST"});
+        if (r.mutual) { toast("Взаимная симпатия! Можно писать"); openChat(r.conversation_id, "Знакомство"); }
+        else { owner.remove(); toast("Симпатия отправлена. Отменить можно 5 минут: вкладка «Я симпатирую»"); loadDating(); }
+      }
+      if (btn.dataset.act === "unlike") {
+        if (!(await confirmDialog("Отменить симпатию? Человеку уйдёт отзыв уведомления."))) return;
+        await api(`/api/dating/${owner.dataset.profile}/like`, {method: "DELETE"});
+        toast("Симпатия отменена"); loadDating();
+      }
+      if (btn.dataset.act === "dchat") {
+        openChat(+owner.dataset.conv, "Знакомство");
+      }
+      if (btn.dataset.act === "dreport") {
+        if (!(await requireConsent())) return;
+        const reason = await askReason();
+        if (!reason) return;
+        await api("/api/reports", {method: "POST", body: JSON.stringify({target_type: "dating", target_id: owner.dataset.profile, reason})});
+        toast("Жалоба отправлена. Спасибо!");
+      }
+      if (btn.dataset.act === "report") {
+        if (!(await requireConsent())) return;
+        const reason = await askReason();
+        if (!reason) return;
+        await api("/api/reports", {method: "POST", body: JSON.stringify({target_type: "listing", target_id: id, reason})});
+        toast("Жалоба отправлена. Спасибо!");
+      }
+    } catch (err) { toast(err.message); }
+    return;
+  }
+
+  const menu = e.target.closest("[data-menu]");
+  if (menu) { try { await openMenu(menu.dataset.menu); } catch (err) { toast(err.message); } return; }
+  const unblock = e.target.closest("[data-unblock]");
+  if (unblock) {
+    try { await api(`/api/me/blocks/${unblock.dataset.unblock}`, {method: "DELETE"}); toast("Пользователь разблокирован"); openMenu("blocks"); }
+    catch (err) { toast(err.message); }
+    return;
+  }
+  const os = e.target.closest("[data-opensearch]");
+  if (os) {
+    const sp = window.__searches?.[os.dataset.opensearch]?.params || {};
+    const {region, ...rest} = sp;
+    filters = {...DEFAULT_FILTERS, ...rest, region_code: region || ""};
+    $("#search").value = filters.q || "";
+    homeLoaded = false; showView("home"); reloadCatalog();
+    return;
+  }
+  const ps = e.target.closest("[data-pausesearch]");
+  if (ps) {
+    try { await api(`/api/me/searches/${ps.dataset.pausesearch}/pause`, {method: "POST", body: JSON.stringify({on: ps.dataset.on === "1"})}); openMenu("searches"); }
+    catch (err) { toast(err.message); }
+    return;
+  }
+  const del = e.target.closest("[data-delsearch]");
+  if (del) {
+    try { await api(`/api/me/searches/${del.dataset.delsearch}`, {method: "DELETE"}); openMenu("searches"); }
+    catch (err) { toast(err.message); }
+    return;
+  }
+  const rc = e.target.closest("[data-receipt]");
+  if (rc) { try { await showReceipt(rc.dataset.receipt); } catch (err) { toast(err.message); } return; }
+  const rp = e.target.closest("[data-replyreview]");
+  if (rp) {
+    const text = await askText("Ответ на отзыв", "Коротко и вежливо. Без телефонов и ссылок");
+    if (!text) return;
+    try { await api(`/api/reviews/${rp.dataset.replyreview}/reply`, {method: "POST", body: JSON.stringify({text})}); toast("Ответ опубликован"); rp.remove(); } catch (err) { toast(err.message); }
+    return;
+  }
+  const rr = e.target.closest("[data-reportreview]");
+  if (rr) {
+    if (!(await requireConsent())) return;
+    const reason = await askReason();
+    if (!reason) return;
+    try { await api("/api/reports", {method: "POST", body: JSON.stringify({target_type: "review", target_id: rr.dataset.reportreview, reason})}); toast("Жалоба отправлена. Спасибо!"); }
+    catch (err) { toast(err.message); }
+    return;
+  }
+  const rv = e.target.closest("[data-review]");
+  if (rv) {
+    if (!(await requireConsent())) return;
+    reviewFor = +rv.dataset.review; reviewRating = 0; reviewTags = new Set(); $("#reviewText").value = ""; drawStars(); drawTags();
+    $("#reviewSheet").classList.remove("hidden");
+    return;
+  }
+  const dr = e.target.closest("[data-delreview]");
+  if (dr) {
+    if (!(await confirmDialog("Удалить ваш отзыв?"))) return;
+    try { await api(`/api/reviews/${dr.dataset.delreview}`, {method: "DELETE"}); toast("Отзыв удалён"); const id = $("#detailBody article")?.dataset.id; if (id) openDetail(+id, false); }
+    catch (err) { toast(err.message); }
+    return;
+  }
+  const coPage = e.target.closest("[data-company]");
+  if (coPage) { showPublicCompany(Number(coPage.dataset.company)); return; }
+  const rq = e.target.closest("[data-refundask]");
+  if (rq) {
+    const reason = await askText("Почему хотите вернуть?", "Коротко, чтобы мы могли помочь");
+    if (!reason) return;
+    try { await api(`/api/me/payments/${rq.dataset.refundask}/refund-request`, {method: "POST", body: JSON.stringify({reason})}); toast("Заявка отправлена. Мы ответим в приложении"); }
+    catch (err) { toast(err.message); }
+    return;
+  }
+  const au = e.target.closest("[data-author]");
+  if (au) {
+    try {
+      const [r, rev] = await Promise.all([api(`/api/authors/${au.dataset.author}`), api(`/api/authors/${au.dataset.author}/reviews`, {quiet: true}).catch(() => null)]);
+      openSub("author");
+      const c = r.card;
+      $("#subBody").innerHTML = `<p class="author">${c.verified ? `<b class="badge-ok">✔ Проверенный работодатель${c.company ? ": " + esc(c.company) : ""}</b> · ` : ""}На сайте с ${c.since || "—"} · Активных: ${c.active}${rev?.reviews ? ` · <b class="rating">★ ${rev.rating}</b> (${rev.reviews})` : ""}</p>` +
+        (rev?.items?.length ? `<h3 class="dsub">Отзывы</h3>` + rev.items.map((v) => `<div class="review"><b class="rating">${"★".repeat(v.rating)}</b> ${esc(v.name)} · ${esc(v.at)}${(v.tags || []).map((t) => `<span class="tagchip">${esc(t)}</span>`).join("")}${v.text ? `<p>${esc(v.text)}</p>` : ""}${v.reply ? `<p class="muted"><b>Ответ автора:</b> ${esc(v.reply)}</p>` : ""}${v.can_reply ? `<button class="linkbtn" data-replyreview="${v.id}">Ответить</button>` : ""}<button class="linkbtn" data-reportreview="${v.id}">⚑</button></div>`).join("") : "") +
+        r.items.map(listingCard).join("");
+    } catch (err) { toast(err.message); }
+    return;
+  }
+  const wd = e.target.closest("[data-withdraw]");
+  if (wd) {
+    if (!(await confirmDialog("Отозвать отклик? Работодатель его больше не увидит."))) return;
+    try { await api(`/api/applications/${wd.dataset.withdraw}/withdraw`, {method: "POST"}); toast("Отклик отозван"); openMenu("applications"); }
+    catch (err) { toast(err.message); }
+    return;
+  }
+  const st = e.target.closest("[data-appstatus]");
+  if (st) {
+    try {
+      const reply = await askText(st.dataset.appstatus === "invited" ? "Что передать кандидату?" : "Что ответить кандидату?",
+                                  st.dataset.appstatus === "invited" ? "Когда и куда прийти" : "Например: место уже занято");
+      if (reply === null) return;
+      await api(`/api/applications/${st.dataset.appid}`, {method: "PUT", body: JSON.stringify({status: st.dataset.appstatus, reply})});
+      const badge = st.closest("[data-app]").querySelector(".status");
+      badge.textContent = APP_STATUS[st.dataset.appstatus];
+      badge.className = "status " + (st.dataset.appstatus === "invited" ? "approved" : "rejected");
+      toast("Кандидат уведомлён");
+    } catch (err) { toast(err.message); }
+    return;
+  }
+  const tk = e.target.closest("[data-ticket]");
+  if (tk) { try { await openTicket(tk.dataset.ticket); } catch (err) { toast(err.message); } return; }
+  const oc = e.target.closest("[data-ownopen]");
+  if (oc && !e.target.closest("[data-own], [data-bulk], .bulkck")) { if (!bulkMode) showOwnPage(oc.dataset.ownopen); return; }
+  const own = e.target.closest("[data-own]");
+  if (own) {
+    const cardEl = own.closest("[data-id]");
+    const id = cardEl?.dataset.id;
+    const item = ownItems[id];
+    try {
+      const act = own.dataset.own;
+      if (act === "employer-apply") { $("#employerModal").classList.remove("hidden"); return; }
+      if (act === "edit") { openEdit(item); return; }
+      if (act === "dup") {
+        await api(`/api/listings/${id}/duplicate`, {method: "POST"});
+        toast("Копия создана в черновиках: измените, добавьте фото и отправьте на проверку"); homeLoaded = false; loadProfile(); return;
+      }
+      if (act === "move") { await moveListing(id, item); return; }
+      if (act === "price") {
+        const v = await askText(`Новая цена, ₩ (сейчас ${fmtKRW(item.price_amount)}, можно менять до ±50%)`, String(item.price_amount));
+        if (!v) return;
+        const n = parseInt(String(v).replace(/\s/g, ""), 10);
+        if (!n || n < 0) { toast("Введите число"); return; }
+        await api(`/api/listings/${id}/price`, {method: "POST", body: JSON.stringify({price_amount: n})});
+        toast(n < item.price_amount ? "Цена снижена: тем, у кого объявление в избранном, придёт уведомление" : "Цена изменена"); homeLoaded = false; loadProfile(); return;
+      }
+      if (act === "history") { await showListingHistory(id, item); return; }
+      if (act === "reserve") { await api(`/api/listings/${id}/reserve`, {method: "POST", body: JSON.stringify({on: !item.reserved})}); toast(item.reserved ? "Резерв снят" : "Отмечено: зарезервировано"); homeLoaded = false; loadProfile(); return; }
+      if (act === "stats") {
+        const st = await api(`/api/listings/${id}/stats`);
+        let line = cardEl.querySelector(".statline");
+        if (!line) { line = document.createElement("div"); line.className = "statline"; cardEl.appendChild(line); }
+        const peak = Math.max(1, ...(st.daily || []).map((d) => d.views));
+        line.innerHTML = ((st.daily || []).some((d) => d.views) ? `<div class="spark" title="Просмотры за 14 дней">${st.daily.map((d) => `<i style="height:${Math.max(4, Math.round(100 * d.views / peak))}%" title="${esc(d.day)}: ${d.views}"></i>`).join("")}</div>` : "") + `<p class="meta-line">👁 ${st.views} · ♥ в избранном ${st.favorites} · 💬 чатов ${st.chats}` + (st.applications ? ` · 📨 откликов ${st.applications}` : "") +
+          (st.views ? ` · конверсия в чат ${st.conversion}%` : "") + (st.days_left !== null ? ` · осталось дней: ${st.days_left}` : "") + "</p>" +
+          st.advice.map((t) => `<p class="note">💡 ${esc(t)}</p>`).join("") + (st.promote ? '<div class="actions"><button data-own="promo">🚀 Продвинуть</button></div>' : "");
+        return;
+      }
+      if (act === "appeal") {
+        const text = await askText("Почему решение неверно?", "Объясните, что изменилось или что не учли");
+        if (!text) return;
+        await api("/api/tickets", {method: "POST", body: JSON.stringify({kind: "appeal", listing_id: +id, text})});
+        toast("Обращение отправлено. Ответ придёт в уведомления");
+        return;
+      }
+      if (act === "applicants") { await showApplicants(id); return; }
+      if (act === "promo") { await openServices(id, item.category); return; }
+      if (act === "archive" && !(await confirmDialog("Удалить объявление? Его не будет видно другим."))) return;
+      const done = await api(`/api/listings/${id}/${{close: "close", sold: "sold", reopen: "reopen", archive: "archive", renew: "renew", submit: "submit"}[act]}`, {method: "POST"});
+      toast(act === "renew" && done?.expires_at ? "Продлено до " + new Date(done.expires_at).toLocaleDateString("ru-RU")
+        : act === "archive" ? "Объявление удалено" : "Готово");
+      homeLoaded = false;
+      loadProfile();
+    } catch (err) { toast(err.message); }
+    return;
+  }
+
+  const convo = e.target.closest("[data-chat]");
+  if (convo) { openChat(convo.dataset.chat, convo.dataset.title); return; }
+  const section = e.target.closest("[data-section]");
+  if (section) { openSection(section.dataset.section); return; }
+  const article = e.target.closest("[data-article]");
+  if (article) { openArticle(article.dataset.article); return; }
+  const open = e.target.closest("[data-open]");
+  if (open && !e.target.closest(".cmp, .cmpbar")) { openDetail(open.dataset.open); return; }
+});
+
+document.querySelectorAll(".bottom [data-view], .tiles [data-view]").forEach((b) => b.onclick = () => showView(b.dataset.view));
+
+// ---------- согласие, город, работодатель ----------
+// ---------- e-mail и пароль для входа на сайт ----------
+function openSignup(mode) {
+  const f = $("#signupForm");
+  f.reset();
+  const acc = me?.account || {};
+  f.display_name.value = me?.display_name || "";
+  f.email.value = acc.email || "";
+  $("#signupCurrentBox").hidden = !acc.has_password;
+  f.password.required = !acc.has_password;
+  f.password2.required = !acc.has_password;
+  $("#signupTitle").textContent = mode === "first" ? "Завершите регистрацию" : "Вход на сайт";
+  $("#signupHint").textContent = acc.has_password
+    ? "Здесь можно сменить e-mail или пароль. Чтобы изменить, введите текущий пароль. Остальные браузеры после смены пароля выйдут."
+    : "Чтобы заходить на сайт из любого браузера по e-mail и паролю, задайте их сейчас. Telegram останется основным способом входа и восстановления.";
+  $("#signupLater").hidden = mode !== "first";
+  $("#signupSheet").classList.remove("hidden");
+}
+async function maybeSignup() {
+  try { if (!me) me = await api("/api/me", {quiet: true}); } catch (e) { return; }
+  if (!localStorage.getItem("welcomeSeen")) return;            // в первый заход только приветствие: не показываем сразу три окна
+  if (me?.consent && me.account?.needs_setup) openSignup("first");
+}
+$("#signupClose").onclick = () => { if ($("#signupLater").hidden) $("#signupSheet").classList.add("hidden"); else $("#signupLater").click(); };
+$("#signupShow").onchange = (e) => { for (const n of ["password", "password2", "current_password"]) $("#signupForm")[n].type = e.target.checked ? "text" : "password"; };
+$("#signupLater").onclick = async () => {
+  try { await api("/api/me/account/skip", {method: "POST"}); me.account = {...me.account, needs_setup: false, skipped: true}; } catch (e) { /* не страшно */ }
+  $("#signupSheet").classList.add("hidden");
+  toast("Задать e-mail и пароль можно в «Настройки → Вход на сайт»");
+};
+$("#signupForm").onsubmit = async (e) => {
+  e.preventDefault();
+  const f = e.target, d = Object.fromEntries(new FormData(f));
+  if (d.password !== d.password2) { toast("Пароли не совпадают"); return; }
+  const body = {display_name: d.display_name, email: d.email, current_password: d.current_password || ""};
+  if (d.password) body.password = d.password;
+  try {
+    const r = await api("/api/me/account", {method: "PUT", body: JSON.stringify(body)});
+    me.account = r; if (r.name) me.display_name = r.name;
+    $("#signupSheet").classList.add("hidden");
+    toast(r.has_password ? "Готово: теперь можно входить на сайт по e-mail и паролю" : "Сохранено");
+    if (currentView === "sub" && currentSubKey === "settings") openMenu("settings");
+  } catch (err) { toast(err.message); }
+};
+$("#pwLoginForm").onsubmit = async (e) => {
+  e.preventDefault();
+  const d = Object.fromEntries(new FormData(e.target));
+  try {
+    const r = await api("/api/auth/password-login", {method: "POST", body: JSON.stringify(d), quiet: true});
+    localStorage.setItem("webSession", r.session);
+    location.reload();
+  } catch (err) { $("#pwLoginInfo").textContent = err.message; $("#pwLoginInfo").style.color = "var(--bad)"; }
+};
+$("#consentOk").onclick = async () => {
+  if (!$("#consentRules").checked || !$("#consentPrivacy").checked) { toast("Отметьте оба пункта, чтобы продолжить"); return; }
+  try {
+    await api("/api/me/consent", {method: "POST", body: JSON.stringify({accept: true})});
+    $("#consent").classList.add("hidden");
+    toast("Спасибо! Теперь можно пользоваться приложением");
+    me = null; setTimeout(maybeSignup, 600);          // сразу после согласия: имя, e-mail и пароль для входа на сайт
+  } catch (err) { toast(err.message); }
+};
+function showCityChip() { $("#cityChipText").textContent = (me?.city || "Город").split(",")[0]; }
+$("#cityChip").onclick = () => openCity();
+$("#langBtn").textContent = ({ru: "RU", en: "EN", ko: "KO"})[i18n.lang] || "RU";
+$("#langBtn").onclick = async () => {
+  const k = await chooseDialog("Язык / Language / 언어", [{key: "ru", label: "Русский"}, {key: "en", label: "English (beta)"}, {key: "ko", label: "한국어 (beta)"}]);
+  if (!k || k === i18n.lang) return;
+  localStorage.setItem(LANG_KEY, k);
+  location.reload();                              // чистый перезапуск: тексты возвращаются или переводятся целиком
+};
+function showBell(n) { $("#bellBadge").textContent = n > 99 ? "99+" : n; $("#bellBadge").hidden = !n; }
+$("#bellBtn").onclick = async () => { if (await requireConsent()) showView("notifs", {push: true}); };
+async function loadNotifs() {
+  const box = $("#notifList");
+  box.innerHTML = '<div class="skeleton"></div>';
+  try {
+    const r = await api("/api/me/notifications");
+    box.innerHTML = r.items.length ? r.items.map((n) => `<article class="listing nitem ${n.read ? "" : "unread"}">
+      <small>${esc(n.label)} · ${esc(fmtDate(n.created_at))}</small><p>${esc(n.text)}</p></article>`).join("")
+      : '<div class="empty">Пока ничего нового.<br>Здесь появятся сообщения, отклики и решения модератора.</div>';
+    if (r.unread) { await api("/api/me/notifications/read", {method: "POST", body: JSON.stringify({})}); showBell(0); }
+  } catch (e) { box.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+$("#readAll").onclick = async () => {
+  try { await api("/api/me/notifications/read", {method: "POST", body: JSON.stringify({})}); showBell(0); loadNotifs(); }
+  catch (err) { toast(err.message); }
+};
+async function openCity() {
+  await setGeo("#cityGeo", me?.region_code || "", me?.district_id || "");
+  $("#cityModal").classList.remove("hidden");
+}
+$("#cityBtn").onclick = openCity;
+$("#closeCity").onclick = () => $("#cityModal").classList.add("hidden");
+$("#cityForm").onsubmit = async (e) => {
+  e.preventDefault();
+  try {
+    const f = e.target;
+    await api("/api/me/settings", {method: "PUT", body: JSON.stringify({
+      region_code: f.region_code.value, district_id: f.district_id.value ? Number(f.district_id.value) : null})});
+    $("#cityModal").classList.add("hidden");
+    toast("Город сохранён");
+    await loadMe(); showCityChip();
+    loadProfile();
+    if (currentView === "sub" && currentSubKey === "settings") openMenu("settings");
+  } catch (err) { toast(err.message); }
+};
+$("#closeEmployer").onclick = () => $("#employerModal").classList.add("hidden");
+$("#employerForm").onsubmit = async (e) => {
+  e.preventDefault();
+  try {
+    await api("/api/me/employer", {method: "POST", body: JSON.stringify(Object.fromEntries(new FormData(e.target)))});
+    $("#employerModal").classList.add("hidden");
+    toast("Заявка отправлена на проверку");
+    me.employer_status = "pending";
+    openMenu("employer");
+  } catch (err) { toast(err.message); }
+};
+
+// ---------- тема Telegram ----------
+function applyTelegramTheme() {
+  // Фирменные цвета приложения не меняются под тему Telegram (дизайн по макету); подстраиваем только окно Telegram
+  try { tg?.setBackgroundColor?.("#f3f6fb"); tg?.setHeaderColor?.("#ffffff"); tg?.setBottomBarColor?.("#ffffff"); } catch (e) { /* старая версия */ }
+}
+applyTelegramTheme();
+tg?.onEvent?.("themeChanged", applyTelegramTheme);
+
+// ---------- потянуть вниз, чтобы обновить ----------
+{
+  const box = $("#scroll");
+  const ind = document.createElement("div"); ind.className = "ptr"; ind.textContent = "Отпустите, чтобы обновить";
+  box.parentNode.insertBefore(ind, box);
+  let y0 = null;
+  box.addEventListener("touchstart", (e) => { y0 = box.scrollTop === 0 && e.touches.length === 1 ? e.touches[0].clientY : null; }, {passive: true});
+  box.addEventListener("touchmove", (e) => { if (y0 !== null) ind.classList.toggle("show", e.touches[0].clientY - y0 > 80); }, {passive: true});
+  box.addEventListener("touchend", (e) => {
+    const pulled = y0 !== null && e.changedTouches[0].clientY - y0 > 80;
+    y0 = null; ind.classList.remove("show");
+    if (!pulled || currentView === "chat") return;
+    const refresh = {home: reloadCatalog, saved: loadFavorites, chats: loadConversations, profile: loadProfile, mine: loadProfile, notifs: loadNotifs, dating: loadDating, community: loadGroups, guide: loadGuide}[currentView];
+    if (refresh) { refresh(); toast("Обновлено"); }
+  }, {passive: true});
+}
+// ---------- старт ----------
+setTimeout(showWelcomeOnce, 1200);
+setTimeout(() => ensureConfig(), 800);      // сверяет номер версии страницы с сервером
+// Офлайн: страница-оболочка и скрипты кэшируются, чтобы приложение открывалось и при плохой связи
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
+function openFromLink() {
+  const params = new URLSearchParams(location.search);
+  const section = params.get("section");
+  if (["job", "housing", "marketplace"].includes(section)) { filters.category = section; return false; }
+  if (section === "cabinet") { setTimeout(() => $("#myDatingBtn").onclick(), 700); return true; }      // кабинет знакомств из бота
+  if (["dating", "community", "guide"].includes(section)) { showView(section); return true; }
+  const joinCode = params.get("join");
+  if (joinCode) { setTimeout(async () => { if (await requireConsent()) { openSub("company"); joinCompany(joinCode); } }, 900); return true; }
+  const listing = params.get("listing");
+  if (listing && /^\d+$/.test(listing)) { openDetail(listing, false); return true; }
+  return false;
+}
+if (!inTelegram) $("#logoutItem").hidden = !localStorage.getItem("webSession");
+const openedFromLink = openFromLink();
+updateFilterUi();
+loadFields().then(() => loadCatalog());  // подписи полей нужны карточкам с первой отрисовки
+loadGeo();
+loadFavIds().then(() => {
+  document.querySelectorAll("#listings .fav").forEach((b) => {
+    const id = Number(b.closest("[data-id]")?.dataset.id);
+    if (favIds.has(id)) { b.textContent = "♥"; b.classList.add("on"); }
+  });
+});
+api("/api/me", {quiet: true})
+  .then((user) => { api("/api/exchange", {quiet: true}).then((x) => { khInfo = x; }).catch(() => {}); me = user; showCityChip(); showBell(user.unread || 0); if (!me.consent) $("#consent").classList.remove("hidden"); else setTimeout(maybeSignup, 1500); })
+  .catch(() => { if (!inTelegram) $("#loginTop").hidden = false; });
+
+// ---------- страница не двигается ----------
+// Страница целиком неподвижна: прокручиваются только внутренние области, а когда прокрутка
+// доходит до края, остаток жеста не «тянет» всё приложение (резинка в iOS и сворачивание в Telegram).
+(() => {
+  let startY = 0;
+  const scroller = (el) => {
+    for (; el && el !== document.body; el = el.parentElement) {
+      const o = getComputedStyle(el).overflowY;
+      if ((o === "auto" || o === "scroll") && el.scrollHeight > el.clientHeight) return el;
+    }
+    return null;
+  };
+  document.addEventListener("touchstart", (e) => {
+    startY = e.touches[0].clientY;
+    const el = scroller(e.target);
+    if (!el) return;
+    if (el.scrollTop <= 0) el.scrollTop = 1;
+    else if (el.scrollTop + el.clientHeight >= el.scrollHeight) el.scrollTop = el.scrollHeight - el.clientHeight - 1;
+  }, {passive: true});
+  document.addEventListener("touchmove", (e) => {
+    if (e.touches.length > 1) return;  // щипок оставляем системе
+    if (e.target.closest("textarea, input, select")) return;
+    const el = scroller(e.target);
+    if (!el) { e.preventDefault(); return; }
+    const dy = e.touches[0].clientY - startY;
+    if ((dy > 0 && el.scrollTop <= 0) || (dy < 0 && el.scrollTop + el.clientHeight >= el.scrollHeight)) e.preventDefault();
+  }, {passive: false});
+})();
+
+
+// ---------- кабинет и окна ----------
+document.querySelectorAll("[data-back]").forEach((b) => b.onclick = goBack);
+$("#profileAdd").onclick = () => $("#addBtn").onclick();
+// Окно закрывается нажатием на затемнённый фон, клавишей Esc и кнопкой «Назад» Telegram.
+// Обязательное окно согласия и страница создания объявления так не закрываются.
+const modalOpen = () => [...document.querySelectorAll(".modal:not(.hidden):not(.page):not(#consent):not(#webLogin)")].pop();
+function closeModal(el) {
+  const closer = el.querySelector(".sheet-top button");
+  if (closer) closer.click(); else el.classList.add("hidden");
+}
+document.addEventListener("click", (e) => {
+  if (e.target.classList?.contains("modal") && !e.target.classList.contains("page") && e.target.id !== "consent") closeModal(e.target);
+});
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") { const m = modalOpen(); if (m) closeModal(m); } });
+
+// Быстрый переход к поиску: "/" или Ctrl/Cmd+K. Не перехватываем ввод в полях и открытые диалоги.
+document.addEventListener("keydown", (e) => {
+  if (e.defaultPrevented || e.altKey || e.shiftKey) return;
+  const key = e.key.toLowerCase();
+  const shortcut = (key === "/" && !e.ctrlKey && !e.metaKey) ||
+    (key === "k" && (e.ctrlKey || e.metaKey));
+  if (!shortcut || modalOpen()) return;
+  const target = e.target;
+  if (target instanceof HTMLElement &&
+      (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return;
+  const search = document.getElementById("search");
+  if (!search || search.closest("[hidden]")) return;
+  e.preventDefault();
+  search.focus();
+  search.select();
+});
+
+// Ссылки на правила открываются во внешнем браузере/окне Telegram, а не заменяют приложение
+document.addEventListener("click", (e) => {
+  const a = e.target.closest("[data-legal]");
+  if (!a) return;
+  e.preventDefault();
+  const url = location.origin + a.getAttribute("href");
+  if (tg?.openLink) tg.openLink(url); else window.open(url, "_blank", "noopener");
+});
+
+// ---------- выбор из списка (окно) ----------
+function chooseDialog(title, options) {
+  return new Promise((resolve) => {
+    const m = document.createElement("div");
+    m.className = "modal";
+    m.innerHTML = `<div class="sheet"><div class="sheet-top"><b>${esc(title)}</b><button type="button" data-x aria-label="Закрыть">✕</button></div>
+      <div class="menu-list">${options.map((o) => `<button class="wide" data-k="${esc(String(o.key))}">${esc(o.label)}</button>`).join("")}</div></div>`;
+    document.body.appendChild(m);
+    const done = (v) => { m.remove(); resolve(v); };
+    m.onclick = (e) => {
+      if (e.target === m || e.target.closest("[data-x]")) return done(null);
+      const b = e.target.closest("[data-k]");
+      if (b) done(b.dataset.k);
+    };
+  });
+}
+// «Перенести»: из личных в компанию и обратно (платное продвижение должно закончиться)
+async function moveListing(id, item, after) {
+  let cos = [];
+  try { cos = (await api("/api/company/mine", {quiet: true})).filter((c) => c.verified && c.role !== "viewer" && c.id !== item?.company_id); } catch (e) { cos = []; }
+  const opts = cos.map((c) => ({key: c.id, label: "🏢 " + c.name}));
+  if (item?.company_id) opts.unshift({key: "me", label: "👤 В мои личные объявления"});
+  if (!opts.length) { toast("Нет проверенной компании, куда можно перенести. Создайте её в «Кабинет компании»."); return; }
+  const k = await chooseDialog("Куда перенести объявление?", opts);
+  if (!k) return;
+  await api(`/api/listings/${id}/move`, {method: "POST", body: JSON.stringify({company_id: k === "me" ? null : Number(k)})});
+  toast(k === "me" ? "Теперь объявление личное" : "Объявление перенесено в компанию");
+  homeLoaded = false;
+  if (after) after(); else loadProfile();
+}
+// ---------- «Мои объявления»: выбрать несколько и сделать одно действие ----------
+let bulkMode = false;
+$("#mineBulk").onclick = () => {
+  bulkMode = !bulkMode;
+  $("#mineBulk").textContent = bulkMode ? "Готово" : "Выбрать";
+  $("#bulkBar").hidden = !bulkMode;
+  renderOwn();
+};
+$("#bulkBar").addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-bulkdo]");
+  if (!b) return;
+  const ids = [...document.querySelectorAll("[data-bulk]:checked")].map((c) => c.dataset.bulk);
+  if (!ids.length) { toast("Отметьте объявления галочками"); return; }
+  const act = b.dataset.bulkdo;
+  if (act === "archive" && !(await confirmDialog(`Удалить выбранные объявления (${ids.length})?`))) return;
+  let ok = 0, fail = [];
+  for (const id of ids) {
+    try { await api(`/api/listings/${id}/${act}`, {method: "POST", quiet: true}); ok += 1; }
+    catch (err) { fail.push(`#${id}: ${err.message}`); }
+  }
+  toast(`Готово: ${ok} из ${ids.length}` + (fail.length ? `. Не получилось: ${fail[0]}` : ""));
+  homeLoaded = false;
+  loadProfile();
+});
+// ---------- редактирование: шаги кликабельны, «Сохранить» доступно на любом шаге ----------
+$("#stepsBar").addEventListener("click", (e) => {
+  const d = e.target.closest("#stepsBar > div");
+  if (!d) return;
+  const n = [...$("#stepsBar").children].indexOf(d) + 1;
+  if (n === wizStep) return;
+  if (n < wizStep || currentEditId) { showStep(n); return; }
+  for (let k = wizStep; k < n; k++) if (!validateStep(k)) return;
+  showStep(n);
+});
+$("#editSave").onclick = () => { $("#rulesOk").checked = true; saveListing(true); };
+// ---------- компания: аналитика, журнал, выгрузка, копия и перенос ----------
+async function downloadWithAuth(url, name) {
+  const headers = inTelegram ? {"X-Telegram-Init-Data": tg.initData} : {"X-Web-Session": localStorage.getItem("webSession") || ""};
+  const r = await fetch(url, {headers});
+  if (!r.ok) { toast("Не удалось скачать"); return; }
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(await r.blob()); a.download = name; document.body.appendChild(a); a.click(); a.remove();
+}
+async function coAnalyticsHtml(ov) {
+  const a = await api(`/api/company/${ov.id}/analytics`);
+  const t = a.total;
+  return `<article class="dcard2"><h3>Итоги по всем объявлениям</h3><p>👁 ${t.views} · ♥ ${t.favorites} · 💬 чатов ${t.chats} · 📨 откликов ${t.applications}</p>
+    ${a.best ? `<p class="muted">Больше всего смотрят: «${esc(a.best)}»</p>` : ""}</article>` +
+    (a.items.length ? a.items.map((x) => `<article class="dcard2"><div class="dcard2-head"><h3 style="margin:0">${esc(x.title)}</h3><span class="muted">${x.conversion}%</span></div>
+      <p class="muted">👁 ${x.views} · ♥ ${x.favorites} · 💬 ${x.chats} · 📨 ${x.applications}</p>
+      <div class="fw-bar"><i style="width:${Math.min(100, x.conversion * 4)}%"></i></div></article>`).join("") : '<div class="empty">Пока нет данных.</div>') +
+    '<p class="muted">Процент: сколько просмотров закончились откликом или чатом.</p>';
+}
+async function coActivityHtml(ov) {
+  const rows = await api(`/api/company/${ov.id}/activity`);
+  return rows.length ? rows.map((r) => `<article class="dcard2"><b>${esc(r.what)}</b><p class="muted">${esc(r.who)} · ${esc(fmtDate(r.at))}${r.details ? " · " + esc(r.details) : ""}</p></article>`).join("")
+    : '<div class="empty">Здесь появятся действия команды: приглашения, роли, копии и переносы.</div>';
+}
+document.addEventListener("click", async (e) => {
+  const dup = e.target.closest("[data-codup]"), mv = e.target.closest("[data-comove]"), csv = e.target.closest("[data-cocsv]");
+  try {
+    if (dup) { await api(`/api/listings/${dup.dataset.codup}/duplicate`, {method: "POST"}); toast("Копия создана в черновиках компании"); renderCoPane(await api(`/api/company/${coState.id}`)); }
+    if (mv) { await moveListing(mv.dataset.comove, {company_id: coState.id}, async () => renderCoPane(await api(`/api/company/${coState.id}`))); }
+    if (csv) await downloadWithAuth(`/api/company/${coState.id}/applications.csv`, "applications.csv");
+  } catch (err) { toast(err.message); }
+});
+
+async function showListingHistory(id, item) {
+  const rows = await api(`/api/listings/${id}/history`);
+  const m = document.createElement("div");
+  m.className = "modal";
+  m.innerHTML = `<div class="sheet"><div class="sheet-top"><b>История: ${esc(item?.title || "#" + id)}</b><button type="button" data-x aria-label="Закрыть">✕</button></div>
+    <div class="menu-list">${rows.map((r) => `<div class="hist"><b>${esc(r.what)}</b><small class="muted">${esc(fmtDate(r.at))}${r.details ? " · " + esc(r.details) : ""}</small></div>`).join("")}</div></div>`;
+  document.body.appendChild(m);
+  m.onclick = (e) => { if (e.target === m || e.target.closest("[data-x]")) m.remove(); };
+}
+
+document.addEventListener("change", async (e) => {
+  const sel = e.target.closest("[data-costage]");
+  if (!sel) return;
+  try { await api(`/api/company/${coState.id}/applications/${sel.dataset.costage}/note`, {method: "PUT", body: JSON.stringify({stage: sel.value})}); toast("Этап сохранён"); }
+  catch (err) { toast(err.message); }
+});
+document.addEventListener("click", async (e) => {
+  const f = e.target.closest("[data-costage-f]"), sv = e.target.closest("[data-conote-save]");
+  try {
+    if (f) { coState.stage = f.dataset.costageF; renderCoPane(await api(`/api/company/${coState.id}`)); }
+    if (sv) {
+      const id = sv.dataset.conoteSave;
+      await api(`/api/company/${coState.id}/applications/${id}/note`, {method: "PUT", body: JSON.stringify({note: document.querySelector(`[data-conote="${id}"]`).value})});
+      toast("Заметка сохранена");
+    }
+  } catch (err) { toast(err.message); }
+});
+
+// ---------- шаблоны: сохранить заполненное и начинать новое одним касанием ----------
+let tplItems = [];
+async function loadTemplates() {
+  try { tplItems = await api("/api/me/templates", {quiet: true}); } catch (e) { tplItems = []; }
+  $("#tplBox").hidden = tplItems.length === 0;
+  $("#tplList").innerHTML = tplItems.map((t) => `<div class="wide tplrow"><button type="button" data-tpl="${t.id}">${{job: "💼", housing: "🏠"}[t.category] || "🛍️"} ${esc(t.name)}${t.company_id ? " · 🏢" : ""}</button><button type="button" class="link" data-tpldel="${t.id}" aria-label="Удалить шаблон">✕</button></div>`).join("");
+}
+document.addEventListener("click", async (e) => {
+  const use = e.target.closest("[data-tpl]"), del = e.target.closest("[data-tpldel]");
+  try {
+    if (use) {
+      const t = tplItems.find((x) => String(x.id) === use.dataset.tpl);
+      if (!t) return;
+      pendingTemplate = t.data;
+      if (t.company_id) { const co = (await api("/api/company/mine", {quiet: true}).catch(() => [])).find((c) => c.id === t.company_id); if (co) postAsCompany = {id: co.id, name: co.name}; }
+      await openAdd(kindOfItem(t.data));
+    }
+    if (del && (await confirmDialog("Удалить шаблон?"))) { await api(`/api/me/templates/${del.dataset.tpldel}`, {method: "DELETE"}); loadTemplates(); }
+  } catch (err) { toast(err.message); }
+});
+$("#saveTplBtn").onclick = async () => {
+  try {
+    const data = listingPayload($("#listingForm"));
+    if (!data.title && !data.description) { toast("Сначала заполните объявление"); return; }
+    const name = await askText("Название шаблона", "Например: Повар, полный день");
+    if (!name) return;
+    await api("/api/me/templates", {method: "POST", body: JSON.stringify({name, data, company_id: postAsCompany ? postAsCompany.id : null})});
+    toast("Шаблон сохранён: он будет в окне «Добавить»");
+  } catch (err) { toast(err.message); }
+};
+
+// ---------- значок непрочитанных сообщений на нижней панели ----------
+async function refreshNavBadge() {
+  if (isGuest()) { $("#navChats").hidden = true; return; }
+  try {
+    const r = await api("/api/me/unread", {quiet: true});
+    $("#navChats").textContent = r.messages > 99 ? "99+" : r.messages;
+    $("#navChats").hidden = !r.messages;
+  } catch (e) { /* без значка */ }
+}
+setTimeout(refreshNavBadge, 2500);
+setInterval(refreshNavBadge, 60000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshNavBadge(); });
+
+document.addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-restore]");
+  if (!b) return;
+  try {
+    if (!(await confirmDialog("Вернуть эту версию? Текст и цену сначала проверит модератор, пока видна текущая."))) return;
+    const r = await api(`/api/listings/${ownPageId}/restore/${b.dataset.restore}`, {method: "POST"});
+    toast(r.has_edit ? "Версия отправлена на проверку" : "Версия возвращена");
+    homeLoaded = false; loadProfile();
+  } catch (err) { toast(err.message); }
+});
+// ---------- подсказка цены: сколько стоят похожие объявления ----------
+let hintTimer = null;
+function priceHint() {
+  clearTimeout(hintTimer);
+  hintTimer = setTimeout(async () => {
+    const f = $("#listingForm"), box = $("#priceHint");
+    if (!box || !f) return;
+    const category = KIND_CATEGORY[formKind];
+    const q = new URLSearchParams({category});
+    if (f.region_code.value) q.set("region_code", f.region_code.value);
+    if (category === "job" && f.employment.value) q.set("employment", f.employment.value);
+    if (category === "housing" && f.housing_type.value) q.set("housing_type", f.housing_type.value);
+    if (category === "marketplace" && f.goods_category.value) q.set("goods_category", f.goods_category.value);
+    try {
+      const r = await api("/api/price-hint?" + q, {quiet: true});
+      if (!r.hint) { box.hidden = true; return; }
+      const mine = Number(f.price_amount.value) || 0, h = r.hint;
+      const verdict = !mine ? "" : mine < h.low ? " Ваша цена ниже обычной: быстрее найдут, но проверьте, не прогадаете ли." : mine > h.high ? " Ваша цена выше обычной: откликов может быть меньше." : " Ваша цена в обычном диапазоне.";
+      box.hidden = false;
+      box.textContent = `💡 По ${r.scope}: обычно ${fmtKRW(h.low)} – ${fmtKRW(h.high)}, середина ${fmtKRW(h.median)} (${r.n} объявлений).${verdict}`;
+    } catch (err) { box.hidden = true; }
+  }, 500);
+}
+document.addEventListener("input", (e) => { if (e.target.closest("#listingForm") && ["price_amount", "employment", "housing_type", "goods_category"].includes(e.target.name)) priceHint(); });
+document.addEventListener("change", (e) => { if (e.target.closest("#listingForm") && ["region_code", "employment", "housing_type", "goods_category"].includes(e.target.name)) priceHint(); });
+
+document.addEventListener("click", async (e) => {
+  const rv = e.target.closest("[data-coreview]"), rp = e.target.closest("[data-coreply]");
+  try {
+    if (rv) {
+      const k = await chooseDialog("Ваша оценка компании", [5, 4, 3, 2, 1].map((n) => ({key: n, label: "★".repeat(n) + "☆".repeat(5 - n)})));
+      if (!k) return;
+      const text = (await askText("Что рассказать другим? (необязательно)", "Как с вами общались, всё ли как в объявлении")) || "";
+      await api(`/api/companies/${rv.dataset.coreview}/reviews`, {method: "POST", body: JSON.stringify({rating: Number(k), text})});
+      toast("Спасибо! Отзыв опубликован"); showPublicCompany(Number(rv.dataset.coreview));
+    }
+    if (rp) {
+      const text = await askText("Ответ на отзыв", "Спасибо, учтём");
+      if (!text) return;
+      await api(`/api/company/${coState.id}/reviews/${rp.dataset.coreply}/reply`, {method: "POST", body: JSON.stringify({text})});
+      toast("Ответ опубликован"); renderCoPane(await api(`/api/company/${coState.id}`));
+    }
+  } catch (err) { toast(err.message); }
+});
+async function coPageFormHtml(ov) {
+  const p = await api(`/api/company/${ov.id}/page`);
+  return `<article class="dcard2" id="coPageBox"><h3>Публичная страница</h3><p class="muted">Так компанию увидят соискатели: коротко о вас, контакты и что вы предлагаете.</p>
+    ${p.cover ? `<img class="cocover" src="${esc(p.cover)}" alt="">` : ""}<div class="actions"><label class="btn secondary dfile">${p.cover ? "Заменить обложку" : "Загрузить обложку"}<input type="file" id="coCover" accept="image/jpeg,image/png,image/webp" hidden></label>${p.cover ? '<button class="secondary" id="coCoverDel">Убрать</button>' : ""}</div>
+    <div class="gridform"><label class="wide">Одной строкой о компании<input data-pg="tagline" maxlength="120" value="${esc(p.tagline)}" placeholder="Корейская кухня в Сеуле, берём без опыта"></label>
+    <label>Telegram<input data-pg="telegram" maxlength="80" value="${esc(p.telegram)}" placeholder="username без @"></label><label>Instagram<input data-pg="instagram" maxlength="80" value="${esc(p.instagram)}"></label>
+    <label>KakaoTalk<input data-pg="kakao" maxlength="80" value="${esc(p.kakao)}"></label><label>Часы работы<input data-pg="hours" maxlength="80" value="${esc(p.hours)}" placeholder="Пн–Сб 9:00–18:00"></label>
+    <label class="wide">Адрес<input data-pg="address" maxlength="160" value="${esc(p.address)}"></label></div>
+    <div class="chips">${Object.entries(p.all_benefits).map(([k, t]) => `<label class="chip"><input type="checkbox" data-pgb="${k}" ${p.benefits.includes(k) ? "checked" : ""}> ${esc(t)}</label>`).join("")}</div>
+    <div class="actions"><button id="coPageSave">💾 Сохранить страницу</button></div></article>`;
+}
+document.addEventListener("click", async (e) => {
+  if (e.target.id !== "coPageSave") return;
+  try {
+    const body = {benefits: [...document.querySelectorAll("#coPageBox [data-pgb]:checked")].map((c) => c.dataset.pgb)};
+    document.querySelectorAll("#coPageBox [data-pg]").forEach((i) => { body[i.dataset.pg] = i.value; });
+    await api(`/api/company/${coState.id}/page`, {method: "PUT", body: JSON.stringify(body)});
+    toast("Страница сохранена");
+  } catch (err) { toast(err.message); }
+});
+
+document.addEventListener("change", async (e) => {
+  if (e.target.id !== "coCover" || !e.target.files[0]) return;
+  const data = new FormData(); data.append("file", e.target.files[0]);
+  const headers = inTelegram ? {"X-Telegram-Init-Data": tg.initData} : {"X-Web-Session": localStorage.getItem("webSession") || ""};
+  const r = await fetch(`/api/company/${coState.id}/cover`, {method: "POST", body: data, headers});
+  if (!r.ok) toast((await r.json()).detail || "Не удалось загрузить"); else { toast("Обложка обновлена"); showCompany(coState.id); }
+});
+document.addEventListener("click", async (e) => {
+  if (e.target.id !== "coCoverDel") return;
+  try { await api(`/api/company/${coState.id}/cover`, {method: "DELETE"}); showCompany(coState.id); } catch (err) { toast(err.message); }
+});
+// ---------- шаблоны ответов компании: приглашение, отказ, чат ----------
+const DEFAULT_REPLIES = {invite: ["Приглашаем на собеседование. Адрес и время пришлём в чате: напишите, когда вам удобно", "Здравствуйте! Вы нам подходите. Когда сможете подойти в офис?"],
+                         reject: ["Спасибо за отклик! Сейчас мы нашли другого кандидата, но сохраним ваш контакт", "К сожалению, по условиям вакансии вы не подходите (виза или опыт). Спасибо за интерес"]};
+async function pickReply(kind) {
+  let own = [];
+  try { own = (await api(`/api/company/${coState.id}/reply-templates`, {quiet: true})).filter((r) => r.kind === kind); } catch (e) { own = []; }
+  const options = [...own.map((r) => ({key: "own:" + r.id, label: r.text})), ...(DEFAULT_REPLIES[kind] || []).map((t, i) => ({key: "def:" + i, label: t})),
+                   {key: "write", label: "✍ Написать своё"}, {key: "none", label: "Без сообщения"}];
+  const k = await chooseDialog(kind === "invite" ? "Сообщение соискателю" : "Причина отказа", options);
+  if (!k) return null;
+  if (k === "none") return "";
+  if (k === "write") return (await askText("Сообщение соискателю", "Можно оставить пустым")) ?? "";
+  return options.find((o) => o.key === k).label;
+}
+async function coReplyTemplatesHtml() {
+  const rows = await api(`/api/company/${coState.id}/reply-templates`);
+  const K = {invite: "Приглашение", reject: "Отказ", chat: "Для чата"};
+  return `<article class="dcard2"><h3>Шаблоны ответов</h3><p class="muted">Быстрые ответы для приглашений, отказов и чата с кандидатами. Их видит вся команда.</p>
+    ${rows.map((r) => `<div class="drun"><span><b>${esc(K[r.kind] || r.kind)}</b> · ${esc(r.text)}</span><button class="link" data-corpl-del="${r.id}">убрать</button></div>`).join("") || '<p class="muted">Своих шаблонов пока нет, но предложим готовые.</p>'}
+    <div class="actions"><button class="secondary" data-corpl-add>＋ Добавить шаблон</button></div></article>`;
+}
+document.addEventListener("click", async (e) => {
+  const add = e.target.closest("[data-corpl-add]"), del = e.target.closest("[data-corpl-del]");
+  try {
+    if (add) {
+      const kind = await chooseDialog("Для чего шаблон?", [{key: "invite", label: "Приглашение на собеседование"}, {key: "reject", label: "Отказ"}, {key: "chat", label: "Быстрый ответ в чате"}]);
+      if (!kind) return;
+      const text = await askText("Текст шаблона", "Например: Адрес: Каннам, 123. Приходите к 10:00");
+      if (!text) return;
+      await api(`/api/company/${coState.id}/reply-templates`, {method: "POST", body: JSON.stringify({kind, text})});
+      toast("Шаблон сохранён"); renderCoPane(await api(`/api/company/${coState.id}`));
+    }
+    if (del) { await api(`/api/company/${coState.id}/reply-templates/${del.dataset.corplDel}`, {method: "DELETE"}); renderCoPane(await api(`/api/company/${coState.id}`)); }
+  } catch (err) { toast(err.message); }
+});
+// ---------- чат: прислать объявление ----------
+document.addEventListener("click", async (e) => {
+  if (e.target.id !== "chatSendListing") return;
+  $("#chatMenu").hidden = true;
+  try {
+    const mine = (await api("/api/me/listings")).filter((x) => x.status === "approved");
+    if (!mine.length) { toast("Опубликованных объявлений пока нет"); return; }
+    const k = await chooseDialog("Какое объявление прислать?", mine.slice(0, 20).map((x) => ({key: x.id, label: `${x.title} · ${priceText(x)}`})));
+    if (!k) return;
+    const item = mine.find((x) => String(x.id) === k);
+    await api(`/api/conversations/${currentChat}/messages`, {method: "POST", body: JSON.stringify({text: `🔗 Объявление #${item.id}: ${item.title}`})});
+    loadMessages();
+  } catch (err) { toast(err.message); }
+});
+
+// ---------- письма: «забыли пароль», подтверждение e-mail по ссылке ----------
+function showForgot() {
+  const info = $("#pwLoginInfo");
+  if (!info || !mailOn) return;
+  info.innerHTML = 'Забыли пароль? <button type="button" class="link" id="pwForgot">Прислать ссылку на почту</button>';
+}
+document.addEventListener("click", async (e) => {
+  if (e.target.id !== "pwForgot") return;
+  const email = (document.querySelector('#pwLoginForm [name=email]').value || "").trim() || (await askText("Ваш e-mail", "name@example.com"));
+  if (!email) return;
+  try {
+    await api("/api/auth/password-reset/request", {method: "POST", body: JSON.stringify({email}), quiet: true});
+    $("#pwLoginInfo").textContent = "Если такой подтверждённый e-mail есть, мы отправили на него письмо со ссылкой на 1 час.";
+  } catch (err) { $("#pwLoginInfo").textContent = err.message; }
+});
+function openResetDialog(token) {
+  const m = document.createElement("div");
+  m.className = "modal";
+  m.innerHTML = `<div class="sheet"><div class="sheet-top"><b>Новый пароль</b><button type="button" data-x aria-label="Закрыть">✕</button></div>
+    <form class="dform" id="resetForm"><label>Пароль (8–72 знака, буквы и цифры)<input name="password" type="password" required minlength="8" maxlength="72" autocomplete="new-password"></label>
+    <label>Ещё раз<input name="password2" type="password" required minlength="8" maxlength="72" autocomplete="new-password"></label>
+    <button class="submit" type="submit">Сохранить пароль</button><p class="muted" id="resetInfo"></p></form></div>`;
+  document.body.appendChild(m);
+  m.querySelector("[data-x]").onclick = () => m.remove();
+  m.querySelector("#resetForm").onsubmit = async (ev) => {
+    ev.preventDefault();
+    const f = ev.target;
+    if (f.password.value !== f.password2.value) { $("#resetInfo").textContent = "Пароли не совпадают"; return; }
+    try {
+      await api("/api/auth/password-reset", {method: "POST", body: JSON.stringify({token, password: f.password.value}), quiet: true});
+      m.remove(); toast("Пароль изменён. Теперь войдите по e-mail и новому паролю");
+    } catch (err) { $("#resetInfo").textContent = err.message; }
+  };
+}
+(function handleMailLinks() {
+  const q = new URLSearchParams(location.search), confirm = q.get("confirm"), reset = q.get("reset");
+  if (!confirm && !reset) return;
+  history.replaceState(null, "", location.pathname);              // the one-time token must not stay in the address bar
+  setTimeout(async () => {
+    try {
+      if (confirm) { await api("/api/auth/email-confirm", {method: "POST", body: JSON.stringify({token: confirm}), quiet: true}); toast("E-mail подтверждён ✔"); }
+      if (reset) openResetDialog(reset);
+    } catch (err) { toast(err.message); }
+  }, 1200);
+})();
+
+api("/api/mail-state", {quiet: true}).then((x) => { mailOn = Boolean(x.enabled); showForgot(); }).catch(() => {});      // и гостю: у него окно входа
+// ---------- нет связи: честная плашка вместо пустых экранов ----------
+(function offlineBar() {
+  const bar = document.createElement("div");
+  bar.id = "offlineBar"; bar.hidden = navigator.onLine !== false; bar.hidden = true;
+  bar.textContent = "Нет связи с интернетом. Показано то, что уже загружено";
+  document.body.appendChild(bar);
+  window.addEventListener("offline", () => { bar.hidden = false; });
+  window.addEventListener("online", () => { bar.hidden = true; toast("Связь вернулась"); homeLoaded = false; if (currentView === "home") loadCatalog(); });
+  if (navigator.onLine === false) bar.hidden = false;
+})();
+try { tg?.onEvent?.("themeChanged", applyTheme); } catch (e) { /* без событий темы */ }
+
+startI18n();

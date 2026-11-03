@@ -1,0 +1,52 @@
+name: CI
+on:
+  push:
+    branches: [main, korea-hub]
+  pull_request:
+    branches: [main, korea-hub]
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lint installer
+        run: shellcheck install.sh
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Browser for the UI tests
+        run: |
+          pip install playwright==1.49.1
+          playwright install --with-deps chromium
+
+      - name: Tests (SQLite only, never production DB; includes the admin panel in a real browser)
+        run: pytest -q
+        env:
+          SHOTS_DIR: ${{ github.workspace }}/shots
+
+      - name: Screenshots of the phone screens
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phone-screens
+          path: shots
+          if-no-files-found: ignore
+
+      - name: Validate docker-compose
+        run: |
+          cp .env.example .env
+          docker compose config --quiet
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false

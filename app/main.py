@@ -1,0 +1,1068 @@
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+import uuid
+
+from fastapi import FastAPI, Depends, File, HTTPException, Header, Query, UploadFile
+from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
+from sqlalchemy import select, func, desc, or_
+from sqlalchemy.orm import Session
+
+from app import payments, buildinfo
+from app.auth import optional_user_id, current_user_id
+from app.config import settings
+from app.database import Base, engine, get_db, SessionLocal, migrate, upgrade_schema, startup_lock
+from app.models import (
+    Listing, Favorite, Conversation, Message, User, Block, Report,
+    Pricing, Placement, Payment, Group, Article, ListingPhoto, ArticleBookmark,
+)
+from app.schemas import (
+    ListingCreate, ListingOut, MessageIn, MessageOut, ConversationOut,
+    CATEGORIES, EMPLOYER_ACTIVE_JOBS, MAX_ACTIVE_PER_CATEGORY,
+)
+from app.seed import seed_reference
+from app.admin_auth import router as admin_auth_router, bootstrap_admins
+from app.webauth import router as webauth_router
+from app.audit import log_action
+from app.admin_auth import staff, SUPPORT, MOD, ADM, SUP, FIN
+from app.manage import router as manage_router
+from app.guard import rate_limit, check_text, duplicate_note, notify_user
+from app import admin_ops as ops
+from app import catalog
+from app import photos, applications, searches, inbox, promos, adminx, observe, site
+from app import geo, reviews, resumes, referrals, support, extras, adminplus, adminview, datingsvc, ads, rules, adminreports, account, refunds, blocks, reportsflow, batches, security, duty, searchdict, searchlog, views, adminsys, adminmanage, adminedit, listingtools, exchange, pipeline, listingtemplates, chatextras, companypage, companypro, accountmail, staffprefs
+from app import fields as listing_fields
+from app.users import get_or_create_user, writer, is_blocked_pair
+from app.models import Admin, AuditLog, ConvHide, DatingProfile, TypingMark
+from app.dating import router as dating_router
+from app.company import router as company_mod_router
+from app.payments import PaymentError, aware, now
+
+with startup_lock():   # with several workers only one prepares the database at a time
+    Base.metadata.create_all(bind=engine)
+    migrate()
+    from app.database import heal_schema
+    heal_schema()                 # any column a model has and the database lacks is added, instead of a 500 on the first request
+    upgrade_schema()
+    with SessionLocal() as _db:
+        seed_reference(_db)
+        bootstrap_admins(_db)
+        geo.backfill_places(_db)
+        catalog.backfill_search_fields(_db)
+        from app import company as _company_boot
+        _company_boot.migrate_employers(_db)      # people who were employers before get a company
+
+app = FastAPI(title="KOREA HUB API", version="0.4.0")
+app.include_router(adminmanage.router)
+app.include_router(adminsys.router)
+app.include_router(views.router)
+app.include_router(searchlog.router)
+app.include_router(searchdict.router)
+app.include_router(duty.router)
+app.include_router(security.router)
+app.include_router(batches.router)
+app.include_router(reportsflow.router)
+app.include_router(blocks.router)
+app.include_router(refunds.router)
+app.include_router(account.router)
+app.include_router(company_mod_router)
+app.include_router(adminreports.router)
+app.include_router(rules.router)
+app.include_router(ads.router)
+app.include_router(datingsvc.router)    # before the dating router: fixed words such as /viewers must win over /{profile_id}
+app.include_router(dating_router)
+app.include_router(manage_router)
+app.include_router(admin_auth_router)
+app.include_router(webauth_router)
+app.include_router(catalog.router)
+app.include_router(photos.router)
+app.include_router(applications.router)
+app.include_router(searches.router)
+app.include_router(inbox.router)
+app.include_router(promos.router)
+app.include_router(adminx.router)
+app.include_router(site.router)
+app.include_router(geo.router)
+app.include_router(reviews.router)
+app.include_router(resumes.router)
+app.include_router(referrals.router)
+app.include_router(support.router)
+app.include_router(extras.router)
+app.include_router(adminplus.router)
+app.include_router(adminview.router)
+app.include_router(adminedit.router)
+app.include_router(listingtools.router)
+app.include_router(exchange.router)
+app.include_router(pipeline.router)
+app.include_router(listingtemplates.router)
+app.include_router(chatextras.router)
+app.include_router(companypage.router)
+app.include_router(companypro.router)
+app.include_router(accountmail.router)
+app.include_router(staffprefs.router)
+app.include_router(listing_fields.router)
+STATIC = Path(__file__).parent / "static"
+app.mount("/static", StaticFiles(directory=STATIC), name="static")
+
+def _run(operation, *args):
+    """Run a shared admin action and turn its error into an HTTP error."""
+    try:
+        return operation(*args)
+    except ops.OpError as exc:
+        raise HTTPException(exc.status, exc.message)
+
+
+REPORT_REASONS = {"fraud", "fake", "spam", "offensive", "inappropriate", "rights", "minor", "profile"}
+REPORTS_TO_HIDE = 3  # distinct reporters that hide a listing until a moderator decides
+REPORT_TARGETS = {"listing", "user", "message", "dating", "review"}
+
+
+@app.get("/")
+def home():
+    return HTMLResponse(buildinfo.page("index.html"), headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/admin")
+def admin_page():
+    return HTMLResponse(buildinfo.page("admin.html"), headers={"Cache-Control": "no-store"})
+
+
+observe.install(app)  # /health, /health/extended, request IDs, JSON logs, security headers
+
+
+# ---------- Users, consent, blocks ----------
+
+class ConsentIn(BaseModel):
+    accept: bool
+    city: str | None = Field(default=None, max_length=100)
+    district_id: int | None = None
+    region_code: str | None = Field(default=None, max_length=20)
+    language: str | None = Field(default=None, max_length=8)
+
+
+@app.get("/api/config")
+def public_config(db: Session = Depends(get_db)):
+    """What the page needs to build links: the bot's @username (empty if it cannot be found)."""
+    from app import webauth
+    import time
+    cached = _config_cache.get("bot")
+    if cached and (cached[0] or time.monotonic() - cached[1] < 300):  # a failed lookup is not repeated for 5 minutes
+        return {"bot": cached[0], "rates": support.rates(db), "build": buildinfo.build_id()}
+    try:
+        name = webauth.bot_username()
+    except Exception:
+        name = ""
+    _config_cache["bot"] = (name, time.monotonic())
+    return {"bot": name, "rates": support.rates(db), "build": buildinfo.build_id()}
+
+
+_config_cache: dict = {}
+
+
+@app.get("/api/me")
+def me(user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
+    user = get_or_create_user(db, user_id)
+    inbox.touch(db, user_id)
+    return {"tg_id": user.tg_id, "consent": user.consent_at is not None, "city": user.city,
+            "region_code": user.region_code, "district_id": user.district_id,
+            "language": "ru", "blocked": user.blocked, "block_reason": user.block_reason,
+            "employer_status": user.employer_status, "company_name": user.company_name, "visa": user.visa,
+            "account": account.view(user),
+            "notify_messages": user.notify_messages, "display_name": user.display_name,
+            "avatar": photos.url(user.avatar_key) if user.avatar_key else None,
+            "unread": inbox.unread_count(db, user_id)}
+
+
+@app.post("/api/me/consent")
+def give_consent(payload: ConsentIn, user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
+    if not payload.accept:
+        raise HTTPException(400, "Без согласия пользоваться приложением нельзя")
+    user = get_or_create_user(db, user_id)
+    if user.deleted_at is not None:
+        raise HTTPException(403, "Аккаунт удалён")
+    user.consent_at = now()
+    user.consent_version = site.LEGAL_VERSION   # which texts the person agreed to
+    place = geo.resolve_place(db, payload.district_id, payload.region_code, payload.city)
+    if place:
+        user.city, user.region_code, user.district_id = place.label, place.region_code, place.district_id
+    if payload.language:
+        user.language = payload.language
+    db.commit()
+    return {"consent": True}
+
+
+@app.get("/api/me/export")
+def export_me(user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
+    """Personal data export (ТЗ §4.6)."""
+    user = get_or_create_user(db, user_id)
+    listings = db.scalars(select(Listing).where(Listing.author_telegram_id == user_id)).all()
+    favorites = db.scalars(select(Favorite.listing_id).where(Favorite.user_tg_id == user_id)).all()
+    payments_rows = db.scalars(select(Payment).where(Payment.user_tg_id == user_id)).all()
+    messages = db.scalars(select(Message).where(Message.sender_tg_id == user_id)).all()
+    return {
+        "profile": {"tg_id": user.tg_id, "city": user.city, "language": user.language,
+                    "consent_at": str(user.consent_at) if user.consent_at else None},
+        "listings": [{"id": x.id, "title": x.title, "status": x.status, "category": x.category} for x in listings],
+        "favorites": list(favorites),
+        "payments": [{"id": x.id, "service": x.service_code, "stars": x.stars, "status": x.status,
+                      "paid_at": str(x.paid_at) if x.paid_at else None} for x in payments_rows],
+        "messages_sent": [{"text": x.text, "at": str(x.created_at)} for x in messages],
+        "resume": resumes.public_export(db, user_id),
+        "reviews_written": [{"listing_id": x.listing_id, "rating": x.rating, "text": x.text}
+                            for x in db.scalars(select(reviews.Review).where(reviews.Review.reviewer_tg_id == user_id)).all()],
+    }
+
+
+@app.post("/api/me/delete")
+def delete_me(user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
+    """Account deletion: hides listings, removes favorites and anonymizes own messages (ТЗ §4.6)."""
+    user = get_or_create_user(db, user_id)
+    user.deleted_at = now()
+    user.consent_at = None
+    for listing in db.scalars(select(Listing).where(Listing.author_telegram_id == user_id)).all():
+        listing.status = "hidden"
+        for photo in db.scalars(select(ListingPhoto).where(ListingPhoto.listing_id == listing.id)).all():
+            photos.delete_files(photo.key)  # the author's photos are removed with the account
+            db.delete(photo)
+    for fav in db.scalars(select(Favorite).where(Favorite.user_tg_id == user_id)).all():
+        db.delete(fav)
+    for msg in db.scalars(select(Message).where(Message.sender_tg_id == user_id)).all():
+        msg.text = "[удалено]"
+    from app import dating as _dating
+    _dating.erase_profile(db, user_id)        # the profile, its sympathies, views and private photos go with the account
+    from app.models import WizardDraft
+    draft = db.get(WizardDraft, user_id)
+    if draft is not None:
+        db.delete(draft)
+    for msg in db.scalars(select(Message).where(Message.sender_tg_id == user_id, Message.file_key.is_not(None))).all():
+        (photos.photo_root() / f"{msg.file_key}.bin").unlink(missing_ok=True)     # documents and voice go with the account
+        msg.file_key, msg.file_name = None, ""
+    cv = db.get(resumes.Resume, user_id)
+    if cv is not None:
+        db.delete(cv)
+    for rv in db.scalars(select(reviews.Review).where(reviews.Review.reviewer_tg_id == user_id)).all():
+        db.delete(rv)       # the account is gone, so are the opinions it wrote
+    db.commit()
+    return {"deleted": True}
+
+
+@app.get("/api/me/blocks")
+def my_blocks(user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
+    """Who I blocked. Only a number of the entry is returned, never the other person's Telegram ID."""
+    rows = db.scalars(select(Block).where(Block.blocker_tg_id == user_id).order_by(Block.id)).all()
+    return [{"id": b.id, "label": f"Пользователь №{i}"} for i, b in enumerate(rows, 1)]
+
+
+@app.delete("/api/me/blocks/{block_id}")
+def unblock_by_entry(block_id: int, user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
+    row = db.get(Block, block_id)
+    if row is None or row.blocker_tg_id != user_id:
+        raise HTTPException(404, "Запись не найдена")
+    db.delete(row)
+    db.commit()
+    return {"blocked": False}
+
+
+@app.post("/api/users/{target}/block")
+def block_user(target: str, user_id: str = Depends(writer), db: Session = Depends(get_db)):
+    if target == user_id:
+        raise HTTPException(400, "Нельзя заблокировать себя")
+    exists = db.scalar(select(Block).where(Block.blocker_tg_id == user_id, Block.blocked_tg_id == target))
+    if exists is None:
+        db.add(Block(blocker_tg_id=user_id, blocked_tg_id=target))
+        db.commit()
+    return {"blocked": True}
+
+
+@app.delete("/api/users/{target}/block")
+def unblock_user(target: str, user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
+    row = db.scalar(select(Block).where(Block.blocker_tg_id == user_id, Block.blocked_tg_id == target))
+    if row is not None:
+        db.delete(row)
+        db.commit()
+    return {"blocked": False}
+
+
+# ---------- Reports ----------
+
+class ReportIn(BaseModel):
+    target_type: str
+    target_id: str = Field(min_length=1, max_length=40)
+    reason: str
+    comment: str = Field(default="", max_length=500)
+
+
+@app.post("/api/reports", status_code=201)
+def create_report(payload: ReportIn, user_id: str = Depends(writer), db: Session = Depends(get_db)):
+    rate_limit(user_id, "report", 10, 3600)
+    if payload.target_type not in REPORT_TARGETS:
+        raise HTTPException(400, "Неизвестный тип жалобы")
+    if payload.reason not in REPORT_REASONS:
+        raise HTTPException(400, "Неизвестная причина жалобы")
+    if payload.target_type == "listing":
+        listing = db.get(Listing, int(payload.target_id)) if payload.target_id.isdigit() else None
+        if listing is None or listing.author_telegram_id == user_id:
+            raise HTTPException(400, "Нельзя пожаловаться на это объявление")
+    if payload.target_type == "dating":
+        profile = db.get(DatingProfile, int(payload.target_id)) if payload.target_id.isdigit() else None
+        if profile is None or profile.owner_tg_id == user_id:
+            raise HTTPException(400, "Нельзя пожаловаться на эту анкету")
+    if payload.target_type == "review":
+        from app.models import Review
+        row = db.get(Review, int(payload.target_id)) if payload.target_id.isdigit() else None
+        if row is None or row.reviewer_tg_id == user_id:
+            raise HTTPException(400, "Нельзя пожаловаться на этот отзыв")
+    if payload.target_type == "user" and payload.target_id == user_id:
+        raise HTTPException(400, "Нельзя пожаловаться на себя")
+    existing = db.scalar(select(Report).where(
+        Report.reporter_tg_id == user_id, Report.target_type == payload.target_type,
+        Report.target_id == payload.target_id))
+    if existing is None:
+        db.add(Report(reporter_tg_id=user_id, target_type=payload.target_type,
+                      target_id=payload.target_id, reason=payload.reason, comment=payload.comment))
+        db.commit()
+        adminplus.notify_staff(db, "Новая жалоба ждёт рассмотрения (админка → Жалобы).", "report", ("support", "moderator", "admin", "super_admin"))
+        if payload.target_type == "dating" and payload.target_id.isdigit():
+            # doubt about age or person: «minor» hides the profile at once, «fake/fraud» from the second person
+            target = db.get(DatingProfile, int(payload.target_id))
+            if target is not None and not target.suspect:
+                who_n = db.scalar(select(func.count(func.distinct(Report.reporter_tg_id))).where(
+                    Report.target_type == "dating", Report.target_id == payload.target_id, Report.reason.in_(["minor", "fake", "fraud"]))) or 0
+                if payload.reason == "minor" or (payload.reason in {"fake", "fraud"} and who_n >= 2):
+                    target.suspect = True
+                    db.commit()
+    # Several different reporters hide a listing until a moderator decides
+    if payload.target_type == "listing":
+        count = db.scalar(select(func.count(func.distinct(Report.reporter_tg_id))).where(
+            Report.target_type == "listing", Report.target_id == payload.target_id))
+        listing = db.get(Listing, int(payload.target_id))
+        if count >= rules.val("reports.to_hide") and listing and listing.status == "approved":
+            listing.status = "hidden"
+            listing.note = "Скрыто по жалобам пользователей, пока модератор проверяет"
+            db.commit()
+            notify_user(db, listing.author_telegram_id,
+                        f"Объявление «{listing.title}» временно скрыто: на него пожаловались несколько человек. Модератор проверит его.",
+                        "moderation")
+    return {"received": True}
+
+
+# ---------- Listings ----------
+
+@app.get("/api/listings", response_model=list[ListingOut])
+def get_listings(category: str | None = None, city: str | None = None,
+                 q: str | None = Query(default=None, max_length=100),
+                 db: Session = Depends(get_db)):
+    stmt = select(Listing).where(Listing.status == "approved")
+    if category:
+        if category not in CATEGORIES:
+            raise HTTPException(400, "Неизвестная категория")
+        stmt = stmt.where(Listing.category == category)
+    if city:
+        stmt = stmt.where(Listing.city.ilike(f"%{city}%"))
+    if q:
+        stmt = stmt.where(Listing.title.ilike(f"%{q}%"))
+    items = db.scalars(stmt.order_by(Listing.id.desc()).limit(100)).all()
+    placed = payments.active_placements(db, [x.id for x in items])
+    # Paid placements first: pin > vip > bump > highlight, then newest
+    items.sort(key=lambda x: (-payments.KIND_PRIORITY.get(placed.get(x.id, ""), 0), -x.id))
+    return items
+
+
+@app.post("/api/listings", response_model=ListingOut, status_code=201)
+def create_listing(payload: ListingCreate, user_id: str = Depends(writer), db: Session = Depends(get_db)):
+    if payload.category not in CATEGORIES:
+        raise HTTPException(400, "Неизвестная категория")
+    rate_limit(user_id, "listing", 10, 3600)
+    newcomer = get_or_create_user(db, user_id)
+    if settings.new_account_minutes and newcomer.created_at is not None \
+            and (now() - aware(newcomer.created_at)).total_seconds() < settings.new_account_minutes * 60:
+        try:
+            rate_limit(user_id, "listing_new_account", 1, 3600)
+        except HTTPException:
+            raise HTTPException(429, "Новый аккаунт может публиковать не больше одного объявления в час. "
+                                     "Подождите или дополните уже созданное")
+    check_text(payload.title, payload.description)
+    place = geo.resolve_place(db, payload.district_id, payload.region_code, payload.city)
+    if place is None:
+        raise HTTPException(400, "Выберите город или район из списка. Сайт только для Южной Кореи")
+    from app import company as company_mod
+    if payload.company_id:
+        co = db.get(company_mod.Company, payload.company_id)
+        if co is None or company_mod.role_of(db, co.id, user_id) not in company_mod.WRITE:
+            raise HTTPException(403, "Публиковать от этой компании вам нельзя")
+        if co.status != "verified":
+            raise HTTPException(409, "Компания ещё не проверена: пока публикуйте от себя")
+        active = db.scalar(select(func.count()).select_from(Listing).where(
+            Listing.company_id == co.id, Listing.category == payload.category, Listing.status.in_(["draft", "pending", "approved"])))
+        from app import companypro
+        limit = (EMPLOYER_ACTIVE_JOBS if payload.category == "job" else 3 * MAX_ACTIVE_PER_CATEGORY) * companypro.factor(db, co.id)
+    else:
+        active = db.scalar(
+            select(func.count()).select_from(Listing).where(
+                Listing.author_telegram_id == user_id,
+                Listing.company_id.is_(None),
+                Listing.category == payload.category,
+                Listing.status.in_(["draft", "pending", "approved"]),
+            )
+        )
+        me_row = db.get(User, user_id)
+        limit = EMPLOYER_ACTIVE_JOBS if payload.category == "job" and me_row is not None and me_row.employer_status == "approved" else MAX_ACTIVE_PER_CATEGORY
+    if active >= limit:
+        raise HTTPException(409, f"Лимит: не больше {limit} активных объявлений в разделе")
+    data = catalog.clean_extras(payload.category, payload.model_dump(exclude={"city", "region_code", "district_id", "draft", "company_id"}))
+    item = Listing(**data, city=place.label, region_code=place.region_code, district_id=place.district_id,
+                   author_telegram_id=user_id, company_id=payload.company_id, status="draft" if payload.draft else "pending")
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    dup = duplicate_note(db, user_id, payload.title, payload.description, item.id, payload.contact)
+    if dup:
+        # Для модератора: виден в журнале, автор этого не видит
+        log_action(db, "system", "listing.duplicate_suspected", "listing", item.id, dup)
+        db.commit()
+    if item.status == "pending" and support.maybe_auto_approve(db, item):
+        db.refresh(item)
+    return catalog.with_promo(db, [item], owner=True)[0]
+
+
+@app.get("/api/me/listings", response_model=list[ListingOut])
+def my_listings(user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
+    rows = db.scalars(
+        select(Listing).where(Listing.author_telegram_id == user_id, Listing.company_id.is_(None))
+        .order_by(Listing.id.desc()).limit(100)
+    ).all()
+    return catalog.with_promo(db, list(rows), owner=True)
+
+
+# ---------- Favorites ----------
+
+@app.post("/api/favorites/{listing_id}")
+def toggle_favorite(listing_id: int, user_id: str = Depends(writer), db: Session = Depends(get_db)):
+    if db.get(Listing, listing_id) is None:
+        raise HTTPException(404, "Объявление не найдено")
+    fav = db.scalar(select(Favorite).where(Favorite.user_tg_id == user_id, Favorite.listing_id == listing_id))
+    if fav:
+        db.delete(fav)
+        db.commit()
+        return {"favorited": False}
+    db.add(Favorite(user_tg_id=user_id, listing_id=listing_id))
+    db.commit()
+    return {"favorited": True}
+
+
+@app.get("/api/favorites", response_model=list[ListingOut])
+def my_favorites(user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
+    rows = db.scalars(
+        select(Listing)
+        .join(Favorite, Favorite.listing_id == Listing.id)
+        .where(Favorite.user_tg_id == user_id, Listing.status == "approved")
+        .order_by(desc(Favorite.id))
+        .limit(100)
+    ).all()
+    return catalog.with_promo(db, list(rows))
+
+
+# ---------- Chats ----------
+
+def _side_access(db: Session, conv: Conversation, user_id: str) -> bool:
+    """The buyer, or the seller side. For a company listing the seller side is the team (those who may answer), not one
+    person: somebody who left the team loses the chat, a new colleague gets it."""
+    if conv.buyer_tg_id == user_id:
+        return True
+    listing = db.get(Listing, conv.listing_id) if conv.listing_id else None
+    if listing is not None and listing.company_id:
+        from app import company
+        return company.role_of(db, listing.company_id, user_id) in company.WRITE
+    return user_id == conv.seller_tg_id
+
+
+def _get_conversation_for(db: Session, conv_id: int, user_id: str) -> Conversation:
+    conv = db.get(Conversation, conv_id)
+    if conv is None or not _side_access(db, conv, user_id):
+        # Одинаково отвечаем на «нет» и «чужое», чтобы не раскрывать существование чатов
+        raise HTTPException(404, "Чат не найден")
+    return conv
+
+
+@app.post("/api/listings/{listing_id}/conversation")
+def start_conversation(listing_id: int, user_id: str = Depends(writer), db: Session = Depends(get_db)):
+    listing = db.get(Listing, listing_id)
+    if listing is None or listing.status != "approved":
+        raise HTTPException(404, "Объявление не найдено")
+    if listing.author_telegram_id == user_id or (listing.company_id and _side_access(db, Conversation(listing_id=listing.id, buyer_tg_id="", seller_tg_id=""), user_id)):
+        raise HTTPException(400, "Нельзя написать самому себе")
+    if is_blocked_pair(db, user_id, listing.author_telegram_id):
+        raise HTTPException(403, "Диалог недоступен")
+    conv = db.scalar(select(Conversation).where(
+        Conversation.listing_id == listing_id, Conversation.buyer_tg_id == user_id))
+    if conv is None:
+        conv = Conversation(listing_id=listing_id, buyer_tg_id=user_id,
+                            seller_tg_id=listing.author_telegram_id)
+        db.add(conv)
+        db.commit()
+        db.refresh(conv)
+    return {"id": conv.id}
+
+
+def person_name(db: Session, tg_id: str, conv: Conversation | None = None) -> str:
+    """How a person is shown to the other side: the chosen name, or the dating name in a match, never the Telegram ID."""
+    if conv is not None and conv.match_key:
+        prof = db.scalar(select(DatingProfile).where(DatingProfile.owner_tg_id == tg_id))
+        if prof is not None and prof.first_name:
+            return prof.first_name
+    if conv is not None and conv.listing_id and tg_id == conv.seller_tg_id:        # the buyer talks to the company, not to a person
+        listing = db.get(Listing, conv.listing_id)
+        if listing is not None and listing.company_id:
+            from app.company import Company
+            co = db.get(Company, listing.company_id)
+            if co is not None:
+                return co.name
+    user = db.get(User, tg_id)
+    if user and user.display_name:
+        return user.display_name
+    if conv is not None and conv.listing_id:           # no name: say who this is in this chat
+        listing = db.get(Listing, conv.listing_id)
+        if tg_id == conv.seller_tg_id:
+            return "Автор объявления"
+        return "Соискатель" if listing is not None and listing.category == "job" else "Покупатель"
+    return "Без имени"
+
+
+def conversation_card(db: Session, conv: Conversation, user_id: str, last: Message | None = None, unread: int = 0) -> ConversationOut:
+    from app import site
+    other = conv.seller_tg_id if conv.buyer_tg_id == user_id else conv.buyer_tg_id
+    listing = db.get(Listing, conv.listing_id) if conv.listing_id else None
+    name = person_name(db, other, conv)
+    cover, price = None, ""
+    if listing is not None:
+        key = db.scalar(select(ListingPhoto.key).where(ListingPhoto.listing_id == listing.id, ListingPhoto.status == "live")
+                        .order_by(ListingPhoto.position, ListingPhoto.id).limit(1))
+        cover = photos.url(key, True) if key else None
+        price = site._price(listing)
+    if last is not None:
+        preview = last.text or ("🎤 Голосовое" if last.file_kind == "audio" else "📎 Документ" if last.file_key else "📷 Фото")
+    else:
+        preview = ""
+    return ConversationOut(
+        id=conv.id, listing_id=conv.listing_id,
+        listing_title=("Знакомство" if conv.match_key else (listing.title if listing else "Объявление удалено")),
+        last_text=preview, last_at=last.created_at if last else None, unread=unread,
+        kind="mutual" if conv.match_key else "listing", role="buyer" if conv.buyer_tg_id == user_id else "seller",
+        other_name=name, other_initial=(name[:1] or "?").upper(), listing_cover=cover, listing_price=price,
+        listing_category=listing.category if listing else "", listing_status=listing.status if listing else "",
+        last_mine=bool(last and last.sender_tg_id == user_id), company_id=listing.company_id if listing else None)
+
+
+@app.get("/api/conversations", response_model=list[ConversationOut])
+def my_conversations(user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
+    from app.company import CompanyMember, WRITE
+    team_listings = select(Listing.id).where(Listing.company_id.in_(
+        select(CompanyMember.company_id).where(CompanyMember.tg_id == user_id, CompanyMember.role.in_(WRITE))))
+    convs = [c for c in db.scalars(
+        select(Conversation).where(
+            (Conversation.buyer_tg_id == user_id) | (Conversation.seller_tg_id == user_id) | Conversation.listing_id.in_(team_listings)
+        )
+    ).all() if _side_access(db, c, user_id)]
+    hides = {h.conv_id: h.at for h in db.scalars(select(ConvHide).where(ConvHide.user_tg_id == user_id)).all()}
+    out = []
+    for conv in convs:
+        other = conv.seller_tg_id if conv.buyer_tg_id == user_id else conv.buyer_tg_id
+        if is_blocked_pair(db, user_id, other):
+            continue
+        last = db.scalar(select(Message).where(Message.conversation_id == conv.id)
+                         .order_by(desc(Message.id)).limit(1))
+        if conv.id in hides and (last is None or aware(last.created_at) <= aware(hides[conv.id])):
+            continue                                   # hidden by me, nothing new since then
+        unread = db.scalar(select(func.count()).select_from(Message).where(
+            Message.conversation_id == conv.id, Message.sender_tg_id != user_id, Message.read_at.is_(None))) or 0
+        out.append(conversation_card(db, conv, user_id, last, unread))
+    epoch = datetime.min.replace(tzinfo=timezone.utc)
+    pins = chatextras.pinned_ids(db, user_id)
+    for c in out:
+        c.pinned = c.id in pins
+    out.sort(key=lambda c: (c.pinned, aware(c.last_at) if c.last_at else epoch), reverse=True)      # pinned first, then the newest
+    return out
+
+
+@app.get("/api/conversations/{conv_id}/info", response_model=ConversationOut)
+def conversation_info(conv_id: int, user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
+    """The header of a chat: who it is, which listing, its photo and price."""
+    conv = _get_conversation_for(db, conv_id, user_id)
+    card = conversation_card(db, conv, user_id)
+    card.pinned = conv_id in chatextras.pinned_ids(db, user_id)
+    return card
+
+
+@app.post("/api/conversations/{conv_id}/hide")
+def hide_conversation(conv_id: int, user_id: str = Depends(writer), db: Session = Depends(get_db)):
+    _get_conversation_for(db, conv_id, user_id)
+    row = db.get(ConvHide, (conv_id, user_id))
+    if row is None:
+        db.add(ConvHide(conv_id=conv_id, user_tg_id=user_id, at=now()))
+    else:
+        row.at = now()
+    db.commit()
+    return {"hidden": True}
+
+
+def message_notice(db: Session, conv: Conversation, sender: str, what: str) -> str:
+    """Who wrote and about what, so the notification is clear without opening the app."""
+    name = person_name(db, sender, conv)
+    if conv.match_key:
+        return f"{name} (знакомства): {what}"[:300]
+    listing = db.get(Listing, conv.listing_id) if conv.listing_id else None
+    about = f" по объявлению «{listing.title}»" if listing is not None else ""
+    return f"{name} пишет{about}:\n{what}"[:300]
+
+
+def _msg_out(m: Message, user_id: str) -> MessageOut:
+    return MessageOut(id=m.id, mine=m.sender_tg_id == user_id, text=m.text, created_at=m.created_at,
+                      read=m.read_at is not None, photo=photos.url(m.photo_key) if m.photo_key else None,
+                      file=({"name": m.file_name, "kind": m.file_kind, "url": f"/api/conversations/{m.conversation_id}/attachment/{m.file_key}"}
+                            if m.file_key else None))
+
+
+@app.get("/api/conversations/{conv_id}/messages", response_model=list[MessageOut])
+def get_messages(conv_id: int, before_id: int | None = Query(default=None, ge=1),
+                 limit: int = Query(default=100, ge=1, le=100),
+                 user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
+    """Latest messages; pass before_id (the oldest id on screen) to load earlier ones. Opening the chat marks
+    the other person's messages as read."""
+    _get_conversation_for(db, conv_id, user_id)
+    inbox.touch(db, user_id)
+    stmt = select(Message).where(Message.conversation_id == conv_id)
+    if before_id is not None:
+        stmt = stmt.where(Message.id < before_id)
+    msgs = db.scalars(stmt.order_by(desc(Message.id)).limit(limit)).all()
+    unread = [m for m in msgs if m.sender_tg_id != user_id and m.read_at is None]
+    for m in unread:
+        m.read_at = now()
+    if unread:
+        db.commit()
+    return [_msg_out(m, user_id) for m in reversed(msgs)]
+
+
+@app.get("/api/conversations/{conv_id}/status")
+def chat_status(conv_id: int, user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
+    """Roughly whether the other person is around: online / recently / nothing. Never an exact time."""
+    conv = _get_conversation_for(db, conv_id, user_id)
+    other = conv.seller_tg_id if conv.buyer_tg_id == user_id else conv.buyer_tg_id
+    mark = db.get(TypingMark, (conv_id, other))
+    typing = mark is not None and (now() - aware(mark.at)).total_seconds() <= 6
+    return {"status": inbox.coarse_status(db.get(User, other)), "typing": typing}
+
+
+@app.post("/api/conversations/{conv_id}/messages", response_model=MessageOut, status_code=201)
+def send_message(conv_id: int, payload: MessageIn, user_id: str = Depends(writer),
+                 db: Session = Depends(get_db)):
+    conv = _get_conversation_for(db, conv_id, user_id)
+    other = conv.seller_tg_id if conv.buyer_tg_id == user_id else conv.buyer_tg_id
+    other_user = db.get(User, other)
+    if is_blocked_pair(db, user_id, other) or (other_user is not None and (other_user.blocked or other_user.deleted_at)):
+        raise HTTPException(403, "Диалог недоступен")
+    text = payload.text.strip()
+    if not text:
+        raise HTTPException(422, "Пустое сообщение")
+    rate_limit(user_id, "message", 30, 60)
+    msg = Message(conversation_id=conv_id, sender_tg_id=user_id, text=text)
+    db.add(msg)
+    db.commit()
+    db.refresh(msg)
+    inbox.touch(db, user_id)
+    _tell_other_side(db, conv, user_id, other, message_notice(db, conv, user_id, text[:160]))
+    return _msg_out(msg, user_id)
+
+
+@app.post("/api/conversations/{conv_id}/photo", response_model=MessageOut, status_code=201)
+async def send_chat_photo(conv_id: int, file: UploadFile = File(...), user_id: str = Depends(writer),
+                          db: Session = Depends(get_db)):
+    """A picture in the chat. Re-encoded like listing photos (no EXIF, no GPS); the link is an unguessable key."""
+    conv = _get_conversation_for(db, conv_id, user_id)
+    other = conv.seller_tg_id if conv.buyer_tg_id == user_id else conv.buyer_tg_id
+    other_user = db.get(User, other)
+    if is_blocked_pair(db, user_id, other) or (other_user is not None and (other_user.blocked or other_user.deleted_at)):
+        raise HTTPException(403, "Диалог недоступен")
+    rate_limit(user_id, "chat_photo", 20, 600)
+    data = await file.read(photos.MAX_UPLOAD_BYTES + 1)
+    if len(data) > photos.MAX_UPLOAD_BYTES:
+        raise HTTPException(413, "Фото больше 8 МБ")
+    full, thumb = photos.process_image(data)
+    key = uuid.uuid4().hex
+    (photos.photo_root() / f"{key}.jpg").write_bytes(full)
+    (photos.photo_root() / f"{key}_t.jpg").write_bytes(thumb)
+    msg = Message(conversation_id=conv_id, sender_tg_id=user_id, text="", photo_key=key)
+    db.add(msg)
+    db.commit()
+    db.refresh(msg)
+    _tell_other_side(db, conv, user_id, other, message_notice(db, conv, user_id, "📷 фото"))
+    return _msg_out(msg, user_id)
+
+
+def _tell_other_side(db: Session, conv: Conversation, sender: str, other: str, text: str) -> None:
+    """The buyer wrote to a company listing: the whole team that may answer is told. Otherwise one person is told."""
+    listing = db.get(Listing, conv.listing_id) if conv.listing_id else None
+    if sender == conv.buyer_tg_id and listing is not None and listing.company_id:
+        from app import company
+        company.notify_team(db, listing, text, "messages", skip=sender)
+    else:
+        notify_user(db, other, text, "messages")
+
+
+def _other_party(conv: Conversation, user_id: str) -> str:
+    return conv.seller_tg_id if conv.buyer_tg_id == user_id else conv.buyer_tg_id
+
+
+@app.post("/api/conversations/{conv_id}/block")
+def block_from_chat(conv_id: int, user_id: str = Depends(writer), db: Session = Depends(get_db)):
+    """Block the other person without the client ever learning their Telegram ID."""
+    conv = _get_conversation_for(db, conv_id, user_id)
+    return block_user(_other_party(conv, user_id), user_id, db)
+
+
+class ChatReportIn(BaseModel):
+    reason: str
+    comment: str = Field(default="", max_length=500)
+
+
+@app.post("/api/conversations/{conv_id}/report", status_code=201)
+def report_from_chat(conv_id: int, payload: ChatReportIn, user_id: str = Depends(writer),
+                     db: Session = Depends(get_db)):
+    conv = _get_conversation_for(db, conv_id, user_id)
+    return create_report(ReportIn(target_type="user", target_id=_other_party(conv, user_id),
+                                  reason=payload.reason, comment=payload.comment), user_id, db)
+
+
+# ---------- Paid services (ТЗ № 2) ----------
+
+@app.get("/api/services")
+def list_services(category: str | None = None, db: Session = Depends(get_db)):
+    payments.ensure_pricing(db)
+    stmt = select(Pricing).where(Pricing.is_active == True)  # noqa: E712
+    if category:
+        stmt = stmt.where(Pricing.category == category)
+    return [{"code": p.code, "category": p.category, "kind": p.kind, "title": p.title,
+             "stars": p.stars, "duration_days": p.duration_days}
+            for p in db.scalars(stmt.order_by(Pricing.code)).all()]
+
+
+class InvoiceIn(BaseModel):
+    listing_id: int
+    service_code: str = Field(min_length=3, max_length=40)
+    promo_code: str = Field(default="", max_length=24)
+    use_balance: bool = False
+
+
+@app.post("/api/payments/invoice")
+def create_invoice(payload: InvoiceIn, user_id: str = Depends(writer), db: Session = Depends(get_db)):
+    try:
+        payment, url = payments.create_invoice(db, user_id, payload.listing_id, payload.service_code, payload.promo_code,
+                                               payload.use_balance)
+    except PaymentError as exc:
+        raise HTTPException(400, str(exc))
+    return {"payment_id": payment.id, "invoice_url": url, "stars": payment.stars, "paid": payment.status == "paid",
+            "from_balance": payment.balance_used}
+
+
+class TopupIn(BaseModel):
+    kh: int = 0            # how much KH to put on the balance
+    stars: int = 0         # older clients: the same number
+
+
+@app.post("/api/me/balance/topup")
+def topup_my_balance(payload: TopupIn, user_id: str = Depends(writer), db: Session = Depends(get_db)):
+    """Put Stars on the personal balance (one for dating, your own listings and everything personal)."""
+    try:
+        pay, url = payments.create_topup(db, user_id, payload.kh or payload.stars)
+    except PaymentError as exc:
+        raise HTTPException(400, str(exc))
+    return {"payment_id": pay.id, "invoice_url": url, "stars": pay.stars, "kh": pay.list_stars}
+
+
+@app.get("/api/me/balance")
+def my_balance(user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
+    """Stars returned for unused service time; they can pay for any service."""
+    user = get_or_create_user(db, user_id)
+    return {"balance": user.balance_stars or 0}
+
+
+@app.get("/api/listings/{listing_id}/services")
+def listing_services(listing_id: int, user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
+    """The showcase for one own listing: every service with its price, what it does and whether it can be bought now."""
+    from app import company
+    item = db.get(Listing, listing_id)
+    if item is None or not company.can_manage(db, user_id, item, write=False):
+        raise HTTPException(404, "Объявление не найдено")
+    purse = payments._purse(db, user_id, item.company_id)
+    return {"title": item.title, "category": item.category, "options": payments.service_options(db, item),
+            "balance": (purse.balance_stars if purse is not None else 0) or 0, "balance_of": "company" if item.company_id else "person",
+            "can_pay": company.can_pay(db, user_id, item)}
+
+
+@app.get("/api/promo/check")
+def promo_check(code: str = Query(max_length=24), service_code: str = Query(max_length=40),
+                user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
+    pricing = db.get(Pricing, service_code)
+    if pricing is None:
+        raise HTTPException(404, "Услуга не найдена")
+    try:
+        promo, stars = payments.check_promo(db, user_id, code, pricing.stars)
+    except PaymentError as exc:
+        raise HTTPException(400, str(exc))
+    return {"code": promo.code, "stars": stars, "was": pricing.stars}
+
+
+@app.get("/api/me/payments/{payment_id}/receipt")
+def payment_receipt(payment_id: int, user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
+    p = db.get(Payment, payment_id)
+    if p is None or p.user_tg_id != user_id:
+        raise HTTPException(404, "Платёж не найден")
+    pricing = db.get(Pricing, p.service_code)
+    listing = db.get(Listing, p.listing_id) if p.listing_id else None
+    return {"number": f"KH-{p.id:06d}", "date": str(p.paid_at or p.created_at), "status": p.status, "note": p.note,
+            "gift": p.status == "granted", "from_balance": p.balance_used, "profile": bool(p.profile_id),
+            "service": pricing.title if pricing else ("Пополнение баланса" if p.service_code == payments.TOPUP_CODE else p.service_code), "days": pricing.duration_days if pricing else None,
+            "listing_id": p.listing_id, "listing_title": listing.title if listing else "",
+            "stars": p.stars, "list_stars": p.list_stars or p.stars, "promo": p.promo_code,
+            "discount": max(0, (p.list_stars or p.stars) - p.stars), "charge_id": p.telegram_payment_charge_id}
+
+
+@app.get("/api/me/payments")
+def my_payments(user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
+    rows = db.scalars(select(Payment).where(Payment.user_tg_id == user_id)
+                      .order_by(desc(Payment.id)).limit(100)).all()
+    titles = {p.code: p.title for p in db.scalars(select(Pricing)).all()} | {payments.TOPUP_CODE: "Пополнение баланса", "company_pro": "Подписка «Про»"}
+    return [{"id": p.id, "service": titles.get(p.service_code, p.service_code), "stars": p.stars,
+             "status": p.status, "listing_id": p.listing_id, "charge_id": p.telegram_payment_charge_id,
+             "promo": p.promo_code, "number": f"KH-{p.id:06d}", "note": p.note, "gift": p.status == "granted",
+             "from_balance": p.balance_used, "profile": bool(p.profile_id),
+             "created_at": str(p.created_at), "paid_at": str(p.paid_at) if p.paid_at else None}
+            for p in rows]
+
+
+# ---------- Community and guide ----------
+
+@app.get("/api/groups")
+def list_groups(db: Session = Depends(get_db)):
+    return [{"id": g.id, "name": g.name, "flag": g.flag, "description": g.description,
+             "telegram_link": g.telegram_link, "members_count": g.members_count, "kind": g.kind or "nation"}
+            for g in db.scalars(select(Group).order_by(Group.id)).all()]
+
+
+def _stale(a: Article) -> bool:
+    """A guide article that was checked more than 6 months ago: the app warns that the facts may have changed."""
+    return a.checked_at is None or aware(a.checked_at) < now() - timedelta(days=183)
+
+
+@app.get("/api/articles")
+def list_articles(section: str | None = None, q: str = Query(default="", max_length=60),
+                  user_id: str | None = Depends(optional_user_id), db: Session = Depends(get_db)):
+    stmt = select(Article).where(Article.published == True)  # noqa: E712
+    if section:
+        stmt = stmt.where(Article.section == section)
+    words = [w for w in q.lower().split()[:5]]
+    saved = set(db.scalars(select(ArticleBookmark.article_id).where(ArticleBookmark.user_tg_id == user_id)).all()) if user_id else set()
+    out = []
+    for a in db.scalars(stmt.order_by(Article.id)).all():
+        hay = f"{a.title} {a.body}".lower()
+        if all(w in hay for w in words):
+            out.append({"id": a.id, "section": a.section, "title": a.title, "saved": a.id in saved,
+                        "checked_at": str(a.checked_at) if a.checked_at else None, "stale": _stale(a)})
+    return out
+
+
+@app.get("/api/me/bookmarks")
+def my_bookmarks(user_id: str = Depends(current_user_id), db: Session = Depends(get_db)):
+    rows = db.scalars(select(Article).join(ArticleBookmark, ArticleBookmark.article_id == Article.id)
+                      .where(ArticleBookmark.user_tg_id == user_id, Article.published == True)  # noqa: E712
+                      .order_by(ArticleBookmark.id.desc())).all()
+    return [{"id": a.id, "section": a.section, "title": a.title, "saved": True} for a in rows]
+
+
+@app.post("/api/articles/{article_id}/bookmark")
+def toggle_bookmark(article_id: int, user_id: str = Depends(writer), db: Session = Depends(get_db)):
+    article = db.get(Article, article_id)
+    if article is None or not article.published:
+        raise HTTPException(404, "Статья не найдена")
+    row = db.scalar(select(ArticleBookmark).where(ArticleBookmark.user_tg_id == user_id, ArticleBookmark.article_id == article_id))
+    if row:
+        db.delete(row)
+    else:
+        db.add(ArticleBookmark(user_tg_id=user_id, article_id=article_id))
+    db.commit()
+    return {"saved": row is None}
+
+
+@app.get("/api/articles/{article_id}")
+def get_article(article_id: int, db: Session = Depends(get_db)):
+    a = db.get(Article, article_id)
+    if a is None or not a.published:
+        raise HTTPException(404, "Статья не найдена")
+    return {"id": a.id, "section": a.section, "title": a.title, "body": a.body,
+            "source_url": a.source_url, "checked_at": str(a.checked_at) if a.checked_at else None, "stale": _stale(a)}
+
+
+# ---------- Admin ----------
+
+@app.get("/api/admin/listings")
+def pending_listings(category: str | None = None, city: str = Query(default="", max_length=60),
+                     sort: str = Query(default="old", max_length=4), actor: str = Depends(staff(*MOD)), db: Session = Depends(get_db)):
+    """New listings and waiting edits (oldest first by default). For an edit, pending_changes shows what would change."""
+    stmt = select(Listing).where(ops.queue_condition())
+    if category:
+        stmt = stmt.where(Listing.category == category)
+    if city.strip():
+        stmt = stmt.where(Listing.city_key.like(catalog._like(city.strip().lower()), escape="\\"))
+    rows = list(db.scalars(stmt.order_by(Listing.id.desc() if sort == "new" else Listing.id)).all())
+    shown = catalog.with_promo(db, rows, owner=True)
+    authors = {x.author_telegram_id for x in rows}
+    who = adminview.names(db, authors)
+    bad = dict(db.execute(select(Listing.author_telegram_id, func.count()).where(
+        Listing.author_telegram_id.in_(authors or ["-"]), Listing.status.in_(["rejected", "needs_fix"])).group_by(Listing.author_telegram_id)).all())
+    return [{**o.model_dump(mode="json"), "pending_changes": x.pending_changes, "author_id": x.author_telegram_id,
+             "author_name": who.get(x.author_telegram_id, ""), "author_rejects": bad.get(x.author_telegram_id, 0),
+             "flags": adminx.listing_flags(db, x)} for o, x in zip(shown, rows)]
+
+
+@app.get("/api/admin/listings/{listing_id}")
+def admin_listing(listing_id: int, actor: str = Depends(staff(*MOD)), db: Session = Depends(get_db)):
+    item = db.get(Listing, listing_id)
+    if item is None:
+        raise HTTPException(404, "Объявление не найдено")
+    shown = catalog.with_promo(db, [item], owner=True)[0]
+    security.note_pii_view(db, actor, "listing", str(listing_id))            # the contact of the listing is personal data
+    return {**shown.model_dump(mode="json"), "pending_changes": item.pending_changes, "author_id": item.author_telegram_id,
+            "flags": adminx.listing_flags(db, item)}
+
+
+@app.post("/api/admin/listings/{listing_id}/{decision}")
+def moderate_listing(listing_id: int, decision: str, reason: str = Query(default="", max_length=300),
+                     actor: str = Depends(staff(*MOD)), db: Session = Depends(get_db)):
+    """decision: approve | reject (reason required) | needs_fix (comment required)."""
+    item = _run(ops.moderate_listing, db, actor, listing_id, decision, reason)
+    return {"id": item.id, "status": item.status}
+
+
+@app.get("/api/admin/reports")
+def admin_reports(status: str = "new", actor: str = Depends(staff(*SUPPORT)),
+                  db: Session = Depends(get_db)):
+    rows = db.scalars(select(Report).where(Report.status == status).order_by(Report.id).limit(200)).all()
+    return adminview.report_rows(db, rows)
+
+
+@app.post("/api/admin/reports/{report_id}/{decision}")
+def decide_report(report_id: int, decision: str, reason: str = Query(default="", max_length=300),
+                  actor: str = Depends(staff(*SUPPORT)), db: Session = Depends(get_db)):
+    report = _run(ops.decide_report, db, actor, report_id, decision, reason)
+    return {"id": report.id, "status": report.status}
+
+
+@app.get("/api/admin/pricing")
+def admin_pricing(actor: str = Depends(staff(*ADM)), db: Session = Depends(get_db)):
+    payments.ensure_pricing(db)
+    return [{"code": p.code, "category": p.category, "kind": p.kind, "title": p.title,
+             "stars": p.stars, "duration_days": p.duration_days, "is_active": p.is_active}
+            for p in db.scalars(select(Pricing).order_by(Pricing.code)).all()]
+
+
+class PricingIn(BaseModel):
+    stars: int | None = None
+    is_active: bool | None = None
+
+
+@app.put("/api/admin/pricing/{code}")
+def admin_set_price(code: str, payload: PricingIn, actor: str = Depends(staff(*ADM)),
+                    db: Session = Depends(get_db)):
+    try:
+        p = payments.set_price(db, code, payload.stars, payload.is_active)
+    except PaymentError as exc:
+        raise HTTPException(400, str(exc))
+    log_action(db, actor, "pricing.update", "pricing", code, f"stars={payload.stars} active={payload.is_active}")
+    db.commit()
+    return {"code": p.code, "stars": p.stars, "is_active": p.is_active}
+
+
+@app.get("/api/admin/payments")
+def admin_payments(actor: str = Depends(staff(*FIN)), db: Session = Depends(get_db)):
+    rows = db.scalars(select(Payment).order_by(desc(Payment.id)).limit(200)).all()
+    return [{"id": p.id, "user": p.user_tg_id, "listing_id": p.listing_id, "service": p.service_code,
+             "stars": p.stars, "status": p.status, "charge_id": p.telegram_payment_charge_id,
+             "paid_at": str(p.paid_at) if p.paid_at else None} for p in rows]
+
+
+@app.post("/api/admin/payments/{payment_id}/refund")
+def admin_refund(payment_id: int, reason: str = Query(default="", max_length=300), mode: str = Query(default="full", pattern="^(full|balance)$"),
+                 actor: str = Depends(staff(*FIN)), db: Session = Depends(get_db)):
+    """mode=full: the whole payment goes back to the person (Telegram). mode=balance: only the unused part of the service,
+    as Stars on the balance (Telegram can not return a part)."""
+    credit = None
+    boss = db.get(Admin, actor)
+    if boss is None or boss.role != "super_admin":                # a daily cap protects against a mass refund by one account
+        today = now().replace(hour=0, minute=0, second=0, microsecond=0)
+        done = db.scalar(select(func.count()).select_from(AuditLog).where(
+            AuditLog.actor == actor, AuditLog.action == "payment.refund", AuditLog.created_at >= today)) or 0
+        if done >= rules.val("refund.day_count"):
+            raise HTTPException(429, "Дневной лимит возвратов исчерпан: дальше возвращает суперадмин (настройка в «Правилах»)")
+    try:
+        if mode == "balance":
+            p, credit = payments.refund_to_balance(db, payment_id, reason)
+        else:
+            p = payments.refund(db, payment_id)
+    except PaymentError as exc:
+        raise HTTPException(400, str(exc))
+    log_action(db, actor, "payment.refund", "payment", payment_id, f"{mode} {p.telegram_payment_charge_id or ''} {reason}".strip())
+    db.add(refunds.Refund(payment_id=p.id, user_tg_id=p.user_tg_id, status="approved" if credit is None else "partially_refunded", mode=mode, amount=p.refunded_amount or 0,
+                          reason=reason or "возврат из админки", decided_by=actor, decided_at=now(), note=refunds.NOTE))
+    db.commit()
+    text = ("Платёж возвращён." if credit is None else f"Неиспользованная часть услуги вернулась на ваш баланс: {credit} KH.") + (f" Причина: {reason}" if reason else "")
+    notify_user(db, p.user_tg_id, text, "payments")
+    return {"id": p.id, "status": p.status, "credited": credit}
+
+
+@app.get("/api/admin/stats")
+def admin_stats(actor: str = Depends(staff(*ADM)), db: Session = Depends(get_db)):
+    return ops.compute_stats(db)
+
+
+@app.put("/api/admin/groups/{group_id}")
+def admin_group(group_id: int, telegram_link: str = "", members_count: int = 0, kind: str = "",
+                actor: str = Depends(staff(*ADM)), db: Session = Depends(get_db)):
+    g = db.get(Group, group_id)
+    if g is None:
+        raise HTTPException(404, "Группа не найдена")
+    if telegram_link:
+        if not telegram_link.startswith("https://t.me/"):
+            raise HTTPException(400, "Ссылка должна начинаться с https://t.me/")
+        g.telegram_link = telegram_link
+    g.members_count = max(0, members_count)
+    if kind:
+        if kind not in ("nation", "city"):
+            raise HTTPException(400, "Тип группы: nation или city")
+        g.kind = kind
+    log_action(db, actor, "group.update", "group", group_id, telegram_link)
+    db.commit()
+    return {"id": g.id, "telegram_link": g.telegram_link}
+
+
+class ArticleIn(BaseModel):
+    title: str = Field(min_length=3, max_length=200)
+    body: str = Field(default="", max_length=20000)
+    source_url: str = Field(default="", max_length=255)
+    checked_at: datetime | None = None
+    published: bool = False
+
+
+@app.put("/api/admin/articles/{article_id}")
+def admin_article(article_id: int, payload: ArticleIn, actor: str = Depends(staff(*ADM)),
+                  db: Session = Depends(get_db)):
+    a = db.get(Article, article_id)
+    if a is None:
+        raise HTTPException(404, "Статья не найдена")
+    if payload.published and (not payload.source_url or payload.checked_at is None):
+        raise HTTPException(400, "Для публикации нужны источник и дата проверки")
+    a.title, a.body, a.source_url = payload.title, payload.body, payload.source_url
+    a.checked_at, a.published = payload.checked_at, payload.published
+    log_action(db, actor, "article.update", "article", article_id, f"published={payload.published}")
+    db.commit()
+    return {"id": a.id, "published": a.published}
