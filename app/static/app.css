@@ -825,3 +825,34 @@ html[data-theme=dark] a{color:var(--accent)}
 html[data-theme=dark] .submit:not(.alt):not(.ok):not(.ghost),html[data-theme=dark] #view-detail .submit{color:#0b1224}
 html[data-theme=dark] .submit.ghost{background:var(--card);color:var(--text);border-color:var(--border)}
 html[data-theme=dark] .bottom{background:var(--card);border-color:var(--border)}
+
+
+/* Mobile layout hardening: keep flex/grid children inside the actual viewport. */
+html,body{width:100%;max-width:100%;min-width:0}
+.shell{width:100%;min-width:0;max-width:520px;left:0;right:0}
+.topbar,.content,.view,.chat-view,.chat-head,.messages,.chat-form{min-width:0;max-width:100%}
+.content{width:100%;overscroll-behavior-y:contain;overflow-x:clip}
+.view{width:100%;overflow-wrap:anywhere}
+.view > *,#subBody,#subBody > *,#subBody > form,#subBody > div{min-width:0;max-width:100%}
+.tiles{width:100%;max-width:100%;grid-template-columns:repeat(3,minmax(0,1fr))}
+.tiles > button{min-width:0;max-width:100%;width:100%;overflow-wrap:anywhere}
+.tiles .t-more{grid-column:auto}
+.listings,.convlist,.convrow,.section-head,.subhead,.chips,.chatsearch{min-width:0;max-width:100%}
+.section-head > *, .subhead > *{min-width:0;max-width:100%}
+.chat-form{width:100%;box-sizing:border-box;padding-bottom:max(8px,env(safe-area-inset-bottom))}
+.chat-form input{width:0;min-width:0;flex:1 1 auto}
+.chat-form .send{flex:0 0 42px}
+.dphoto,.dphoto .nophoto{max-width:100%;min-width:0}
+.dphoto{width:100%;box-sizing:border-box;overflow:hidden}
+.modal{width:100%;max-width:100vw}
+.modal.page .sheet{width:100%;max-width:520px;min-width:0;box-sizing:border-box}
+@media(max-width:520px){
+  .shell{max-width:100%;margin:0}
+  .content{padding-left:14px;padding-right:14px}
+  .landing .hero{margin-left:-14px;margin-right:-14px;max-width:calc(100% + 28px)}
+  .tiles{gap:8px}
+  .tiles > button{padding-left:3px;padding-right:3px}
+  .convrow{grid-template-columns:48px minmax(0,1fr) auto;gap:8px}
+  .convrow .thumb2{width:48px;height:48px}
+  .chat-form{padding-left:10px;padding-right:10px}
+}
