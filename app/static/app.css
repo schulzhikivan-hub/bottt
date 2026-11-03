@@ -805,28 +805,6 @@ img.co-ava{object-fit:cover}
 
 .promo.autobump{background:#dfeaff}.promo.pack{background:#ffe9b0;white-space:normal}
 
-/* тёмная тема: только если человек сам выбрал её в «Настройки → Тема» (по умолчанию внешний вид не меняется) */
-html[data-theme=dark]{--bg:#0e1524;--card:#17213a;--text:#e9eef8;--hint:#97a4bd;--border:#2a3654;--accent:#6fa3ff;--accent-text:#0b1224;--soft:#1e2d4f;color-scheme:dark}
-html[data-theme=dark] .landing .searchbar,html[data-theme=dark] .logo,html[data-theme=dark] #view-detail .back,html[data-theme=dark] .rnd{background:var(--card);color:var(--text)}
-html[data-theme=dark] .bubble{background:#22304f;color:var(--text)}
-html[data-theme=dark] .bubble.mine{background:#244a3a;color:#e9f6ee}
-html[data-theme=dark] #datingChips{background:#1b2744}
-html[data-theme=dark] .note,html[data-theme=dark] .pricehint,html[data-theme=dark] .chipnote,html[data-theme=dark] .dalert,html[data-theme=dark] .pill.reserved,html[data-theme=dark] .reserved-tag{background:#3a2f12;color:#f3dfa2}
-html[data-theme=dark] .dalert.bad{background:#3d1d20;color:#ffb8bb}
-html[data-theme=dark] .promo{color:#10182c}
-html[data-theme=dark] .dbadges span,html[data-theme=dark] .dpill{background:#1b2744e8;color:var(--text)}
-html[data-theme=dark] .hero,html[data-theme=dark] .sheet,html[data-theme=dark] .modal .sheet{color:var(--text)}
-html[data-theme=dark] input,html[data-theme=dark] select,html[data-theme=dark] textarea{background:#101a30;color:var(--text);border-color:var(--border)}
-html[data-theme=dark] .chip,html[data-theme=dark] .picks button,html[data-theme=dark] .tiles .t-more,html[data-theme=dark] .cab,html[data-theme=dark] .fweek,html[data-theme=dark] .score{background:var(--card);color:var(--text);border-color:var(--border)}
-html[data-theme=dark] .chip.active{background:var(--accent);color:var(--accent-text)}
-html[data-theme=dark] .secondary,html[data-theme=dark] button.secondary{background:#22304f;color:var(--text)}
-html[data-theme=dark] .skeleton{background:#1b2745}
-html[data-theme=dark] a{color:var(--accent)}
-html[data-theme=dark] .submit:not(.alt):not(.ok):not(.ghost),html[data-theme=dark] #view-detail .submit{color:#0b1224}
-html[data-theme=dark] .submit.ghost{background:var(--card);color:var(--text);border-color:var(--border)}
-html[data-theme=dark] .bottom{background:var(--card);border-color:var(--border)}
-
-
 /* Mobile layout hardening: keep flex/grid children inside the actual viewport. */
 html,body{width:100%;max-width:100%;min-width:0}
 .shell{width:100%;min-width:0;max-width:520px;left:0;right:0}
@@ -849,10 +827,38 @@ html,body{width:100%;max-width:100%;min-width:0}
 @media(max-width:520px){
   .shell{max-width:100%;margin:0}
   .content{padding-left:14px;padding-right:14px}
-  .landing .hero{margin-left:-14px;margin-right:-14px;max-width:calc(100% + 28px)}
+  .landing .hero{margin-left:-12px;margin-right:-12px;max-width:calc(100% + 24px)}
   .tiles{gap:8px}
   .tiles > button{padding-left:3px;padding-right:3px}
   .convrow{grid-template-columns:48px minmax(0,1fr) auto;gap:8px}
   .convrow .thumb2{width:48px;height:48px}
   .chat-form{padding-left:10px;padding-right:10px}
 }
+
+
+/* тёмная тема: только если человек сам выбрал её в «Настройки → Тема» (по умолчанию внешний вид не меняется) */
+html[data-theme=dark]{--bg:#0e1524;--card:#17213a;--text:#e9eef8;--hint:#97a4bd;--border:#2a3654;--accent:#6fa3ff;--accent-text:#0b1224;--soft:#1e2d4f;color-scheme:dark}
+html[data-theme=dark] .landing .searchbar,html[data-theme=dark] .logo,html[data-theme=dark] #view-detail .back,html[data-theme=dark] .rnd{background:var(--card);color:var(--text)}
+html[data-theme=dark] .bubble{background:#22304f;color:var(--text)}
+html[data-theme=dark] .bubble.mine{background:#244a3a;color:#e9f6ee}
+html[data-theme=dark] #datingChips{background:#1b2744}
+html[data-theme=dark] .note,html[data-theme=dark] .pricehint,html[data-theme=dark] .chipnote,html[data-theme=dark] .dalert,html[data-theme=dark] .pill.reserved,html[data-theme=dark] .reserved-tag{background:#3a2f12;color:#f3dfa2}
+html[data-theme=dark] .dalert.bad{background:#3d1d20;color:#ffb8bb}
+html[data-theme=dark] .promo{color:#10182c}
+html[data-theme=dark] .dbadges span,html[data-theme=dark] .dpill{background:#1b2744e8;color:var(--text)}
+html[data-theme=dark] .hero,html[data-theme=dark] .sheet,html[data-theme=dark] .modal .sheet{color:var(--text)}
+html[data-theme=dark] input,html[data-theme=dark] select,html[data-theme=dark] textarea{background:#101a30;color:var(--text);border-color:var(--border)}
+html[data-theme=dark] .chip,html[data-theme=dark] .picks button,html[data-theme=dark] .tiles .t-more,html[data-theme=dark] .cab,html[data-theme=dark] .fweek,html[data-theme=dark] .score{background:var(--card);color:var(--text);border-color:var(--border)}
+html[data-theme=dark] .chip.active{background:var(--accent);color:var(--accent-text)}
+html[data-theme=dark] .secondary,html[data-theme=dark] button.secondary{background:#22304f;color:var(--text)}
+html[data-theme=dark] .skeleton{background:#1b2745}
+html[data-theme=dark] a{color:var(--accent)}
+html[data-theme=dark] .submit:not(.alt):not(.ok):not(.ghost),html[data-theme=dark] #view-detail .submit{color:#0b1224}
+html[data-theme=dark] .submit.ghost{background:var(--card);color:var(--text);border-color:var(--border)}
+html[data-theme=dark] .bottom{background:var(--card);border-color:var(--border)}
+
+
+
+/* CI phone fixes */
+@media(max-width:520px){.hscroll{min-width:0;max-width:100%;box-sizing:border-box}.dphoto .nophoto{width:100%;max-width:100%;box-sizing:border-box}}
+.shell:has(#view-chat:not([hidden])) > .bottom{display:none}
