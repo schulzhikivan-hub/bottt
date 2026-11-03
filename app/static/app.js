@@ -2092,6 +2092,7 @@ async function loadGroups() {
   catch (e) { $("#groups").innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
 }
 let guideTimer = null;
+let guideSearchRequest = 0;
 const articleRow = (a) => `<article class="listing convo" data-article="${a.id}"><h3>${esc(a.title)}</h3>
   <p class="muted">${esc(SECTIONS[a.section] || "")}${a.saved ? " · ★ в закладках" : ""}</p></article>`;
 async function loadGuide() {
@@ -2109,15 +2110,20 @@ async function loadGuide() {
 }
 $("#guideSearch").addEventListener("input", () => {
   clearTimeout(guideTimer);
+  const requestId = ++guideSearchRequest;
+  const q = $("#guideSearch").value.trim();
+  const box = $("#guideFound");
+  if (!q) { box.innerHTML = ""; $("#guideSections").hidden = false; return; }
+  $("#guideSections").hidden = true;
   guideTimer = setTimeout(async () => {
-    const q = $("#guideSearch").value.trim();
-    const box = $("#guideFound");
-    if (!q) { box.innerHTML = ""; $("#guideSections").hidden = false; return; }
-    $("#guideSections").hidden = true;
     try {
       const rows = await api("/api/articles?q=" + encodeURIComponent(q), {quiet: true});
+      if (requestId !== guideSearchRequest || q !== $("#guideSearch").value.trim()) return;
       box.innerHTML = rows.length ? rows.map(articleRow).join("") : '<div class="empty">Ничего не найдено в проверенных статьях</div>';
-    } catch (e) { box.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+    } catch (e) {
+      if (requestId !== guideSearchRequest || q !== $("#guideSearch").value.trim()) return;
+      box.innerHTML = `<div class="empty">${esc(e.message)}</div>`;
+    }
   }, 300);
 });
 async function openSection(key) {
