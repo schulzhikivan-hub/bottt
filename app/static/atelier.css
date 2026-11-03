@@ -223,3 +223,29 @@ a{color:#14556a}
   .detail .dphoto .nophoto{width:100%;max-width:100%;min-width:0;box-sizing:border-box}
 }
 .shell:has(#view-chat:not([hidden])) .bottom{display:none!important}
+
+
+/* Stage 1 — accessibility and consistent touch targets across the redesigned shell. */
+:where(.shell) :where(button,a,input,select,textarea,[tabindex]):focus-visible{
+  outline:3px solid #e28b68;
+  outline-offset:3px;
+}
+:where(.shell) :where(button,a[role="button"],input[type="checkbox"],input[type="radio"]){
+  -webkit-tap-highlight-color:transparent;
+}
+:where(.shell) :where(button,.chip,.pchip,.wide,.cab,.bottom button){
+  touch-action:manipulation;
+}
+@media(max-width:760px){
+  :where(.shell) :where(.chip,.pchip,.wide,.bottom button){
+    min-height:44px;
+  }
+}
+@media(prefers-reduced-motion:reduce){
+  :where(.shell) *,:where(.shell) *::before,:where(.shell) *::after{
+    scroll-behavior:auto!important;
+    animation-duration:.01ms!important;
+    animation-iteration-count:1!important;
+    transition-duration:.01ms!important;
+  }
+}
