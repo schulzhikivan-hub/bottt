@@ -2092,6 +2092,7 @@ async function loadGroups() {
   catch (e) { $("#groups").innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
 }
 let guideTimer = null;
+let guideSearchRequest = 0;
 const articleRow = (a) => `<article class="listing convo" data-article="${a.id}"><h3>${esc(a.title)}</h3>
   <p class="muted">${esc(SECTIONS[a.section] || "")}${a.saved ? " · ★ в закладках" : ""}</p></article>`;
 async function loadGuide() {
@@ -2109,15 +2110,20 @@ async function loadGuide() {
 }
 $("#guideSearch").addEventListener("input", () => {
   clearTimeout(guideTimer);
+  const requestId = ++guideSearchRequest;
+  const q = $("#guideSearch").value.trim();
+  const box = $("#guideFound");
+  if (!q) { box.innerHTML = ""; $("#guideSections").hidden = false; return; }
+  $("#guideSections").hidden = true;
   guideTimer = setTimeout(async () => {
-    const q = $("#guideSearch").value.trim();
-    const box = $("#guideFound");
-    if (!q) { box.innerHTML = ""; $("#guideSections").hidden = false; return; }
-    $("#guideSections").hidden = true;
     try {
       const rows = await api("/api/articles?q=" + encodeURIComponent(q), {quiet: true});
+      if (requestId !== guideSearchRequest || q !== $("#guideSearch").value.trim()) return;
       box.innerHTML = rows.length ? rows.map(articleRow).join("") : '<div class="empty">Ничего не найдено в проверенных статьях</div>';
-    } catch (e) { box.innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+    } catch (e) {
+      if (requestId !== guideSearchRequest || q !== $("#guideSearch").value.trim()) return;
+      box.innerHTML = `<div class="empty">${esc(e.message)}</div>`;
+    }
   }, 300);
 });
 async function openSection(key) {
@@ -3311,6 +3317,23 @@ document.addEventListener("click", (e) => {
   if (e.target.classList?.contains("modal") && !e.target.classList.contains("page") && e.target.id !== "consent") closeModal(e.target);
 });
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") { const m = modalOpen(); if (m) closeModal(m); } });
+
+// Быстрый переход к поиску: "/" или Ctrl/Cmd+K. Не перехватываем ввод в полях и открытые диалоги.
+document.addEventListener("keydown", (e) => {
+  if (e.defaultPrevented || e.altKey || e.shiftKey) return;
+  const key = e.key.toLowerCase();
+  const shortcut = (key === "/" && !e.ctrlKey && !e.metaKey) ||
+    (key === "k" && (e.ctrlKey || e.metaKey));
+  if (!shortcut || modalOpen()) return;
+  const target = e.target;
+  if (target instanceof HTMLElement &&
+      (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return;
+  const search = document.getElementById("search");
+  if (!search || search.closest("[hidden]")) return;
+  e.preventDefault();
+  search.focus();
+  search.select();
+});
 
 // Ссылки на правила открываются во внешнем браузере/окне Telegram, а не заменяют приложение
 document.addEventListener("click", (e) => {

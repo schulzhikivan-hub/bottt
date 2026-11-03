@@ -139,6 +139,8 @@ T = [
 ("Просмотров", "Views", "조회수"), ("В избранном", "In favorites", "찜"), ("Конверсия", "Conversion", "전환율"), ("Тема", "Theme", "테마"), ("Светлая", "Light", "라이트"), ("Тёмная", "Dark", "다크"), ("Как в Telegram", "Like Telegram", "텔레그램과 동일"),
 ("Баланс", "Balance", "잔액"), ("Мой баланс", "My balance", "내 잔액"), ("Показано то, что уже загружено", "Showing what is already loaded", "이미 불러온 내용만 표시됩니다"),
 ("Основная навигация", "Main navigation", "주요 탐색"),
+("Сообщество возможностей в Корее", "A community of opportunities in Korea", "한국의 기회 커뮤니티"),
+("Работа, жильё, объявления и люди — всё рядом", "Jobs, housing, listings and people — all in one place", "일자리, 주거, 게시글과 사람을 한곳에서"),
 ]
 OUT = ROOT / "app" / "static" / "i18n"
 

@@ -97,8 +97,9 @@ const SECTIONS = [
   {key: "people", icon: "👥", name: "Люди", tabs: ["users", "companies", "resumes", "reviews", "admins"]},
   {key: "dating", icon: "💗", name: "Знакомства", tabs: ["dating", "datingall"]},
   {key: "support", icon: "🚩", name: "Жалобы и поддержка", tabs: ["reports", "support", "duty"]},
-  {key: "catalog", icon: "🗂", name: "Каталог и контент", tabs: ["community", "guide", "texts"]},
-  {key: "marketing", icon: "📣", name: "Маркетинг", tabs: ["marketing"]},
+  {key: "community", icon: "🗣️", name: "Сообщество", tabs: ["community"]},
+  {key: "editorial", icon: "📰", name: "Новости и материалы", tabs: ["guide", "texts"]},
+  {key: "marketing", icon: "📣", name: "Реклама и продвижение", tabs: ["marketing"]},
   {key: "money", icon: "💰", name: "Деньги", tabs: ["payments", "exchange", "refunds", "pricing", "reportsm"]},
   {key: "rules", icon: "📐", name: "Поиск и правила", tabs: ["rules", "stest"]},
   {key: "system", icon: "⚙️", name: "Система", tabs: ["mynotify", "audit", "errors", "security", "settings"]},
@@ -119,8 +120,8 @@ const TABS = [
   {key: "support", label: "Обращения и оспаривания", roles: SUPPORT, title: "Жалобы и поддержка: обращения и оспаривания"},
   {key: "duty", label: "Дежурства", roles: SUPPORT, title: "Жалобы и поддержка: дежурства и эскалация"},
   {key: "community", label: "Сообщество", roles: ADM, title: "Каталог: группы сообщества"},
-  {key: "guide", label: "Гид", roles: ADM, title: "Каталог: статьи гида"},
-  {key: "texts", label: "Тексты и FAQ", roles: ADM, title: "Каталог: тексты, вопросы и ответы, настройки"},
+  {key: "guide", label: "Новости и статьи", roles: ADM, title: "Новости и статьи: редакция и публикации"},
+  {key: "texts", label: "Страницы и вопросы", roles: ADM, title: "Материалы: страницы, вопросы и ответы, настройки"},
   {key: "marketing", label: "Баннеры, рассылки, реклама, акции", roles: ADM, title: "Маркетинг: баннеры, рассылки, реклама, акции"},
   {key: "payments", label: "Платежи и промокоды", roles: FIN, title: "Деньги: платежи и промокоды"},
   {key: "exchange", label: "Обменник KH", roles: FIN, title: "Деньги: обменник звёзд Telegram на KH (валюта сайта)"},
@@ -141,8 +142,9 @@ const SECTION_HELP = {
   people: "Пользователи, работодатели, резюме, отзывы и права сотрудников.",
   dating: "Проверка анкет знакомств и управление опубликованными профилями.",
   support: "Жалобы, обращения пользователей и график дежурств.",
-  catalog: "Справочники, статьи и тексты, которые видят пользователи.",
-  marketing: "Баннеры, рассылки, рекламные размещения и акции.",
+  community: "Группы сообщества и их настройки. Управление доступно в пределах назначенных прав.",
+  editorial: "Новости, статьи, страницы сайта и часто задаваемые вопросы.",
+  marketing: "Рекламные места, продвижение, баннеры, рассылки и акции.",
   money: "Платежи, возвраты, обмен KH и тарифы.",
   rules: "Настройки поиска, словари и правила размещения.",
   system: "Журнал действий, ошибки, безопасность и настройки."
@@ -159,9 +161,39 @@ function startApp() {
   const mineSections = SECTIONS.filter((sec) => secTabs(sec.key).length);
   $("#tabs").innerHTML = mineSections.map((sec) => `<button data-sec="${sec.key}" title="${esc(sec.name)}"><span class="ic">${sec.icon}</span><span class="lb">${esc(sec.name)}</span><em hidden data-sbadge="${sec.key}"></em></button>`).join("");
   $("#tabs").querySelectorAll("button").forEach((b) => b.onclick = () => { document.body.classList.remove("drawer"); $("#burger").setAttribute("aria-expanded", "false"); show(lastTab(b.dataset.sec).key); });
+  renderMobileNav(mineSections);
   show(lastTab(mineSections[0].key).key);
   refreshBadges();
 }
+// ---- мобильная навигация: частые разделы внизу, полный каталог — в меню ----
+function renderMobileNav(visibleSections) {
+  const preferred = ["home", "listings", "people", "support"];
+  const chosen = preferred.map((key) => visibleSections.find((s) => s.key === key)).filter(Boolean).slice(0, 4);
+  const nav = $("#mobileNav");
+  nav.innerHTML = chosen.map((sec) => '<button type="button" data-mobile-sec="' + sec.key + '" aria-label="' + esc(sec.name) + '"><span class="ic">' + sec.icon + '</span><span>' + esc(sec.name) + '</span></button>').join("") +
+    '<button type="button" data-mobile-more aria-label="Все разделы"><span class="ic">☰</span><span>Ещё</span></button>';
+  nav.querySelectorAll("[data-mobile-sec]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const sec = button.dataset.mobileSec;
+      document.body.classList.remove("drawer");
+      $("#burger").setAttribute("aria-expanded", "false");
+      show(lastTab(sec).key);
+    });
+  });
+  nav.querySelector("[data-mobile-more]").addEventListener("click", () => {
+    document.body.classList.add("drawer");
+    $("#burger").setAttribute("aria-expanded", "true");
+  });
+}
+function syncMobileNav(section) {
+  $("#mobileNav")?.querySelectorAll("[data-mobile-sec]").forEach((button) => {
+    const active = button.dataset.mobileSec === section;
+    button.classList.toggle("active", active);
+    if (active) button.setAttribute("aria-current", "page");
+    else button.removeAttribute("aria-current");
+  });
+}
+
 // ---- оформление: тема, узкое меню, ящик на телефоне ----
 (function chrome() {
   const saved = localStorage.getItem("adminTheme");
@@ -306,6 +338,7 @@ function show(tab) {
   document.querySelectorAll("#tabs button").forEach((b) => { const active = b.dataset.sec === sec; b.classList.toggle("active", active); if (active) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current"); });
   const hint = $("#sectionHint"); hint.textContent = SECTION_HELP[sec] || ""; hint.hidden = !hint.textContent;
   renderSubnav(tab);
+  syncMobileNav(sec);
   $("#title").textContent = def.title;
   say("Загрузка…");
   $("#main").innerHTML = "";

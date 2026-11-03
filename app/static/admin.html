@@ -378,7 +378,8 @@ button.gray{background:var(--surface2);border-color:var(--line)}
 }
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important;transition-duration:.01ms!important}}
 
-</style></head>
+</style>
+<link rel="stylesheet" href="/static/admin-atelier.css"></head>
 <body>
 <div id="previewModal" class="pmodal" hidden><div class="pbox"><div class="pbar"><b id="previewTitle">Предпросмотр</b>
   <span><label><input type="checkbox" id="previewChanges" checked> с правкой</label> <button class="act gray" id="previewClose">Закрыть</button></span></div>
@@ -400,6 +401,7 @@ button.gray{background:var(--surface2);border-color:var(--line)}
     <nav id="tabs" aria-label="Разделы панели"></nav>
     <div class="foot"><div class="me"><span id="who"></span></div><button id="logout" hidden title="Выйти">⎋</button></div>
   </aside>
+  <nav class="mobile-nav" id="mobileNav" aria-label="Быстрая навигация"></nav>
   <div class="scrim" id="scrim"></div>
   <div class="content">
     <header class="top">

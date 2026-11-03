@@ -29,6 +29,19 @@ def test_admin_page_served(client):
     r = client.get("/admin")
     assert r.status_code == 200
     assert "админ-панель" in r.text
+    assert "/static/admin-atelier.css?v=" in r.text
+    css_url = "/static/admin-atelier.css?v=" + r.text.split('/static/admin-atelier.css?v=', 1)[1].split('"', 1)[0]
+    css = client.get(css_url)
+    assert css.status_code == 200
+
+
+def test_public_page_loads_redesign_assets(client):
+    r = client.get("/")
+    assert r.status_code == 200
+    assert "/static/atelier.css?v=" in r.text
+    css_url = "/static/atelier.css?v=" + r.text.split('/static/atelier.css?v=', 1)[1].split('"', 1)[0]
+    css = client.get(css_url)
+    assert css.status_code == 200
 
 
 def test_admin_api_requires_key(client):
